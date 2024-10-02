@@ -37,7 +37,7 @@ mime_guess = "2.0.4"
 harsh = "0.2"
 html-escape = "0.2.13"
 magic-crypt = "3.1.12"
-rusqlite = { version = "0.31.0", features = ["bundled"] }
+rusqlite = { version = "0.32.1", features = ["bundled"] }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 
 [dependencies.openssl]
