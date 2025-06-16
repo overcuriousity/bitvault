@@ -18,7 +18,7 @@ actix-web = { version = "4", default-features = false, features = ["compat","com
 actix-web-httpauth = "0.8.2"
 askama = "0.12"
 askama-filters = { version = "0.1.3", features = ["chrono"] }
-bytesize = { version = "1.1", features = ["serde"] }
+bytesize = { version = "2.0", features = ["serde"] }
 chrono = "0.4.19"
 
 clap = { version = "4.5.7", features = ["derive", "env"] }
