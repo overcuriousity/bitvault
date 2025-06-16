@@ -50,7 +50,7 @@ sanitize-filename = "0.6.0"
 serde_json = "1.0.114"
 serde = { version = "1.0.197", features = ["derive"] }
 syntect = { version = "5.2.0", default-features = false }
-webpki-roots = { version = "0.26", optional = true }
+webpki-roots = { version = "1.0", optional = true }
 
 [dependencies.openssl]
 version = "0.10.64"
