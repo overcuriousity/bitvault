@@ -38,7 +38,7 @@ qrcode-generator = "5.0.0"
 rand = "0.8.5"
 reqwest = { version = "0.12", default-features = false, features = ["charset",
 "http2", "macos-system-configuration", "json", "blocking"] }
-rusqlite = { version = "0.33", features = ["bundled"], optional = true }
+rusqlite = { version = "0.38", features = ["bundled"], optional = true }
 rust-embed = "8.3.0"
 
 # The rustls-rustcrypto version must support the rustls version and the
