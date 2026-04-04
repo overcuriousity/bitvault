@@ -7,10 +7,14 @@
     {% if args.footer_text.as_ref().is_none() %}
     <a href="https://github.com/overcuriousity/bitvault/">BitVault</a>
     &middot;
-    <a href="/docs">API</a>
+    <a href="{{ args.public_path_as_str() }}/docs">API</a>
     &middot;
+    {% if args.git_commit() != "unknown" %}
     <a href="https://github.com/overcuriousity/bitvault/commit/{{ args.git_commit() }}"
        style="font-family: monospace;">{{ args.git_commit() }}</a>
+    {%- else %}
+    <span style="font-family: monospace;">{{ args.git_commit() }}</span>
+    {%- endif %}
     {%- else %}
     {{ args.footer_text.as_ref().unwrap() }}
     {%- endif %}
