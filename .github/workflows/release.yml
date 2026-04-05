@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: Build — ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            cross: false
+            archive_ext: tar.gz
+
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
+            cross: true
+            archive_ext: tar.gz
+
+          - target: x86_64-apple-darwin
+            os: macos-14
+            cross: false
+            archive_ext: tar.gz
+
+          - target: aarch64-apple-darwin
+            os: macos-14
+            cross: false
+            archive_ext: tar.gz
+
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            cross: false
+            archive_ext: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross (ARM Linux)
+        if: matrix.cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build binary (native)
+        if: '!matrix.cross'
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Build binary (cross)
+        if: matrix.cross
+        run: cross build --release --locked --target ${{ matrix.target }}
+
+      - name: Package archive (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          ARTIFACT="bitvault-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p "dist/$ARTIFACT"
+          cp "target/${{ matrix.target }}/release/bitvault" "dist/$ARTIFACT/"
+          cp README.md LICENSE "dist/$ARTIFACT/" 2>/dev/null || true
+          tar -czf "dist/${ARTIFACT}.tar.gz" -C dist "$ARTIFACT"
+          echo "ASSET=dist/${ARTIFACT}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $artifact = "bitvault-${{ github.ref_name }}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force "dist\$artifact" | Out-Null
+          Copy-Item "target\${{ matrix.target }}\release\bitvault.exe" "dist\$artifact\"
+          if (Test-Path "README.md") { Copy-Item "README.md" "dist\$artifact\" }
+          if (Test-Path "LICENSE")   { Copy-Item "LICENSE"   "dist\$artifact\" }
+          Compress-Archive -Path "dist\$artifact" -DestinationPath "dist\$artifact.zip"
+          "ASSET=dist\$artifact.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET }}
