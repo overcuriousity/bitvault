@@ -6,6 +6,9 @@ A privacy-focused, self-hosted pastebin and file sharing service built in Rust. 
 
 BitVault is a maintained fork of [Microbin](https://github.com/szabodanika/microbin), with telemetry removed, updated dependencies, and a focus on privacy and simplicity.
 
+## Access
+[https://bitvault.overcuriousity.org](https://bitvault.overcuriousity.org)
+
 ## Features
 
 - Single self-contained binary — no runtime dependencies, minimal resource usage
