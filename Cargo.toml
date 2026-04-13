@@ -29,7 +29,7 @@ harsh = "0.2"
 html-escape = "0.2.13"
 
 lazy_static = "1.4.0"
-linkify = "0.10.0"
+linkify = "0.11.0"
 log = "0.4.21"
 magic-crypt = "4.0.1"
 mime_guess = "2.0.4"
