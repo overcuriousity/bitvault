@@ -22,8 +22,6 @@ struct EditTemplate<'a> {
     status: &'a String,
 }
 
-
-
 #[get("/edit/{id}")]
 pub async fn get_edit(data: web::Data<AppState>, id: web::Path<String>) -> HttpResponse {
     let mut pastas = data.pastas.lock().unwrap();
@@ -129,9 +127,6 @@ pub async fn post_edit_private(
     id: web::Path<String>,
     mut payload: Multipart,
 ) -> Result<HttpResponse, Error> {
-    // get access to the pasta collection
-    let mut pastas = data.pastas.lock().unwrap();
-
     let id = if ARGS.hash_ids {
         hashid_to_u64(&id).unwrap_or(0)
     } else {
@@ -140,6 +135,8 @@ pub async fn post_edit_private(
 
     let mut password = String::from("");
 
+    // read the multipart payload before locking the pasta collection, so a
+    // slow upload cannot hold the lock across await points
     while let Some(mut field) = payload.try_next().await? {
         if field.name() == Some("password") {
             while let Some(chunk) = field.try_next().await? {
@@ -147,6 +144,9 @@ pub async fn post_edit_private(
             }
         }
     }
+
+    // get access to the pasta collection
+    let mut pastas = data.pastas.lock().unwrap();
 
     // remove expired pastas (including this one if needed)
     remove_expired(&mut pastas);
@@ -168,10 +168,8 @@ pub async fn post_edit_private(
         // decrypt content temporarily
         if password != *"" {
             let res = decrypt(&original_content, &password);
-            if res.is_ok() {
-                pastas[index]
-                    .content
-                    .replace_range(.., res.unwrap().as_str());
+            if let Ok(decrypted) = res {
+                pastas[index].content.replace_range(.., decrypted.as_str());
                 // save pasta in database
                 update(Some(&pastas), Some(&pastas[index]));
             } else {
@@ -216,9 +214,6 @@ pub async fn post_submit_edit_private(
     id: web::Path<String>,
     mut payload: Multipart,
 ) -> Result<HttpResponse, Error> {
-    // get access to the pasta collection
-    let mut pastas = data.pastas.lock().unwrap();
-
     let id = if ARGS.hash_ids {
         hashid_to_u64(&id).unwrap_or(0)
     } else {
@@ -228,6 +223,8 @@ pub async fn post_submit_edit_private(
     let mut password = String::from("");
     let mut new_content = String::from("");
 
+    // read the multipart payload before locking the pasta collection, so a
+    // slow upload cannot hold the lock across await points
     while let Some(mut field) = payload.try_next().await? {
         if field.name() == Some("content") {
             while let Some(chunk) = field.try_next().await? {
@@ -240,6 +237,9 @@ pub async fn post_submit_edit_private(
             }
         }
     }
+
+    // get access to the pasta collection
+    let mut pastas = data.pastas.lock().unwrap();
 
     // remove expired pastas (including this one if needed)
     remove_expired(&mut pastas);
@@ -315,13 +315,11 @@ pub async fn post_edit(
         to_u64(&id.into_inner()).unwrap_or(0)
     };
 
-    let mut pastas = data.pastas.lock().unwrap();
-
-    remove_expired(&mut pastas);
-
     let mut new_content = String::from("");
     let mut password = String::from("");
 
+    // read the multipart payload before locking the pasta collection, so a
+    // slow upload cannot hold the lock across await points
     while let Some(mut field) = payload.try_next().await? {
         if field.name() == Some("content") {
             while let Some(chunk) = field.try_next().await? {
@@ -334,6 +332,10 @@ pub async fn post_edit(
             }
         }
     }
+
+    let mut pastas = data.pastas.lock().unwrap();
+
+    remove_expired(&mut pastas);
 
     for (i, pasta) in pastas.iter().enumerate() {
         if pasta.id == id {

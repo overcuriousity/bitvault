@@ -6,8 +6,8 @@ use actix_web::{get, post, web, Error, HttpResponse};
 use crate::args::ARGS;
 use crate::endpoints::errors::ErrorTemplate;
 use crate::pasta::PastaFile;
-use crate::util::bip39words::to_u64;
 use crate::util::auth;
+use crate::util::bip39words::to_u64;
 use crate::util::db::delete;
 use crate::util::hashids::to_u64 as hashid_to_u64;
 use crate::util::misc::{decrypt, remove_expired};
@@ -93,12 +93,13 @@ pub async fn post_remove(
         to_u64(&id.into_inner()).unwrap_or(0)
     };
 
+    // read the multipart payload before locking the pasta collection, so a
+    // slow upload cannot hold the lock across await points
+    let password = auth::password_from_multipart(payload).await?;
+
     let mut pastas = data.pastas.lock().unwrap();
 
     remove_expired(&mut pastas);
-
-    let password = auth::password_from_multipart(payload).await?;
-
 
     for (i, pasta) in pastas.iter().enumerate() {
         if pasta.id == id {
