@@ -9,7 +9,6 @@ use crate::AppState;
 use actix_web::{get, web, HttpResponse};
 use askama::Template;
 
-
 #[derive(Template)]
 #[template(path = "auth_upload.html")]
 struct AuthPasta<'a> {
@@ -21,8 +20,6 @@ struct AuthPasta<'a> {
     path: String,
     query_string: String,
 }
-
-
 
 #[get("/auth/{id}")]
 pub async fn auth_upload(data: web::Data<AppState>, id: web::Path<String>) -> HttpResponse {
@@ -37,7 +34,7 @@ pub async fn auth_upload(data: web::Data<AppState>, id: web::Path<String>) -> Ht
         to_u64(&id).unwrap_or(0)
     };
 
-    for (_i, pasta) in pastas.iter().enumerate() {
+    for pasta in pastas.iter() {
         if pasta.id == intern_id {
             return HttpResponse::Ok().content_type("text/html").body(
                 AuthPasta {
@@ -78,7 +75,7 @@ pub async fn auth_upload_with_status(
         to_u64(&id).unwrap_or(0)
     };
 
-    for (_i, pasta) in pastas.iter().enumerate() {
+    for pasta in pastas.iter() {
         if pasta.id == intern_id {
             return HttpResponse::Ok().content_type("text/html").body(
                 AuthPasta {
@@ -114,7 +111,7 @@ pub async fn auth_raw_pasta(data: web::Data<AppState>, id: web::Path<String>) ->
         to_u64(&id).unwrap_or(0)
     };
 
-    for (_i, pasta) in pastas.iter().enumerate() {
+    for pasta in pastas.iter() {
         if pasta.id == intern_id {
             return HttpResponse::Ok().content_type("text/html").body(
                 AuthPasta {
@@ -155,7 +152,7 @@ pub async fn auth_raw_pasta_with_status(
         to_u64(&id).unwrap_or(0)
     };
 
-    for (_i, pasta) in pastas.iter().enumerate() {
+    for pasta in pastas.iter() {
         if pasta.id == intern_id {
             return HttpResponse::Ok().content_type("text/html").body(
                 AuthPasta {
@@ -191,7 +188,7 @@ pub async fn auth_edit_private(data: web::Data<AppState>, id: web::Path<String>)
         to_u64(&id).unwrap_or(0)
     };
 
-    for (_, pasta) in pastas.iter().enumerate() {
+    for pasta in pastas.iter() {
         if pasta.id == intern_id {
             return HttpResponse::Ok().content_type("text/html").body(
                 AuthPasta {
@@ -232,7 +229,7 @@ pub async fn auth_edit_private_with_status(
         to_u64(&id).unwrap_or(0)
     };
 
-    for (_i, pasta) in pastas.iter().enumerate() {
+    for pasta in pastas.iter() {
         if pasta.id == intern_id {
             return HttpResponse::Ok().content_type("text/html").body(
                 AuthPasta {
@@ -273,7 +270,7 @@ pub async fn auth_file(
 
     let query_string = request.uri().query().unwrap_or("").to_owned();
 
-    for (_, pasta) in pastas.iter().enumerate() {
+    for pasta in pastas.iter() {
         if pasta.id == intern_id {
             return HttpResponse::Ok().content_type("text/html").body(
                 AuthPasta {
@@ -316,7 +313,7 @@ pub async fn auth_file_with_status(
 
     let query_string = request.uri().query().unwrap_or("").to_owned();
 
-    for (_i, pasta) in pastas.iter().enumerate() {
+    for pasta in pastas.iter() {
         if pasta.id == intern_id {
             return HttpResponse::Ok().content_type("text/html").body(
                 AuthPasta {
@@ -352,7 +349,7 @@ pub async fn auth_remove_private(data: web::Data<AppState>, id: web::Path<String
         to_u64(&id).unwrap_or(0)
     };
 
-    for (_, pasta) in pastas.iter().enumerate() {
+    for pasta in pastas.iter() {
         if pasta.id == intern_id {
             return HttpResponse::Ok().content_type("text/html").body(
                 AuthPasta {
@@ -393,7 +390,7 @@ pub async fn auth_remove_private_with_status(
         to_u64(&id).unwrap_or(0)
     };
 
-    for (_i, pasta) in pastas.iter().enumerate() {
+    for pasta in pastas.iter() {
         if pasta.id == intern_id {
             return HttpResponse::Ok().content_type("text/html").body(
                 AuthPasta {

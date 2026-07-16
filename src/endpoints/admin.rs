@@ -20,13 +20,11 @@ struct AdminTemplate<'a> {
     message: &'a String,
 }
 
-
-
 #[get("/admin")]
 pub async fn get_admin() -> Result<HttpResponse, Error> {
-    return Ok(HttpResponse::Found()
+    Ok(HttpResponse::Found()
         .append_header(("Location", "/auth_admin"))
-        .finish());
+        .finish())
 }
 
 #[post("/admin")]
@@ -60,7 +58,7 @@ pub async fn post_admin(
     remove_expired(&mut pastas);
 
     // sort pastas in reverse-chronological order of creation time
-    pastas.sort_by(|a, b| b.created.cmp(&a.created));
+    pastas.sort_by_key(|p| std::cmp::Reverse(p.created));
 
     // todo status report more sophisticated
     let mut status = "OK";

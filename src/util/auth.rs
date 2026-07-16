@@ -47,7 +47,10 @@ pub async fn api_auth_validator(
             use actix_web::HttpResponse;
             let body = serde_json::json!({"error": "Invalid credentials", "code": "UNAUTHORIZED"});
             let response = HttpResponse::Unauthorized().json(body);
-            Err((error::InternalError::from_response("Unauthorized", response).into(), req))
+            Err((
+                error::InternalError::from_response("Unauthorized", response).into(),
+                req,
+            ))
         }
     }
 }

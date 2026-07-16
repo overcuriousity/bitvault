@@ -40,7 +40,8 @@ fn migrate_attachments_column(conn: &Connection) {
             [],
             |row| row.get::<_, i64>(0),
         )
-        .unwrap_or(0) > 0;
+        .unwrap_or(0)
+        > 0;
     if !has_col {
         conn.execute("ALTER TABLE pasta ADD COLUMN attachments TEXT", params![])
             .expect("Failed to migrate attachments column");
@@ -82,7 +83,11 @@ pub fn rewrite_all_to_db(pasta_data: &[Pasta]) {
                 i64::try_from(pasta.id).expect("pasta id exceeds i64::MAX"),
                 pasta.content,
                 pasta.file.as_ref().map_or("", |f| f.name.as_str()),
-                pasta.file.as_ref().map_or(0i64, |f| i64::try_from(f.size.as_u64()).expect("file size exceeds i64::MAX")),
+                pasta
+                    .file
+                    .as_ref()
+                    .map_or(0i64, |f| i64::try_from(f.size.as_u64())
+                        .expect("file size exceeds i64::MAX")),
                 pasta.extension,
                 pasta.private as i32,
                 pasta.readonly as i32,
@@ -196,7 +201,11 @@ pub fn insert(pasta: &Pasta) {
             i64::try_from(pasta.id).expect("pasta id exceeds i64::MAX"),
             pasta.content,
             pasta.file.as_ref().map_or("", |f| f.name.as_str()),
-            pasta.file.as_ref().map_or(0i64, |f| i64::try_from(f.size.as_u64()).expect("file size exceeds i64::MAX")),
+            pasta
+                .file
+                .as_ref()
+                .map_or(0i64, |f| i64::try_from(f.size.as_u64())
+                    .expect("file size exceeds i64::MAX")),
             pasta.extension,
             pasta.readonly as i32,
             pasta.private as i32,
@@ -251,7 +260,11 @@ pub fn update(pasta: &Pasta) {
             i64::try_from(pasta.id).expect("pasta id exceeds i64::MAX"),
             pasta.content,
             pasta.file.as_ref().map_or("", |f| f.name.as_str()),
-            pasta.file.as_ref().map_or(0i64, |f| i64::try_from(f.size.as_u64()).expect("file size exceeds i64::MAX")),
+            pasta
+                .file
+                .as_ref()
+                .map_or(0i64, |f| i64::try_from(f.size.as_u64())
+                    .expect("file size exceeds i64::MAX")),
             pasta.extension,
             pasta.readonly as i32,
             pasta.private as i32,

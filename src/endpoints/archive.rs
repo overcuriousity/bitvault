@@ -86,7 +86,11 @@ pub async fn get_archive(
                 .replace(['/', '\\'], "_")
                 .trim_start_matches('.')
                 .to_string();
-            let entry_name = if entry_name.is_empty() { "file".to_string() } else { entry_name };
+            let entry_name = if entry_name.is_empty() {
+                "file".to_string()
+            } else {
+                entry_name
+            };
             zip.start_file(entry_name, options)?;
             zip.write_all(&file_data)?;
         }
@@ -95,8 +99,8 @@ pub async fn get_archive(
         Ok(result.into_inner())
     })
     .await
-    .map_err(|e| actix_web::error::ErrorInternalServerError(e))?
-    .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+    .map_err(actix_web::error::ErrorInternalServerError)?
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok()
         .content_type("application/zip")
         .append_header((

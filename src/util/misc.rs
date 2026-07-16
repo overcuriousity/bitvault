@@ -49,10 +49,8 @@ pub fn remove_expired(pastas: &mut Vec<Pasta>) {
             // was toggled between restarts (directory was created under the other scheme).
             for id_str in [to_bip39_words(p.id), to_hashids(p.id)] {
                 let dir = format!("{}/attachments/{}", ARGS.data_dir, id_str);
-                if Path::new(&dir).exists() {
-                    if fs::remove_dir_all(&dir).is_err() {
-                        log::error!("Failed to delete attachment directory {}!", dir);
-                    }
+                if Path::new(&dir).exists() && fs::remove_dir_all(&dir).is_err() {
+                    log::error!("Failed to delete attachment directory {}!", dir);
                 }
             }
             false
@@ -95,13 +93,11 @@ pub fn remove_expired(pastas: &mut Vec<Pasta>) {
                                             .unwrap_or(false)
                                     })
                                 });
-                                if dominated == Some(true) {
-                                    if fs::remove_dir_all(&path).is_err() {
-                                        log::error!(
-                                            "Failed to remove orphaned attachment dir {:?}",
-                                            path
-                                        );
-                                    }
+                                if dominated == Some(true) && fs::remove_dir_all(&path).is_err() {
+                                    log::error!(
+                                        "Failed to remove orphaned attachment dir {:?}",
+                                        path
+                                    );
                                 }
                             }
                         }
@@ -115,12 +111,20 @@ pub fn remove_expired(pastas: &mut Vec<Pasta>) {
 /// Resolve the attachment sub-directory name for a pasta ID, trying both naming
 /// schemes in case `BITVAULT_HASH_IDS` was toggled between restarts.
 pub fn resolve_attachment_id(id: u64) -> String {
-    let primary = if ARGS.hash_ids { to_hashids(id) } else { to_bip39_words(id) };
+    let primary = if ARGS.hash_ids {
+        to_hashids(id)
+    } else {
+        to_bip39_words(id)
+    };
     let primary_dir = format!("{}/attachments/{}", ARGS.data_dir, primary);
     if Path::new(&primary_dir).exists() {
         return primary;
     }
-    let alt = if ARGS.hash_ids { to_bip39_words(id) } else { to_hashids(id) };
+    let alt = if ARGS.hash_ids {
+        to_bip39_words(id)
+    } else {
+        to_hashids(id)
+    };
     let alt_dir = format!("{}/attachments/{}", ARGS.data_dir, alt);
     if Path::new(&alt_dir).exists() {
         return alt;

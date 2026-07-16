@@ -25,8 +25,7 @@ impl PastaFile {
         let raw = path.file_name().ok_or("Path did not contain a file name")?;
         // sanitize_filename removes characters that are unsafe on any platform
         // (path separators, Windows-reserved chars, null bytes, etc.)
-        let name = sanitize_filename::sanitize(raw.to_string_lossy().as_ref())
-            .replace(' ', "_");
+        let name = sanitize_filename::sanitize(raw.to_string_lossy().as_ref()).replace(' ', "_");
         if name.is_empty() {
             return Err("Filename sanitized to empty string");
         }
@@ -98,17 +97,24 @@ impl Pasta {
     }
 
     pub fn has_attachments(&self) -> bool {
-        self.attachments.as_ref().map(|a| !a.is_empty()).unwrap_or(false)
+        self.attachments
+            .as_ref()
+            .map(|a| !a.is_empty())
+            .unwrap_or(false)
     }
 
     pub fn total_size_as_string(&self) -> String {
-        let attachment_size: usize = self.attachments.as_ref()
+        let attachment_size: usize = self
+            .attachments
+            .as_ref()
             .map(|a| a.iter().map(|f| f.size.as_u64() as usize).sum())
             .unwrap_or(0);
         let total_size_bytes = if self.has_file() {
-            self.file.as_ref().unwrap().size.as_u64() as usize + self.content.as_bytes().len() + attachment_size
+            self.file.as_ref().unwrap().size.as_u64() as usize
+                + self.content.len()
+                + attachment_size
         } else {
-            self.content.as_bytes().len() + attachment_size
+            self.content.len() + attachment_size
         };
 
         if total_size_bytes < 1024 {
@@ -123,31 +129,15 @@ impl Pasta {
     }
 
     pub fn file_embeddable(&self) -> bool {
-        return self.has_file()
+        self.has_file()
             && self.file.as_ref().unwrap().embeddable()
-            && !(self.encrypt_server || self.encrypt_client);
+            && !(self.encrypt_server || self.encrypt_client)
     }
 
     pub fn created_as_string(&self) -> String {
-        Local.timestamp_opt(self.created, 0).map(|date| {
-            format!(
-                "{:02}-{:02} {:02}:{:02}",
-                date.month(),
-                date.day(),
-                date.hour(),
-                date.minute(),
-            )
-        }).earliest().unwrap_or_else(|| {
-            log::error!("Failed to process created date");
-            String::from("Unknow")
-        })
-    }
-
-    pub fn expiration_as_string(&self) -> String {
-        if self.expiration == 0 {
-            String::from("Never")
-        } else {
-            Local.timestamp_opt(self.expiration, 0).map(|date| {
+        Local
+            .timestamp_opt(self.created, 0)
+            .map(|date| {
                 format!(
                     "{:02}-{:02} {:02}:{:02}",
                     date.month(),
@@ -155,10 +145,34 @@ impl Pasta {
                     date.hour(),
                     date.minute(),
                 )
-            }).earliest().unwrap_or_else(|| {
-                log::error!("Failed to process expiration");
-                String::from("Never")
             })
+            .earliest()
+            .unwrap_or_else(|| {
+                log::error!("Failed to process created date");
+                String::from("Unknow")
+            })
+    }
+
+    pub fn expiration_as_string(&self) -> String {
+        if self.expiration == 0 {
+            String::from("Never")
+        } else {
+            Local
+                .timestamp_opt(self.expiration, 0)
+                .map(|date| {
+                    format!(
+                        "{:02}-{:02} {:02}:{:02}",
+                        date.month(),
+                        date.day(),
+                        date.hour(),
+                        date.minute(),
+                    )
+                })
+                .earliest()
+                .unwrap_or_else(|| {
+                    log::error!("Failed to process expiration");
+                    String::from("Never")
+                })
         }
     }
 

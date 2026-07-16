@@ -23,8 +23,8 @@ pub mod args;
 pub mod pasta;
 
 pub mod util {
-    pub mod bip39words;
     pub mod auth;
+    pub mod bip39words;
     pub mod db;
     pub mod db_json;
     #[cfg(feature = "default")]
@@ -72,11 +72,7 @@ async fn main() -> std::io::Result<()> {
         .filter(None, LevelFilter::Info)
         .init();
 
-    log::info!(
-        "MicroBin starting on http://{}:{}",
-        ARGS.bind.to_string(),
-        ARGS.port.to_string()
-    );
+    log::info!("MicroBin starting on http://{}:{}", ARGS.bind, ARGS.port);
 
     match fs::create_dir_all(format!("{}/public", ARGS.data_dir)) {
         Ok(dir) => dir,
@@ -97,8 +93,16 @@ async fn main() -> std::io::Result<()> {
         pastas: Mutex::new(read_all()),
     });
 
-    let api_key_set = ARGS.api_key.as_deref().map(|k| !k.trim().is_empty()).unwrap_or(false);
-    let basic_auth_set = ARGS.auth_basic_username.as_deref().map(|u| !u.trim().is_empty()).unwrap_or(false);
+    let api_key_set = ARGS
+        .api_key
+        .as_deref()
+        .map(|k| !k.trim().is_empty())
+        .unwrap_or(false);
+    let basic_auth_set = ARGS
+        .auth_basic_username
+        .as_deref()
+        .map(|u| !u.trim().is_empty())
+        .unwrap_or(false);
     if !api_key_set && !basic_auth_set {
         log::warn!("API is accessible without authentication. Set BITVAULT_API_KEY to require a bearer token.");
     }
@@ -107,27 +111,26 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(data.clone())
             .wrap(middleware::NormalizePath::trim())
-            .wrap(middleware::Logger::new("%{r}a \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" %T"))
+            .wrap(middleware::Logger::new(
+                "%{r}a \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" %T",
+            ))
             // These endpoints are always open — register before the auth-wrapped scopes.
             .service(web::resource("/openapi.yaml").route(web::get().to(api::openapi_spec)))
             .service(web::resource("/docs").route(web::get().to(api::swagger_docs)))
             .service(web::resource("/api/v1/health").route(web::get().to(api::health)))
             .service(
                 web::scope("/api/v1")
-                    .app_data(
-                        web::JsonConfig::default()
-                            .error_handler(api::json_error_handler),
-                    )
+                    .app_data(web::JsonConfig::default().error_handler(api::json_error_handler))
                     .wrap(Condition::new(
                         ARGS.auth_basic_username.is_some()
                             && ARGS.auth_basic_username.as_ref().unwrap().trim() != "",
                         HttpAuthentication::basic(util::auth::api_auth_validator),
                     ))
-                    .route("/paste",      web::post().to(api::create_paste))
+                    .route("/paste", web::post().to(api::create_paste))
                     .route("/paste/{id}", web::get().to(api::get_paste))
                     .route("/paste/{id}", web::delete().to(api::delete_paste))
                     .route("/paste/{id}", web::patch().to(api::update_paste))
-                    .route("/pastes",     web::get().to(api::list_pastes))
+                    .route("/pastes", web::get().to(api::list_pastes))
                     .default_service(web::route().to(api::not_found)),
             )
             .service(

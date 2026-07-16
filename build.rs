@@ -5,14 +5,12 @@ fn main() {
         let git_path = std::path::Path::new(".git");
         match std::fs::metadata(git_path) {
             Ok(m) if m.is_dir() => Some(git_path.to_path_buf()),
-            Ok(m) if m.is_file() => std::fs::read_to_string(git_path)
-                .ok()
-                .and_then(|s| {
-                    s.strip_prefix("gitdir: ")
-                        .map(str::trim)
-                        .filter(|p| !p.is_empty())
-                        .map(std::path::PathBuf::from)
-                }),
+            Ok(m) if m.is_file() => std::fs::read_to_string(git_path).ok().and_then(|s| {
+                s.strip_prefix("gitdir: ")
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                    .map(std::path::PathBuf::from)
+            }),
             _ => None,
         }
     };

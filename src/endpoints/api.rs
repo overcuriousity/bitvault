@@ -84,7 +84,10 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }
 
 fn require_api_key(req: &HttpRequest) -> Result<(), HttpResponse> {
@@ -102,9 +105,16 @@ fn require_api_key(req: &HttpRequest) -> Result<(), HttpResponse> {
         .map(str::trim)
         .and_then(|v| {
             let (scheme, token) = v.split_once(' ')?;
-            if scheme.eq_ignore_ascii_case("bearer") { Some(token.trim()) } else { None }
+            if scheme.eq_ignore_ascii_case("bearer") {
+                Some(token.trim())
+            } else {
+                None
+            }
         });
-    if provided.map(|t| ct_eq(t.as_bytes(), key.as_bytes())).unwrap_or(false) {
+    if provided
+        .map(|t| ct_eq(t.as_bytes(), key.as_bytes()))
+        .unwrap_or(false)
+    {
         Ok(())
     } else {
         Err(api_error(401, "API_KEY_REQUIRED", "Valid API key required"))
@@ -162,7 +172,11 @@ fn expires_at(pasta: &crate::pasta::Pasta) -> Option<i64> {
 }
 
 fn pasta_url(pasta: &crate::pasta::Pasta) -> String {
-    format!("{}/upload/{}", ARGS.public_path_as_str(), pasta.id_as_words())
+    format!(
+        "{}/upload/{}",
+        ARGS.public_path_as_str(),
+        pasta.id_as_words()
+    )
 }
 
 fn resolve_id(id: &str) -> Option<u64> {
@@ -431,10 +445,8 @@ pub async fn delete_paste(
 
     let id_str = resolve_attachment_id(id_num);
     let dir = format!("{}/attachments/{}", ARGS.data_dir, id_str);
-    if Path::new(&dir).exists() {
-        if fs::remove_dir_all(&dir).is_err() {
-            log::error!("API: failed to delete attachment directory {}", dir);
-        }
+    if Path::new(&dir).exists() && fs::remove_dir_all(&dir).is_err() {
+        log::error!("API: failed to delete attachment directory {}", dir);
     }
 
     pastas.remove(index);
@@ -523,16 +535,17 @@ pub async fn update_paste(
     HttpResponse::Ok().json(resp)
 }
 
-pub async fn list_pastes(
-    data: web::Data<AppState>,
-    req: HttpRequest,
-) -> HttpResponse {
+pub async fn list_pastes(data: web::Data<AppState>, req: HttpRequest) -> HttpResponse {
     if let Err(e) = require_api_key(&req) {
         return e;
     }
 
     if ARGS.no_listing {
-        return api_error(403, "LISTING_DISABLED", "paste listing is disabled on this server");
+        return api_error(
+            403,
+            "LISTING_DISABLED",
+            "paste listing is disabled on this server",
+        );
     }
 
     let mut pastas = data.pastas.lock().unwrap();
@@ -550,7 +563,7 @@ pub async fn list_pastes(
             read_count: p.read_count,
         })
         .collect();
-    list.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    list.sort_by_key(|p| std::cmp::Reverse(p.created_at));
 
     HttpResponse::Ok().json(list)
 }

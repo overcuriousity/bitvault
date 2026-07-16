@@ -3,10 +3,10 @@
 use crate::args::{Args, ARGS};
 use crate::endpoints::errors::ErrorTemplate;
 use crate::pasta::Pasta;
+use crate::util::auth;
 use crate::util::bip39words::to_u64;
 use crate::util::db::update;
 use crate::util::hashids::to_u64 as hashid_to_u64;
-use crate::util::auth;
 use crate::util::misc::remove_expired;
 use crate::AppState;
 use actix_multipart::Multipart;
@@ -22,7 +22,6 @@ struct PastaTemplate<'a> {
     pasta: &'a Pasta,
     args: &'a Args,
 }
-
 
 fn pastaresponse(
     data: web::Data<AppState>,
@@ -55,10 +54,7 @@ fn pastaresponse(
     if found {
         if pastas[index].encrypt_server && password == *"" {
             return HttpResponse::Found()
-                .append_header((
-                    "Location",
-                    format!("/auth/{}", pastas[index].id_as_words()),
-                ))
+                .append_header(("Location", format!("/auth/{}", pastas[index].id_as_words())))
                 .finish();
         }
 
@@ -73,10 +69,8 @@ fn pastaresponse(
         // decrypt content temporarily
         if password != *"" && !original_content.is_empty() {
             let res = decrypt(&original_content, &password);
-            if let Ok(..) = res {
-                pastas[index]
-                    .content
-                    .replace_range(.., res.unwrap().as_str());
+            if let Ok(decrypted) = res {
+                pastas[index].content.replace_range(.., decrypted.as_str());
             } else {
                 return HttpResponse::Found()
                     .append_header((
@@ -338,10 +332,7 @@ pub async fn postrawpasta(
     if found {
         if pastas[index].encrypt_server && password == *"" {
             return Ok(HttpResponse::Found()
-                .append_header((
-                    "Location",
-                    format!("/auth/{}", pastas[index].id_as_words()),
-                ))
+                .append_header(("Location", format!("/auth/{}", pastas[index].id_as_words())))
                 .finish());
         }
 
@@ -356,10 +347,8 @@ pub async fn postrawpasta(
         // decrypt content temporarily
         if password != *"" {
             let res = decrypt(&original_content, &password);
-            if res.is_ok() {
-                pastas[index]
-                    .content
-                    .replace_range(.., res.unwrap().as_str());
+            if let Ok(decrypted) = res {
+                pastas[index].content.replace_range(.., decrypted.as_str());
             } else {
                 return Ok(HttpResponse::Found()
                     .append_header((

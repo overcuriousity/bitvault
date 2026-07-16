@@ -3,7 +3,6 @@
 use actix_web::{get, web, HttpResponse};
 use askama::Template;
 
-
 use crate::args::{Args, ARGS};
 use crate::pasta::Pasta;
 use crate::util::misc::remove_expired;
@@ -15,8 +14,6 @@ struct ListTemplate<'a> {
     pastas: &'a Vec<Pasta>,
     args: &'a Args,
 }
-
-
 
 #[get("/list")]
 pub async fn list(data: web::Data<AppState>) -> HttpResponse {
@@ -31,7 +28,7 @@ pub async fn list(data: web::Data<AppState>) -> HttpResponse {
     remove_expired(&mut pastas);
 
     // sort pastas in reverse-chronological order of creation time
-    pastas.sort_by(|a, b| b.created.cmp(&a.created));
+    pastas.sort_by_key(|p| std::cmp::Reverse(p.created));
 
     HttpResponse::Ok().content_type("text/html").body(
         ListTemplate {

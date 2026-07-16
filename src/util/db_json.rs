@@ -22,9 +22,9 @@ fn save_to_file(pasta_data: &Vec<Pasta>) {
     // the new file. This either succeeds or fails. The database is never left
     // in an undefined state.
     let tmp_file_path = DATABASE_PATH.to_string() + ".tmp";
-    let tmp_file = File::create(&tmp_file_path).expect(&format!(
-        "failed to create temporary database file for writing. path: {tmp_file_path}"
-    ));
+    let tmp_file = File::create(&tmp_file_path).unwrap_or_else(|_| {
+        panic!("failed to create temporary database file for writing. path: {tmp_file_path}")
+    });
 
     let writer = BufWriter::new(tmp_file);
     serde_json::to_writer(writer, &pasta_data)
@@ -35,12 +35,9 @@ fn save_to_file(pasta_data: &Vec<Pasta>) {
 fn load_from_file() -> io::Result<Vec<Pasta>> {
     let file = File::open(DATABASE_PATH);
     match file {
-        Ok(_) => {
-            let reader = BufReader::new(file.unwrap());
-            let data: Vec<Pasta> = match serde_json::from_reader(reader) {
-                Ok(t) => t,
-                _ => Vec::new(),
-            };
+        Ok(file) => {
+            let reader = BufReader::new(file);
+            let data: Vec<Pasta> = serde_json::from_reader(reader).unwrap_or_default();
             Ok(data)
         }
         Err(_) => {

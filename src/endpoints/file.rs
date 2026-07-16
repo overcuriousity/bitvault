@@ -52,10 +52,17 @@ pub async fn post_secure_file(
 
         pastas.iter().find(|p| p.id == id_intern).and_then(|pasta| {
             let pasta_file = if let Some(ref fname) = fname {
-                if pasta.file.as_ref().map(|f| f.name() == fname).unwrap_or(false) {
+                if pasta
+                    .file
+                    .as_ref()
+                    .map(|f| f.name() == fname)
+                    .unwrap_or(false)
+                {
                     pasta.file.as_ref()
                 } else {
-                    pasta.attachments.as_ref()
+                    pasta
+                        .attachments
+                        .as_ref()
                         .and_then(|a| a.iter().find(|f| f.name() == fname))
                 }
             } else {
@@ -63,12 +70,14 @@ pub async fn post_secure_file(
             };
 
             pasta_file.and_then(|pf| {
-                enc_file_path(&ARGS.data_dir, &resolve_attachment_id(pasta.id), pf.name()).map(|enc_path| {
-                    let content_type = mime_guess::from_path(pf.name())
-                        .first_or_octet_stream()
-                        .to_string();
-                    (enc_path, pf.name().to_string(), content_type)
-                })
+                enc_file_path(&ARGS.data_dir, &resolve_attachment_id(pasta.id), pf.name()).map(
+                    |enc_path| {
+                        let content_type = mime_guess::from_path(pf.name())
+                            .first_or_octet_stream()
+                            .to_string();
+                        (enc_path, pf.name().to_string(), content_type)
+                    },
+                )
             })
         })
     }; // lock dropped here
@@ -141,10 +150,17 @@ pub async fn get_file(
         // drop it before the blocking NamedFile::open syscall.
         let file_info: Option<(PathBuf, String, bool)> = {
             let pasta_file = if let Some(ref fname) = fname {
-                if pastas[index].file.as_ref().map(|f| f.name() == fname).unwrap_or(false) {
+                if pastas[index]
+                    .file
+                    .as_ref()
+                    .map(|f| f.name() == fname)
+                    .unwrap_or(false)
+                {
                     pastas[index].file.as_ref()
                 } else {
-                    pastas[index].attachments.as_ref()
+                    pastas[index]
+                        .attachments
+                        .as_ref()
                         .and_then(|a| a.iter().find(|f| f.name() == fname))
                 }
             } else {

@@ -15,8 +15,8 @@ lazy_static! {
 /// Single source of truth for valid expiry option strings, ordered shortest → longest.
 /// Used by both the CLI value_parser and the server-side validation in `create.rs`.
 pub const EXPIRATION_OPTIONS: &[&str] = &[
-    "1min", "10min", "1hour", "24hour", "3days", "1week",
-    "1month", "6months", "1year", "2years", "4years", "8years", "16years", "never",
+    "1min", "10min", "1hour", "24hour", "3days", "1week", "1month", "6months", "1year", "2years",
+    "4years", "8years", "16years", "never",
 ];
 
 #[derive(Parser, Debug, Clone, Serialize)]
@@ -171,22 +171,18 @@ pub struct Args {
 
 impl Args {
     pub fn public_path_as_str(&self) -> String {
-        if self.public_path.is_some() {
-            self.public_path.as_ref().unwrap().to_string()
-        } else {
-            String::from("")
-        }
+        self.public_path
+            .as_ref()
+            .map(|p| p.to_string())
+            .unwrap_or_default()
     }
 
-
     pub fn short_path_as_str(&self) -> String {
-        if self.short_path.is_some() {
-            self.short_path.as_ref().unwrap().to_string()
-        } else if self.public_path.is_some() {
-            self.public_path.as_ref().unwrap().to_string()
-        } else {
-            String::from("")
-        }
+        self.short_path
+            .as_ref()
+            .or(self.public_path.as_ref())
+            .map(|p| p.to_string())
+            .unwrap_or_default()
     }
 
     pub fn without_secrets(self) -> Args {
@@ -204,7 +200,7 @@ impl Args {
             highlightsyntax: self.highlightsyntax,
             port: self.port,
             bind: self.bind,
-            private: true, 
+            private: true,
             pure_html: self.pure_html,
             json_db: self.json_db,
             public_path: self.public_path,
@@ -251,7 +247,10 @@ impl Args {
     }
 
     pub fn max_expiry_index(&self) -> usize {
-        EXPIRATION_OPTIONS.iter().position(|&o| o == self.max_expiry).unwrap_or(5)
+        EXPIRATION_OPTIONS
+            .iter()
+            .position(|&o| o == self.max_expiry)
+            .unwrap_or(5)
     }
 }
 

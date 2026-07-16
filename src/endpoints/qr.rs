@@ -10,7 +10,6 @@ use crate::AppState;
 use actix_web::{get, web, HttpResponse};
 use askama::Template;
 
-
 #[derive(Template)]
 #[template(path = "qr.html")]
 struct QRTemplate<'a> {
@@ -18,8 +17,6 @@ struct QRTemplate<'a> {
     pasta: &'a Pasta,
     args: &'a Args,
 }
-
-
 
 #[get("/qr/{id}")]
 pub async fn getqr(data: web::Data<AppState>, id: web::Path<String>) -> HttpResponse {
