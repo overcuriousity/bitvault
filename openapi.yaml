@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: BitVault Paste API
-  version: 1.4.0
+  version: 1.5.0
   description: |
     REST API for BitVault, a self-hosted pastebin with BIP39 word IDs,
     server-side encryption, and optional HTTP Basic Auth.
@@ -262,9 +262,9 @@ components:
           const: ok
         version:
           type: string
-          description: Semver string, e.g. "1.4.0"
+          description: Semver string, e.g. "1.5.0"
           examples:
-            - "1.4.0"
+            - "1.5.0"
 
     CreatePasteRequest:
       type: object
