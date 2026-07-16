@@ -91,6 +91,6 @@ jobs:
           "ASSET=dist\$artifact.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload release asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ env.ASSET }}
