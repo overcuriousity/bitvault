@@ -1,0 +1,26 @@
+services:
+  bitvault:
+    image: ghcr.io/overcuriousity/bitvault:latest
+    restart: always
+    ports:
+     - "${BITVAULT_PORT:-8080}:8080"
+    volumes:
+     # Named volume: Docker initialises it from the image with the correct
+     # ownership (uid/gid 65532) so the nonroot user can write to it.
+     # To use a bind-mount instead, replace the line below with:
+     #   - ./bitvault-data:/app/bitvault_data
+     # and ensure the host directory is owned by uid 65532:
+     #   mkdir -p ./bitvault-data && chown 65532:65532 ./bitvault-data
+     - bitvault_data:/app/bitvault_data
+    # All BITVAULT_* configuration lives in .env. Only uncommented
+    # variables are passed to the container — commented ones stay unset,
+    # which matters because empty-string values are rejected at startup.
+    env_file: .env
+    environment:
+      # Inside the container the data dir is the mounted volume; override
+      # whatever the host-oriented .env may set.
+      BITVAULT_DATA_DIR: /app/bitvault_data
+      BITVAULT_BIND: 0.0.0.0
+
+volumes:
+  bitvault_data:

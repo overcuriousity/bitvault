@@ -36,6 +36,28 @@ cargo build --release
 cargo run --release
 ```
 
+## Docker
+
+Prebuilt multi-arch images (amd64/arm64) are published to GHCR on every release:
+
+```bash
+docker pull ghcr.io/overcuriousity/bitvault:latest
+```
+
+Quick start with docker compose — download [`compose.yaml`](compose.yaml) and [`.env`](.env), adjust `.env` (at minimum `BITVAULT_ADMIN_PASSWORD` and `BITVAULT_PUBLIC_PATH`), then:
+
+```bash
+docker compose --env-file .env up --detach
+```
+
+Or use the interactive setup script:
+
+```bash
+curl -sO https://raw.githubusercontent.com/overcuriousity/bitvault/master/docker-setup.sh && bash docker-setup.sh
+```
+
+Data is stored in the named volume `bitvault_data`. The container runs as nonroot (uid 65532) on a distroless base image. Secrets can be mounted as files and referenced with `file://` paths (see Configuration below).
+
 ## Systemd service
 
 ```ini

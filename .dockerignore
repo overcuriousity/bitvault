@@ -1,0 +1,7 @@
+target
+.git
+.github
+bitvault_data
+compose.yaml
+docker-setup.sh
+*.md
