@@ -5,6 +5,7 @@ use lazy_static::lazy_static;
 use serde::Serialize;
 use std::convert::Infallible;
 use std::fmt;
+use std::fs;
 use std::net::IpAddr;
 use std::str::FromStr;
 
@@ -23,16 +24,16 @@ pub const EXPIRATION_OPTIONS: &[&str] = &[
 #[clap(author, version, about, long_about = None)]
 pub struct Args {
     #[clap(long, env = "BITVAULT_BASIC_AUTH_USERNAME")]
-    pub auth_basic_username: Option<String>,
+    pub auth_basic_username: Option<SecretArg>,
 
     #[clap(long, env = "BITVAULT_BASIC_AUTH_PASSWORD")]
-    pub auth_basic_password: Option<String>,
+    pub auth_basic_password: Option<SecretArg>,
 
     #[clap(long, env = "BITVAULT_ADMIN_USERNAME", default_value = "admin")]
-    pub auth_admin_username: String,
+    pub auth_admin_username: SecretArg,
 
     #[clap(long, env = "BITVAULT_ADMIN_PASSWORD", default_value = "b1tv4u1t")]
-    pub auth_admin_password: String,
+    pub auth_admin_password: SecretArg,
 
     #[clap(long, env = "BITVAULT_EDITABLE")]
     pub editable: bool,
@@ -77,7 +78,7 @@ pub struct Args {
     pub short_path: Option<PublicUrl>,
 
     #[clap(long, env = "BITVAULT_UPLOADER_PASSWORD")]
-    pub uploader_password: Option<String>,
+    pub uploader_password: Option<SecretArg>,
 
     #[clap(long, env = "BITVAULT_READONLY")]
     pub readonly: bool,
@@ -128,7 +129,7 @@ pub struct Args {
     pub hash_ids: bool,
 
     #[clap(long, env = "BITVAULT_API_KEY")]
-    pub api_key: Option<String>,
+    pub api_key: Option<SecretArg>,
 
     #[clap(
         long,
@@ -189,8 +190,8 @@ impl Args {
         Args {
             auth_basic_username: None,
             auth_basic_password: None,
-            auth_admin_username: String::from(""),
-            auth_admin_password: String::from(""),
+            auth_admin_username: SecretArg(String::new()),
+            auth_admin_password: SecretArg(String::new()),
             editable: self.editable,
             footer_text: self.footer_text,
             hide_footer: self.hide_footer,
@@ -251,6 +252,36 @@ impl Args {
             .iter()
             .position(|&o| o == self.max_expiry)
             .unwrap_or(5)
+    }
+}
+
+/// A secret configuration value. Accepts either the raw secret itself or a
+/// `file://` / `file:` path whose file contents (trimmed) become the secret —
+/// suitable for Docker secrets and systemd LoadCredential.
+#[derive(Debug, Clone, Serialize)]
+pub struct SecretArg(pub String);
+
+impl FromStr for SecretArg {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(path) = s
+            .strip_prefix("file://")
+            .or_else(|| s.strip_prefix("file:"))
+        {
+            fs::read_to_string(path)
+                .map(|content| SecretArg(content.trim().to_string()))
+                .map_err(|e| format!("Failed to read secret from {path}: {e}"))
+        } else {
+            Ok(SecretArg(s.to_string()))
+        }
+    }
+}
+
+impl std::ops::Deref for SecretArg {
+    type Target = String;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

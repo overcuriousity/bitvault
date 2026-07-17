@@ -109,6 +109,11 @@ All options can be set as environment variables or CLI flags (e.g. `BITVAULT_POR
 | `BITVAULT_BASIC_AUTH_PASSWORD` | `--auth-basic-password` | — | HTTP Basic Auth password |
 | `BITVAULT_API_KEY` | `--api-key` | — | Bearer token required for API access; unset = no auth |
 | `BITVAULT_UPLOADER_PASSWORD` | `--uploader-password` | — | Password required to create new pastes |
+
+Secret values (`BITVAULT_ADMIN_USERNAME`, `BITVAULT_ADMIN_PASSWORD`, `BITVAULT_BASIC_AUTH_USERNAME`, `BITVAULT_BASIC_AUTH_PASSWORD`, `BITVAULT_UPLOADER_PASSWORD`, `BITVAULT_API_KEY`) also accept a `file://` path — the file's (trimmed) contents are used as the secret. Useful with Docker secrets or systemd `LoadCredential`, e.g. `BITVAULT_ADMIN_PASSWORD=file:///run/secrets/admin_password`.
+
+| Environment variable | CLI flag | Default | Description |
+|---|---|---|---|
 | `BITVAULT_TITLE` | `--title` | — | Custom page title |
 | `BITVAULT_FOOTER_TEXT` | `--footer-text` | — | Custom footer text |
 | `BITVAULT_CUSTOM_CSS` | `--custom-css` | — | URL of a custom CSS file to inject |

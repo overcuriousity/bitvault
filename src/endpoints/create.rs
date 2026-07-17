@@ -346,7 +346,7 @@ pub async fn create(
 
     if ARGS.readonly
         && ARGS.uploader_password.is_some()
-        && uploader_password != *ARGS.uploader_password.as_ref().unwrap()
+        && uploader_password != **ARGS.uploader_password.as_ref().unwrap()
     {
         return Ok(HttpResponse::Found()
             .append_header(("Location", "/incorrect"))
