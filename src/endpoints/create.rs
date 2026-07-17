@@ -290,15 +290,15 @@ pub async fn create(
                         std::fs::create_dir_all(format!(
                             "{}/attachments/{}",
                             ARGS.data_dir,
-                            &new_pasta.id_as_words()
+                            new_pasta.id_as_words()
                         ))
                         .unwrap();
 
                         let filepath = format!(
                             "{}/attachments/{}/{}",
                             ARGS.data_dir,
-                            &new_pasta.id_as_words(),
-                            &file.name()
+                            new_pasta.id_as_words(),
+                            file.name()
                         );
 
                         let mut f = web::block(|| std::fs::File::create(filepath)).await??;
@@ -374,8 +374,8 @@ pub async fn create(
             let filepath = format!(
                 "{}/attachments/{}/{}",
                 ARGS.data_dir,
-                &new_pasta.id_as_words(),
-                &file.name()
+                new_pasta.id_as_words(),
+                file.name()
             );
             if new_pasta.encrypt_client {
                 encrypt_file(&random_key, &filepath)
@@ -392,7 +392,7 @@ pub async fn create(
                 let filepath = format!(
                     "{}/attachments/{}/{}",
                     ARGS.data_dir,
-                    &new_pasta.id_as_words(),
+                    new_pasta.id_as_words(),
                     attachment.name()
                 );
                 if new_pasta.encrypt_client {
