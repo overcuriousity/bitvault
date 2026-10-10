@@ -90,8 +90,13 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
         == 0
 }
 
-fn require_api_key(req: &HttpRequest) -> Result<(), HttpResponse> {
-    let Some(ref key) = ARGS.api_key else {
+fn require_api_key(req: &HttpRequest) -> Result<(), Box<HttpResponse>> {
+    check_api_key(ARGS.api_key.as_deref().map(String::as_str), req)
+}
+
+/// No key (or a blank one) configured means the API is open.
+fn check_api_key(configured: Option<&str>, req: &HttpRequest) -> Result<(), Box<HttpResponse>> {
+    let Some(key) = configured else {
         return Ok(());
     };
     let key = key.trim();
@@ -117,7 +122,11 @@ fn require_api_key(req: &HttpRequest) -> Result<(), HttpResponse> {
     {
         Ok(())
     } else {
-        Err(api_error(401, "API_KEY_REQUIRED", "Valid API key required"))
+        Err(Box::new(api_error(
+            401,
+            "API_KEY_REQUIRED",
+            "Valid API key required",
+        )))
     }
 }
 
@@ -241,7 +250,7 @@ pub async fn create_paste(
     body: web::Json<CreatePasteRequest>,
 ) -> HttpResponse {
     if let Err(e) = require_api_key(&req) {
-        return e;
+        return *e;
     }
 
     if body.content.is_empty() {
@@ -346,7 +355,7 @@ pub async fn get_paste(
     req: HttpRequest,
 ) -> HttpResponse {
     if let Err(e) = require_api_key(&req) {
-        return e;
+        return *e;
     }
 
     let password = pasta_password(&req);
@@ -395,7 +404,7 @@ pub async fn delete_paste(
     req: HttpRequest,
 ) -> HttpResponse {
     if let Err(e) = require_api_key(&req) {
-        return e;
+        return *e;
     }
 
     let password = pasta_password(&req);
@@ -462,7 +471,7 @@ pub async fn update_paste(
     body: web::Json<UpdatePasteRequest>,
 ) -> HttpResponse {
     if let Err(e) = require_api_key(&req) {
-        return e;
+        return *e;
     }
 
     if body.content.is_empty() {
@@ -537,7 +546,7 @@ pub async fn update_paste(
 
 pub async fn list_pastes(data: web::Data<AppState>, req: HttpRequest) -> HttpResponse {
     if let Err(e) = require_api_key(&req) {
-        return e;
+        return *e;
     }
 
     if ARGS.no_listing {
@@ -566,4 +575,101 @@ pub async fn list_pastes(data: web::Data<AppState>, req: HttpRequest) -> HttpRes
     list.sort_by_key(|p| std::cmp::Reverse(p.created_at));
 
     HttpResponse::Ok().json(list)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{http::StatusCode, test, App};
+    use std::sync::Mutex;
+
+    #[actix_web::test]
+    async fn api_works_without_api_key_or_basic_auth() {
+        assert!(ARGS.api_key.is_none() && ARGS.auth_basic_username.is_none());
+
+        let data = web::Data::new(AppState {
+            pastas: Mutex::new(crate::util::db::read_all()),
+        });
+        // Same /api/v1 routes as main.rs; the Basic Auth wrapper is a no-op without a username.
+        let app = test::init_service(
+            App::new().app_data(data).service(
+                web::scope("/api/v1")
+                    .route("/paste", web::post().to(create_paste))
+                    .route("/paste/{id}", web::get().to(get_paste))
+                    .route("/paste/{id}", web::delete().to(delete_paste))
+                    .route("/paste/{id}", web::patch().to(update_paste))
+                    .route("/pastes", web::get().to(list_pastes)),
+            ),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/v1/paste")
+            .set_json(serde_json::json!({"content": "hello", "privacy": "public"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success(), "create: {}", resp.status());
+        let created: serde_json::Value = test::read_body_json(resp).await;
+        let id = created["id"].as_str().expect("id").to_string();
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/v1/paste/{id}"))
+            .to_request();
+        let got: serde_json::Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(got["content"], "hello");
+
+        let req = test::TestRequest::get().uri("/api/v1/pastes").to_request();
+        let list: serde_json::Value = test::call_and_read_body_json(&app, req).await;
+        assert!(list
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == id.as_str()));
+
+        let req = test::TestRequest::patch()
+            .uri(&format!("/api/v1/paste/{id}"))
+            .set_json(serde_json::json!({"content": "updated"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success(), "update: {}", resp.status());
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/v1/paste/{id}"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success(), "delete: {}", resp.status());
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/v1/paste/{id}"))
+            .to_request();
+        assert_eq!(
+            test::call_service(&app, req).await.status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    #[actix_web::test]
+    async fn configured_api_key_is_enforced() {
+        let req = test::TestRequest::default().to_http_request();
+        let resp =
+            check_api_key(Some("s3cret"), &req).expect_err("missing header must be rejected");
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let body = actix_web::body::to_bytes(resp.into_body()).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["code"], "API_KEY_REQUIRED");
+
+        let req = test::TestRequest::default()
+            .insert_header(("Authorization", "Bearer wrong"))
+            .to_http_request();
+        assert!(check_api_key(Some("s3cret"), &req).is_err());
+
+        let req = test::TestRequest::default()
+            .insert_header(("Authorization", "Bearer s3cret"))
+            .to_http_request();
+        assert!(check_api_key(Some("s3cret"), &req).is_ok());
+
+        let req = test::TestRequest::default().to_http_request();
+        assert!(check_api_key(None, &req).is_ok());
+        assert!(check_api_key(Some("  "), &req).is_ok());
+    }
 }

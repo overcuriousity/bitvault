@@ -9,8 +9,24 @@ use std::fs;
 use std::net::IpAddr;
 use std::str::FromStr;
 
+#[cfg(not(test))]
 lazy_static! {
     pub static ref ARGS: Args = Args::parse();
+}
+
+// Tests must not parse the test harness's own CLI flags; use a fixed config with a throwaway data dir.
+#[cfg(test)]
+lazy_static! {
+    pub static ref ARGS: Args = {
+        let data_dir = std::env::temp_dir().join(format!("bitvault-test-{}", std::process::id()));
+        fs::create_dir_all(&data_dir).expect("create test data dir");
+        Args::parse_from([
+            "bitvault",
+            "--editable",
+            "--data-dir",
+            data_dir.to_str().expect("utf-8 temp dir"),
+        ])
+    };
 }
 
 /// Single source of truth for valid expiry option strings, ordered shortest → longest.
