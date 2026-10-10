@@ -9,6 +9,13 @@ use futures::TryStreamExt;
 
 use crate::args::ARGS;
 
+/// Basic Auth guards `/api/v1` only when no API key is configured: both use the
+/// `Authorization` header, so a configured key is the sole API credential.
+pub fn api_scope_uses_basic_auth(api_key: Option<&str>, basic_username: Option<&str>) -> bool {
+    let is_set = |v: Option<&str>| v.map(|v| !v.trim().is_empty()).unwrap_or(false);
+    is_set(basic_username) && !is_set(api_key)
+}
+
 pub async fn auth_validator(
     req: ServiceRequest,
     creds: BasicAuth,

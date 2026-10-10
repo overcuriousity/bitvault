@@ -122,8 +122,10 @@ async fn main() -> std::io::Result<()> {
                 web::scope("/api/v1")
                     .app_data(web::JsonConfig::default().error_handler(api::json_error_handler))
                     .wrap(Condition::new(
-                        ARGS.auth_basic_username.is_some()
-                            && ARGS.auth_basic_username.as_ref().unwrap().trim() != "",
+                        util::auth::api_scope_uses_basic_auth(
+                            ARGS.api_key.as_deref().map(String::as_str),
+                            ARGS.auth_basic_username.as_deref().map(String::as_str),
+                        ),
                         HttpAuthentication::basic(util::auth::api_auth_validator),
                     ))
                     .route("/paste", web::post().to(api::create_paste))
