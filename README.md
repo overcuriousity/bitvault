@@ -198,7 +198,7 @@ Authorization: Bearer my-secret-token
 
 If `BITVAULT_API_KEY` is unset, the API requires no authentication. Consider setting it in any deployment where the data should not be publicly readable.
 
-When `BITVAULT_BASIC_AUTH_USERNAME`/`BITVAULT_BASIC_AUTH_PASSWORD` (web UI Basic Auth) is configured, it also applies to all `/api/v1/` routes **except `/health`**. API clients must send Basic Auth credentials alongside the `Authorization: Bearer` token when both are configured.
+When `BITVAULT_API_KEY` is set, the bearer token is the only credential for `/api/v1/` — web UI Basic Auth (`BITVAULT_BASIC_AUTH_USERNAME`/`BITVAULT_BASIC_AUTH_PASSWORD`) is not applied to the API, so clients send just `Authorization: Bearer <key>`. When no API key is set but Basic Auth is configured, Basic Auth guards all `/api/v1/` routes **except `/health`** instead.
 
 ### Paste IDs
 
