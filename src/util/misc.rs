@@ -4,7 +4,8 @@ use crate::args::ARGS;
 use crate::util::{bip39words::to_bip39_words, hashids::to_hashids};
 use linkify::{LinkFinder, LinkKind};
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
-use qrcode_generator::QrCodeEcc;
+use qrcode_generator::qr::{Encoder, ErrorCorrection};
+use qrcode_generator::Renderer;
 use std::fs::{self, File};
 use std::io::{BufReader, Read, Write};
 use std::path::Path;
@@ -133,7 +134,10 @@ pub fn resolve_attachment_id(id: u64) -> String {
 }
 
 pub fn string_to_qr_svg(str: &str) -> String {
-    qrcode_generator::to_svg_to_string(str, QrCodeEcc::Low, 256, None::<&str>).unwrap()
+    let symbol = Encoder::new(ErrorCorrection::Low).encode_text(str).unwrap();
+    Renderer::new(&symbol, 256)
+        .to_svg_string(None::<&str>)
+        .unwrap()
 }
 
 pub fn is_valid_url(url: &str) -> bool {
