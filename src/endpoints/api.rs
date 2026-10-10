@@ -672,4 +672,75 @@ mod tests {
         assert!(check_api_key(None, &req).is_ok());
         assert!(check_api_key(Some("  "), &req).is_ok());
     }
+
+    /// Mirrors the /api/v1 wiring in main.rs with explicit config instead of ARGS.
+    macro_rules! auth_app {
+        ($api_key:expr, $basic_username:expr) => {{
+            use actix_web::middleware::Condition;
+            use actix_web_httpauth::middleware::HttpAuthentication;
+            let api_key: Option<&'static str> = $api_key;
+            test::init_service(
+                App::new().service(
+                    web::scope("/api/v1")
+                        .wrap(Condition::new(
+                            crate::util::auth::api_scope_uses_basic_auth(api_key, $basic_username),
+                            HttpAuthentication::basic(crate::util::auth::api_auth_validator),
+                        ))
+                        .route(
+                            "/paste",
+                            web::post().to(move |req: HttpRequest| async move {
+                                match check_api_key(api_key, &req) {
+                                    Ok(()) => HttpResponse::Ok().finish(),
+                                    Err(e) => *e,
+                                }
+                            }),
+                        ),
+                ),
+            )
+            .await
+        }};
+    }
+
+    #[actix_web::test]
+    async fn api_key_replaces_basic_auth_on_api_scope() {
+        let app = auth_app!(Some("s3cret"), Some("admin"));
+
+        let req = test::TestRequest::post()
+            .uri("/api/v1/paste")
+            .insert_header(("Authorization", "Bearer s3cret"))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status(), StatusCode::OK);
+
+        for auth in [None, Some("Bearer wrong"), Some("Basic YWRtaW46cHc=")] {
+            let mut req = test::TestRequest::post().uri("/api/v1/paste");
+            if let Some(auth) = auth {
+                req = req.insert_header(("Authorization", auth));
+            }
+            let resp = test::call_service(&app, req.to_request()).await;
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{auth:?}");
+            let body: serde_json::Value = test::read_body_json(resp).await;
+            assert_eq!(body["code"], "API_KEY_REQUIRED", "{auth:?}");
+        }
+    }
+
+    #[actix_web::test]
+    async fn basic_auth_guards_api_scope_without_api_key() {
+        let app = auth_app!(None, Some("admin"));
+
+        let req = test::TestRequest::post().uri("/api/v1/paste").to_request();
+        assert_eq!(
+            test::call_service(&app, req).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        assert!(!crate::util::auth::api_scope_uses_basic_auth(None, None));
+        assert!(!crate::util::auth::api_scope_uses_basic_auth(
+            None,
+            Some(" ")
+        ));
+        assert!(crate::util::auth::api_scope_uses_basic_auth(
+            Some(" "),
+            Some("admin")
+        ));
+    }
 }

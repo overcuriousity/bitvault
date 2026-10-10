@@ -9,13 +9,15 @@ info:
 
     ## Authentication
 
-    Two independent auth layers may be active on a deployment:
+    Exactly one credential guards `/api/v1` (except `/api/v1/health`, always open):
 
-    1. **HTTP Basic Auth** — wraps the entire `/api/v1` scope (except `/api/v1/health`).
-       Controlled by `BITVAULT_BASIC_AUTH_USERNAME` / `BITVAULT_BASIC_AUTH_PASSWORD`.
+    1. **Bearer token** — if `BITVAULT_API_KEY` is set, it is the only credential
+       for `/api/v1`.  Send as `Authorization: Bearer <key>`.  Basic Auth is not
+       applied to the API in this case, even if configured for the web UI.
 
-    2. **Bearer token** — per-request API key checked inside each handler.
-       Controlled by `BITVAULT_API_KEY`.  Send as `Authorization: Bearer <key>`.
+    2. **HTTP Basic Auth** — if no API key is set but
+       `BITVAULT_BASIC_AUTH_USERNAME` / `BITVAULT_BASIC_AUTH_PASSWORD` are, Basic
+       credentials are required on `/api/v1`.
 
     When neither is configured the API is open (a warning is logged at startup).
 
@@ -223,8 +225,9 @@ components:
       scheme: basic
       description: |
         HTTP Basic Auth set via `BITVAULT_BASIC_AUTH_USERNAME` /
-        `BITVAULT_BASIC_AUTH_PASSWORD`.  Wraps the entire `/api/v1` scope
-        when configured.
+        `BITVAULT_BASIC_AUTH_PASSWORD`.  Guards `/api/v1` only when
+        `BITVAULT_API_KEY` is not set; otherwise the bearer token is the
+        sole API credential.
 
   parameters:
     pasteId:
