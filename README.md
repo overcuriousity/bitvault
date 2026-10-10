@@ -173,9 +173,18 @@ Secret values (`BITVAULT_ADMIN_USERNAME`, `BITVAULT_ADMIN_PASSWORD`, `BITVAULT_B
 
 BitVault exposes a JSON API under `/api/v1/` for programmatic access and AI agent integration.
 
+The API key is optional. By default (no `BITVAULT_API_KEY`, no Basic Auth) the API needs no authentication at all:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/paste \
+  -H "Content-Type: application/json" \
+  -d '{"content": "hello world"}'
+# {"id":"happy-apple-banana","url":"/upload/happy-apple-banana","expires_at":1748736000,"privacy":"unlisted"}
+```
+
 ### Authentication
 
-Set `BITVAULT_API_KEY` to require a bearer token on all API requests (except `/health`, which is always open):
+Optionally, set `BITVAULT_API_KEY` to require a bearer token on all API requests (except `/health`, which is always open):
 
 ```bash
 export BITVAULT_API_KEY=my-secret-token
