@@ -270,6 +270,7 @@ dependencies = [
  "cipher",
  "cpubits",
  "cpufeatures",
+ "zeroize",
 ]
 
 [[package]]
@@ -753,9 +754,9 @@ dependencies = [
 
 [[package]]
 name = "crc-any"
-version = "3.0.1"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4910941b420c3a31aa11a4eec7859b513fd6697ca59d2175b1b583c882b20b6b"
+checksum = "62952f1a7fc111311e515e41cab832c949dccecfb3cfa780a6648e8d62a275c6"
 dependencies = [
  "debug-helper",
 ]
@@ -1572,12 +1573,12 @@ dependencies = [
 
 [[package]]
 name = "magic-crypt"
-version = "5.0.1"
+version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96a1b6c709c8825d60b6f21ef1228b692f9254a02ff332700ccc38c7609209d7"
+checksum = "82952993dd28c8028533bb5004a976731cb83d2b3cccfc0e61ab86788d608ad7"
 dependencies = [
  "aes",
- "base64 0.22.1",
+ "base64 0.23.1",
  "cbc",
  "crc-any",
  "des",
