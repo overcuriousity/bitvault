@@ -16,7 +16,8 @@ use subtle::ConstantTimeEq;
 
 use super::admin::MaybeAdmin;
 use super::multipart::{Guarded, too_large};
-use super::{DeletedQuery, page};
+use super::{DeletedQuery, Extras, page_with};
+use crate::assets::Assets;
 use crate::domain::crypto::{self, SALT_LEN};
 use crate::domain::expiry::{self, Expiry};
 use crate::domain::files::Staging;
@@ -43,6 +44,8 @@ struct Home {
     default_burn: u32,
     editable: bool,
     uploader_password: bool,
+    /// Per-file plaintext limit for secret pastes, which `create.js` enforces before encrypting.
+    max_secret_mb: u64,
     deleted: Option<String>,
 }
 
@@ -94,10 +97,12 @@ async fn index(
         default_burn: app.default_burn_after,
         editable: app.editable,
         uploader_password: app.uploader_password.is_some(),
+        max_secret_mb: app.max_secret_file_mb,
         deleted: q.notice().map(|n| super::escape_text(&n)),
     };
     let body = home.render().map_err(Error::internal)?;
-    page(&st, admin, "new", "New paste", body)
+    let extras = Extras { js: vec![Assets::url("js/create.js")], ..Extras::default() };
+    page_with(&st, admin, "new", "New paste", body, extras)
 }
 
 /// `POST /open`: finds a paste by its words. htmx follows `HX-Redirect`; without it, a plain redirect.

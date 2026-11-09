@@ -6,7 +6,7 @@
 {% if let Some(deleted) = deleted %}{% call notice::notice_escaped("success", deleted) %}{% endcall %}{% endif %}
 <p class="bv-lead">Share text, links and files with a three-word address.</p>
 
-<form class="oc-form bv-create" id="create-form" method="post" action="/" enctype="multipart/form-data">
+<form class="oc-form bv-create" id="create-form" method="post" action="/" enctype="multipart/form-data" data-max-secret-mb="{{ max_secret_mb }}">
   <div class="oc-field">
     <label for="content">Content</label>
     <textarea class="oc-input bv-mono" id="content" name="content" rows="10" spellcheck="false" autocomplete="off"></textarea>
@@ -31,6 +31,7 @@
     <label for="files">Files</label>
     <input class="oc-input" id="files" name="file" type="file" multiple>
   </div>
+  <div id="create-notice" aria-live="polite"></div>
   <div class="oc-form__actions">
     {% call button::submit("primary", "Create paste") %}{% endcall %}
   </div>

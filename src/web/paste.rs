@@ -231,7 +231,8 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, text: Option<&str>, grant: 
 
 fn render_paste(st: &AppState, admin: bool, view: &PasteView, words: &str) -> Result<Response, Error> {
     let body = render(view)?;
-    let extras = Extras { css: vec![Assets::url("css/syntax.css")], ..Extras::default() };
+    let js = if view.secret { vec![Assets::url("js/secret.js")] } else { Vec::new() };
+    let extras = Extras { css: vec![Assets::url("css/syntax.css")], js, ..Extras::default() };
     Ok(no_store(page_with(st, admin, "", words, body, extras)?.into_response()))
 }
 

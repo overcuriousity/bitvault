@@ -49,6 +49,7 @@
 {%- endif %}
 {%- endif %}
 {%- if secret %}
+<div id="secret-notice" aria-live="polite"></div>
 <form class="oc-form bv-secret-open" id="secret-open">
   {% call field::secret("secret-password", "Password", "current-password") %}{% endcall %}
   <div class="oc-form__actions">

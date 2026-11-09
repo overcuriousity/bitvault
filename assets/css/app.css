@@ -46,6 +46,12 @@
 .bv-preview img { max-width: 100%; height: auto; border-radius: var(--radius-md); }
 .bv-preview figcaption { color: var(--color-fg-muted); font-size: var(--text-micro); }
 .bv-secret-open { margin-top: var(--space-2); }
+.bv-secret-open[hidden], .bv-delete[hidden] { display: none; }
+
+/* create.js turns the file field into a drop zone. */
+.bv-create .bv-drop { padding: var(--space-3); border: 1px dashed var(--color-border-control); border-radius: var(--radius-md); }
+.bv-create .bv-drop[data-dragging] { border-color: var(--color-accent); background: var(--color-accent-dim); }
+.bv-drop__hint { color: var(--color-fg-muted); font-size: var(--text-micro); }
 
 .bv-pager { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) 0; }
 .bv-totals { max-width: 24rem; margin-bottom: var(--space-4); }
