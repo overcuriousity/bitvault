@@ -145,42 +145,160 @@ pub const GATE_CONFIG: &str = "public_url = \"https://paste.example\"\n[app]\nsh
 pub const GATE_ALLOWED_URLS: [&str; 3] = ["https://paste.example", "https://s.example", "https://translate.example/t"];
 
 /// Panics with the offending snippet when a page carries inline code or an unconfigured external address.
+/// Only tag interiors are inspected, so escaped paste text such as `style=` is never flagged.
 pub fn assert_clean_html(body: &str) {
-    fn snippet(body: &str, at: usize) -> &str {
-        let start = body.floor_char_boundary(at.saturating_sub(40));
-        let end = body.floor_char_boundary((at + 80).min(body.len()));
-        &body[start..end]
-    }
-    for bad in ["style=", "hx-on", "confirm(", "alert(", "prompt("] {
-        if let Some(at) = body.find(bad) {
-            panic!("`{bad}` in page: ...{}...", snippet(body, at));
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
         }
-    }
-    let mut from = 0;
-    while let Some(i) = body[from..].find("<script") {
-        let at = from + i;
-        let tag_end = body[at..].find('>').map_or(body.len(), |e| at + e);
-        assert!(body[at..tag_end].contains("src="), "inline <script>: ...{}...", snippet(body, at));
-        from = at + 1;
-    }
-    // ` on` + letters + `=` is an event-handler attribute; `data-on…` and text such as "one=" do not match
-    // because attribute names start after whitespace and text rarely continues with `=` directly.
-    for (at, _) in body.match_indices(" on") {
-        let rest = &body[at + 3..];
-        let letters = rest.bytes().take_while(u8::is_ascii_lowercase).count();
-        if letters > 0 && rest.as_bytes().get(letters) == Some(&b'=') {
-            panic!("event handler attribute: ...{}...", snippet(body, at));
+        if body[i..].starts_with("<!--") {
+            i = body[i..].find("-->").map_or(bytes.len(), |e| i + e + 3);
+            continue;
         }
-    }
-    for attr in ["src=", "href=", "action="] {
-        for (at, _) in body.match_indices(attr) {
-            let rest = &body[at + attr.len()..];
-            let Some(quote) = rest.chars().next().filter(|c| matches!(c, '"' | '\'')) else { continue };
-            let value = rest[1..].split(quote).next().unwrap_or("");
-            let external = value.starts_with("http://") || value.starts_with("https://");
-            if external && !GATE_ALLOWED_URLS.iter().any(|ok| value.starts_with(ok)) {
-                panic!("external address in `{attr}`: ...{}...", snippet(body, at));
+        let next = bytes.get(i + 1).copied().unwrap_or(0);
+        if !(next.is_ascii_alphabetic() || next == b'/' || next == b'!') {
+            i += 1;
+            continue;
+        }
+        let (tag, end) = parse_tag(body, i);
+        check_tag(body, i, &tag);
+        i = end;
+        if tag.name == "script" {
+            let close = body[i..].to_ascii_lowercase().find("</script").map_or(bytes.len(), |e| i + e);
+            let script = body[i..close].to_ascii_lowercase();
+            for call in ["confirm(", "alert(", "prompt("] {
+                assert!(!script.contains(call), "`{call}` in <script> body: {}", snippet(body, i));
             }
+            i = close;
         }
     }
+}
+
+struct Tag {
+    name: String,
+    attrs: Vec<(String, String)>,
+}
+
+fn snippet(body: &str, at: usize) -> &str {
+    let start = body.floor_char_boundary(at.saturating_sub(20));
+    let end = body.floor_char_boundary((at + 100).min(body.len()));
+    &body[start..end]
+}
+
+/// Parses the tag opening at `start` up to its closing `>`, honouring quoted values.
+fn parse_tag(body: &str, start: usize) -> (Tag, usize) {
+    let b = body.as_bytes();
+    let mut i = start + 1;
+    let name_start = i;
+    while i < b.len() && !b[i].is_ascii_whitespace() && b[i] != b'/' && b[i] != b'>' {
+        i += 1;
+    }
+    let name = body[name_start..i].to_ascii_lowercase();
+    let mut attrs = Vec::new();
+    loop {
+        while i < b.len() && (b[i].is_ascii_whitespace() || b[i] == b'/') {
+            i += 1;
+        }
+        if i >= b.len() {
+            break;
+        }
+        if b[i] == b'>' {
+            i += 1;
+            break;
+        }
+        let a_start = i;
+        while i < b.len() && !b[i].is_ascii_whitespace() && !matches!(b[i], b'=' | b'>' | b'/') {
+            i += 1;
+        }
+        if i == a_start {
+            i += 1;
+            continue;
+        }
+        let attr = body[a_start..i].to_ascii_lowercase();
+        let mut j = i;
+        while j < b.len() && b[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        let mut value = String::new();
+        if j < b.len() && b[j] == b'=' {
+            j += 1;
+            while j < b.len() && b[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < b.len() && matches!(b[j], b'"' | b'\'') {
+                let quote = b[j];
+                let v_start = j + 1;
+                j = v_start;
+                while j < b.len() && b[j] != quote {
+                    j += 1;
+                }
+                value = body[v_start..j].to_owned();
+                j = (j + 1).min(b.len());
+            } else {
+                let v_start = j;
+                while j < b.len() && !b[j].is_ascii_whitespace() && b[j] != b'>' {
+                    j += 1;
+                }
+                value = body[v_start..j].to_owned();
+            }
+            i = j;
+        }
+        attrs.push((attr, value));
+    }
+    (Tag { name, attrs }, i)
+}
+
+fn check_tag(body: &str, at: usize, tag: &Tag) {
+    let here = || snippet(body, at).to_owned();
+    for (attr, value) in &tag.attrs {
+        let handler = attr.len() > 2 && attr.starts_with("on") && attr.bytes().all(|c| c.is_ascii_lowercase());
+        assert!(attr != "style", "style attribute: {}", here());
+        assert!(!handler, "event handler attribute `{attr}`: {}", here());
+        assert!(!attr.starts_with("hx-on"), "hx-on attribute: {}", here());
+        match attr.as_str() {
+            "src" | "href" | "action" | "formaction" | "poster" | "data" => {
+                check_url(value, tag.name == "img" && attr == "src", &here);
+            }
+            "srcset" => {
+                for candidate in value.split(',') {
+                    check_url(candidate.split_whitespace().next().unwrap_or(""), false, &here);
+                }
+            }
+            "content" if tag.name == "meta" => {
+                let refresh = tag.attrs.iter().any(|(n, v)| n == "http-equiv" && v.eq_ignore_ascii_case("refresh"));
+                if refresh {
+                    let lower = value.to_ascii_lowercase();
+                    let url = lower.find("url=").map_or("", |p| value[p + 4..].trim_matches(['"', '\'', ' ']));
+                    check_url(url, false, &here);
+                }
+            }
+            _ => {}
+        }
+    }
+    if tag.name == "script" {
+        assert!(tag.attrs.iter().any(|(n, _)| n == "src"), "inline <script>: {}", here());
+    }
+}
+
+fn check_url(raw: &str, data_ok: bool, here: &dyn Fn() -> String) {
+    let value: String = raw.chars().filter(|c| !c.is_ascii_control() && *c != ' ').collect::<String>();
+    let lower = value.to_ascii_lowercase();
+    assert!(!lower.starts_with("javascript:"), "javascript: URL: {}", here());
+    let scheme = lower.split_once(':').map(|(s, _)| s).filter(|s| {
+        s.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    });
+    if scheme == Some("mailto") || (scheme == Some("data") && data_ok) {
+        return;
+    }
+    if scheme.is_none() && !lower.starts_with("//") {
+        return;
+    }
+    let allowed = GATE_ALLOWED_URLS
+        .iter()
+        .any(|ok| value.strip_prefix(ok).is_some_and(|rest| rest.is_empty() || rest.starts_with(['/', '?', '#'])));
+    assert!(allowed, "external address `{raw}`: {}", here());
 }

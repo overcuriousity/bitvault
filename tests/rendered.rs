@@ -69,6 +69,7 @@ async fn every_rendered_page_and_fragment_is_clean() {
     let url = create(&app, new("https://example.com/target", Privacy::Unlisted)).await;
     let private = create(&app, NewPaste { password: Some("pw".into()), ..new("locked", Privacy::Private) }).await;
     let secret = create(&app, secret()).await;
+    let hostile = create(&app, new("hello style=\"x\" onclick=alert(1) <script>", Privacy::Public)).await;
     let burning = create(&app, NewPaste { burn_after_reads: 1, ..new("once", Privacy::Public) }).await;
 
     check("home", app.get("/").await, StatusCode::OK).await;
@@ -81,13 +82,27 @@ async fn every_rendered_page_and_fragment_is_clean() {
     assert_clean_html(&html);
     check("public paste", app.get(&format!("/{public}")).await, StatusCode::OK).await;
     check("readonly paste", app.get(&format!("/{readonly}")).await, StatusCode::OK).await;
-    // A URL paste redirects; the redirect page is not HTML, so only its target is checked.
-    assert_eq!(app.get(&format!("/{url}")).await.status(), StatusCode::FOUND);
+    // A URL paste redirects with no HTML body, so only the status and security headers apply.
+    let res = app.get(&format!("/{url}")).await;
+    assert_eq!(res.status(), StatusCode::FOUND);
+    assert_eq!(res.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    assert_eq!(res.headers()[header::REFERRER_POLICY], "no-referrer");
     check("private locked", app.get(&format!("/{private}")).await, StatusCode::OK).await;
     let unlock = app.post_form(&format!("/{private}/unlock"), "password=pw").await;
     check("private unlocked", unlock, StatusCode::OK).await;
     check("secret shell", app.get(&format!("/{secret}")).await, StatusCode::OK).await;
-    check("burned view", app.get(&format!("/{burning}")).await, StatusCode::OK).await;
+    let res = app.get(&format!("/{burning}")).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let html = body_text(res).await;
+    assert!(html.contains("That was the last read"), "burned branch must render");
+    assert_clean_html(&html);
+    let res = app.get(&format!("/{hostile}")).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let html = body_text(res).await;
+    assert!(html.contains("hello"), "hostile paste must render its text");
+    assert_clean_html(&html);
+    let wrong = app.post_form(&format!("/{readonly}/delete"), "password=wrong").await;
+    check("delete page", wrong, StatusCode::FORBIDDEN).await;
     check("edit page", app.get(&format!("/{public}/edit")).await, StatusCode::OK).await;
 
     check("admin sign-in", app.get("/admin/sign-in").await, StatusCode::OK).await;
@@ -102,4 +117,60 @@ async fn every_rendered_page_and_fragment_is_clean() {
     check("open 422", app.post_form("/open", "words=happy+aple+banana").await, StatusCode::UNPROCESSABLE_ENTITY).await;
     let wrong = app.post_form(&format!("/{private}/unlock"), "password=nope").await;
     check("unlock 422", wrong, StatusCode::UNPROCESSABLE_ENTITY).await;
+}
+
+fn panics(html: &str) -> bool {
+    std::panic::catch_unwind(|| assert_clean_html(html)).is_err()
+}
+
+#[test]
+fn the_scanner_rejects_inline_code_and_unlisted_addresses() {
+    let bad = [
+        "<p STYLE=\"x\">",
+        "<img/onerror=x>",
+        "<a\tonclick=\"x\">",
+        "<a\nONCLICK = 'x'>",
+        "<a hx-on:click=\"x\">",
+        "<script>x</script>",
+        "<script data-src=\"a.js\"></script>",
+        "<script src=\"/a.js\">alert(1)</script>",
+        "<a href=https://evil>",
+        "<a HREF = \"https://evil.com\">",
+        "<a href=\"//evil.com\">",
+        "<a href=\"javascript:x\">",
+        "<a href=\"JaVaScRiPt:x\">",
+        "<img srcset=\"/a 1x, https://evil 2x\">",
+        "<button formaction=\"https://evil\">",
+        "<video poster=\"http://evil\">",
+        "<meta http-equiv=\"refresh\" content=\"0; url=https://evil\">",
+        "<a href=\"https://s.example.evil.com\">",
+        "<a href=\"https://s.example.evil.com/x\">",
+        "<a href=\"https://paste.example@evil.com\">",
+        "<a href=\"data:text/html,x\">",
+        "<img src=\"ftp://x\">",
+    ];
+    for html in bad {
+        assert!(panics(html), "{html} must be rejected");
+    }
+}
+
+#[test]
+fn the_scanner_accepts_escaped_text_and_configured_addresses() {
+    let good = [
+        "<pre>style=&quot;x&quot; onclick=alert(1) &lt;script&gt;</pre>",
+        "<p>alert(1) confirm(x) prompt(y) and 1 < 2 style=x</p>",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1 1\"></svg>",
+        "<a href=\"https://s.example/happy-apple-banana\">",
+        "<a href=\"https://paste.example\">",
+        "<a href=\"https://translate.example/t?from=x#y\">",
+        "<a href=\"/relative?a=b:c\" data-oc-copy=\"https://anything\">",
+        "<img src=\"data:image/png;base64,AAAA\">",
+        "<a href=\"mailto:a@b.c\">",
+        "<script src=\"/assets/a.js\"></script>",
+        "<!-- <a href=\"https://evil\" style=\"x\"> -->",
+        "<button data-on=\"x\" aria-label=\"one=two\">",
+    ];
+    for html in good {
+        assert!(!panics(html), "{html} must pass");
+    }
 }
