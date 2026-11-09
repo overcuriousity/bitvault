@@ -137,6 +137,12 @@ async fn origin_check(State(ctx): State<Arc<Ctx>>, req: Request, next: Next) -> 
     }
 }
 
+/// The trace span of a request: method and path only. The query is left out because download
+/// grants travel in it (`?g=`), and grants must never reach a log.
+fn request_span(req: &Request) -> tracing::Span {
+    tracing::info_span!("request", method = %req.method(), path = %req.uri().path(), version = ?req.version())
+}
+
 /// Wraps the whole app, outermost first: header redaction, trace, response headers, host check, origin check, compression.
 pub fn secure(router: Router, dep: Arc<Deployment>, proxies: Vec<IpNet>) -> Router {
     let ctx = Arc::new(Ctx { dep, proxies });
@@ -145,7 +151,7 @@ pub fn secure(router: Router, dep: Arc<Deployment>, proxies: Vec<IpNet>) -> Rout
         .layer(from_fn_with_state(ctx.clone(), origin_check))
         .layer(from_fn_with_state(ctx.clone(), host_check))
         .layer(from_fn_with_state(ctx, headers))
-        .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http().make_span_with(request_span))
         .layer(SetSensitiveRequestHeadersLayer::new([
             header::AUTHORIZATION,
             header::COOKIE,

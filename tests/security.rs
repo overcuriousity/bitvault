@@ -243,3 +243,35 @@ async fn an_unparseable_forwarded_hop_falls_back_to_the_peer() {
     let r = plain(app.req("GET", "/test/ip").header("x-forwarded-for", "198.51.100.1, 203.0.113.9:4000"));
     assert_eq!(body_text(app.send(r).await).await, "127.0.0.1");
 }
+
+/// Collects everything a fmt subscriber writes.
+#[derive(Clone, Default)]
+struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn request_traces_carry_the_path_but_never_the_query() {
+    let app = app_with_test_routes("").await;
+    let captured = Captured::default();
+    let writer = captured.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_ansi(false)
+        .with_writer(move || writer.clone())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let res = app.send(plain(app.req("GET", "/test/ip?g=GRANT-MUST-NOT-BE-LOGGED&x=1"))).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let logs = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+    assert!(logs.contains("path=/test/ip"), "{logs}");
+    assert!(!logs.contains("GRANT-MUST-NOT-BE-LOGGED"), "{logs}");
+}
