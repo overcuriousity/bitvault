@@ -393,3 +393,113 @@ async fn patch_edits_when_enabled() {
     assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(error_code(res).await, "INVALID");
 }
+
+#[tokio::test]
+async fn the_burning_read_returns_a_grant_for_the_files() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let res = post_multipart(
+        &app,
+        &[
+            ("privacy", None, b"public"),
+            ("burn_after_reads", None, b"1"),
+            ("editable", None, b"true"),
+            ("content", None, b"read once"),
+            ("file", Some("a.bin"), b"burned file"),
+        ],
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let words = json_of(res).await["words"].as_str().unwrap().to_owned();
+    let v = json_of(get(&app, &format!("/api/v1/pastes/{words}"), &[]).await).await;
+    assert_eq!(v["burned"], true);
+    assert_eq!(v["editable"], false);
+    assert_eq!(v["content"], "read once");
+    let grant = v["grant"].as_str().unwrap().to_owned();
+    assert_eq!(get(&app, &format!("/api/v1/pastes/{words}"), &[]).await.status(), StatusCode::NOT_FOUND);
+    let file = format!("/api/v1/pastes/{words}/files/1");
+    let res = get(&app, &file, &[]).await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(error_code(res).await, "NOT_FOUND");
+    let res = get(&app, &file, &[("x-paste-grant", &grant)]).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
+    assert_eq!(bytes_of(res).await, b"burned file");
+    let res = get(&app, &file, &[("x-paste-grant", "not-a-grant")]).await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_private_read_returns_a_grant_that_opens_the_files() {
+    let app = app().await;
+    let res = post_multipart(
+        &app,
+        &[
+            ("privacy", None, b"private"),
+            ("password", None, b"pw"),
+            ("content", None, b"hidden text"),
+            ("file", Some("a.txt"), b"hidden file"),
+        ],
+    )
+    .await;
+    let words = json_of(res).await["words"].as_str().unwrap().to_owned();
+    let unlocked = json_of(get(&app, &format!("/api/v1/pastes/{words}"), &[("x-paste-password", "pw")]).await).await;
+    let grant = unlocked["grant"].as_str().unwrap().to_owned();
+    let res = get(&app, &format!("/api/v1/pastes/{words}/files/1"), &[("x-paste-grant", &grant)]).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(bytes_of(res).await, b"hidden file");
+    let public = create(&app, json!({"content": "x", "privacy": "public"})).await;
+    let v = json_of(get(&app, &format!("/api/v1/pastes/{public}"), &[]).await).await;
+    assert!(v.get("grant").is_none(), "only burning and password reads carry a grant");
+}
+
+#[tokio::test]
+async fn an_expired_paste_has_no_files() {
+    let app = app().await;
+    let mut staging = Staging::new(&app.st.files_dir).unwrap();
+    staging
+        .add("a.txt", "", stream::iter([Ok::<_, std::io::Error>(Bytes::from_static(b"old"))]), u64::MAX)
+        .await
+        .unwrap();
+    let new = NewPaste { expiry: Expiry::Min1, ..plain("x", Privacy::Public) };
+    let words = paste::create(&app.st, new, Some(staging), domain::now() - 120).await.unwrap().words();
+    let res = get(&app, &format!("/api/v1/pastes/{words}/files/1"), &[]).await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(get(&app, &format!("/api/v1/pastes/{words}"), &[]).await.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn creates_larger_than_the_regular_body_limit_are_accepted() {
+    let app = app().await;
+    let big = vec![b'z'; 3 << 20];
+    let res = post_multipart(&app, &[("content", None, b"big"), ("file", Some("big.bin"), &big)]).await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let words = json_of(res).await["words"].as_str().unwrap().to_owned();
+    let res = get(&app, &format!("/api/v1/pastes/{words}/files/1"), &[]).await;
+    assert_eq!(bytes_of(res).await.len(), big.len());
+}
+
+#[tokio::test]
+async fn media_types_are_matched_case_insensitively() {
+    let app = app().await;
+    let r = api("POST", "/api/v1/pastes")
+        .header(header::CONTENT_TYPE, "Application/JSON")
+        .body(Body::from(json!({"content": "x"}).to_string()))
+        .unwrap();
+    assert_eq!(app.send(r).await.status(), StatusCode::CREATED);
+    let r = api("POST", "/api/v1/pastes")
+        .header(header::CONTENT_TYPE, format!("Multipart/Form-Data; boundary={BOUNDARY}"))
+        .body(Body::from(multipart_body(&[("content", None, b"x")])))
+        .unwrap();
+    assert_eq!(app.send(r).await.status(), StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn delete_reads_only_the_proof_for_the_paste_level() {
+    let app = app().await;
+    let public = create(&app, json!({"content": "x", "privacy": "public"})).await;
+    let res = delete(&app, &format!("/api/v1/pastes/{public}"), &[("x-paste-verifier", "not hex")]).await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let readonly = create(&app, json!({"content": "x", "privacy": "readonly", "password": "pw"})).await;
+    let headers = [("x-paste-verifier", "abc"), ("x-paste-password", "pw")];
+    assert_eq!(delete(&app, &format!("/api/v1/pastes/{readonly}"), &headers).await.status(), StatusCode::NO_CONTENT);
+}

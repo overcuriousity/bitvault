@@ -23,7 +23,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::domain::paste::{self, Access, Body, DeleteAuth, Paste};
-use crate::domain::{self, files};
+use crate::domain::{self, Privacy, files};
 use crate::error::Error;
 use crate::ratelimit::{self, RateLimiter};
 use crate::security::ClientIp;
@@ -37,6 +37,7 @@ const JSON_LIMIT: usize = 6 * TEXT_LIMIT + (64 << 10);
 const PASSWORD_HEADER: &str = "x-paste-password";
 const VERIFIER_HEADER: &str = "x-paste-verifier";
 const UPLOADER_HEADER: &str = "x-uploader-password";
+const GRANT_HEADER: &str = "x-paste-grant";
 
 #[derive(OpenApi)]
 #[openapi(
@@ -49,7 +50,7 @@ minute with a burst of 5.
 
 Passwords travel in headers, never in URLs: `X-Paste-Password` opens, edits and deletes read-only and \
 private pastes; `X-Paste-Verifier` (64 hex characters, derived in the browser) deletes a secret paste; \
-`X-Uploader-Password` is needed to create when the server sets an uploader password.
+`X-Paste-Grant` carries the `grant` from a paste read to its file downloads; `X-Uploader-Password` is needed to create when the server sets an uploader password.
 
 Errors are JSON `{\"error\": {\"code\": \"...\", \"message\": \"...\"}}`, where `message` is one \
 sentence for a person. Codes: `NOT_FOUND` (404; also burned and expired pastes), `PASSWORD_REQUIRED` \
@@ -349,7 +350,9 @@ async fn create_paste(
 ) -> Result<(StatusCode, Json<CreateResponse>), ApiError> {
     home::check_uploader(&st, req.headers().get(UPLOADER_HEADER).map(HeaderValue::as_bytes))?;
     let rules = CreateRules { uploader_checked: true, allow_secret: false };
-    let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or_default();
+    // Media types are case-insensitive.
+    let content_type =
+        req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or_default().to_ascii_lowercase();
     let (new, staging) = if content_type.starts_with("multipart/form-data") {
         home::read_multipart(&st, req, rules).await?
     } else if content_type.starts_with("application/json") {
@@ -489,9 +492,14 @@ pub struct PasteResponse {
     pub encrypted: bool,
     pub content: String,
     pub files: Vec<FileItem>,
+    /// A download grant for this paste's files, valid for 600 seconds; send it as `X-Paste-Grant`.
+    /// Present after a password read of a private paste (so files need no second key
+    /// derivation) and on the burning read (the only way to reach a burned paste's files).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grant: Option<String>,
 }
 
-fn paste_response(st: &AppState, p: &Paste, encrypted: bool, content: String) -> PasteResponse {
+fn paste_response(st: &AppState, p: &Paste, encrypted: bool, content: String, grant: Option<String>) -> PasteResponse {
     let words = p.id.words();
     let (url, short_url) = paste_urls(st, &words);
     let files = p
@@ -513,7 +521,7 @@ fn paste_response(st: &AppState, p: &Paste, encrypted: bool, content: String) ->
         privacy: p.privacy.as_str().to_owned(),
         kind: p.kind.as_str().to_owned(),
         syntax: p.syntax.clone(),
-        editable: paste::editable(st, p),
+        editable: paste::editable(st, p) && p.burned_at.is_none(),
         created_at: p.created_at,
         expires_at: p.expires_at,
         burn_after_reads: p.burn_after_reads,
@@ -522,13 +530,15 @@ fn paste_response(st: &AppState, p: &Paste, encrypted: bool, content: String) ->
         encrypted,
         content,
         files,
+        grant,
     }
 }
 
 /// Read a paste.
 ///
 /// Counts as a read, so it can burn the paste. A private paste needs `X-Paste-Password`; a
-/// secret paste comes back as its encrypted container with `encrypted: true`.
+/// secret paste comes back as its encrypted container with `encrypted: true`. The burning read,
+/// and a password read of a private paste, return a `grant` for the file downloads.
 #[utoipa::path(
     get,
     path = "/api/v1/pastes/{words}",
@@ -557,7 +567,8 @@ async fn get_paste(
         Body::Text(t) | Body::Url(t) => (false, t),
         Body::Cipher(c) => (true, STANDARD.encode(c)),
     };
-    Ok(no_store(Json(paste_response(&st, &opened.paste, encrypted, content)).into_response()))
+    let view = paste_response(&st, &opened.paste, encrypted, content, opened.grant);
+    Ok(no_store(Json(view).into_response()))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -644,22 +655,28 @@ async fn delete_paste(
     headers: HeaderMap,
 ) -> Result<StatusCode, ApiError> {
     let id = paste_id(&words)?;
-    let auth = if let Some(v) = header_text(&headers, VERIFIER_HEADER)? {
-        let bytes = hex::decode(v.trim()).ok().and_then(|b| <[u8; 32]>::try_from(b).ok());
-        DeleteAuth::Verifier(bytes.ok_or_else(|| invalid("Send X-Paste-Verifier as 64 hex characters."))?)
-    } else if let Some(pw) = header_text(&headers, PASSWORD_HEADER)? {
-        DeleteAuth::Password(pw)
-    } else {
-        DeleteAuth::None
+    let now = domain::now();
+    // Each level reads only its own proof, so a stray header for another level changes nothing.
+    let auth = match paste::meta(&st, id, now).await?.privacy {
+        Privacy::Secret => match header_text(&headers, VERIFIER_HEADER)? {
+            Some(v) => {
+                let bytes = hex::decode(v.trim()).ok().and_then(|b| <[u8; 32]>::try_from(b).ok());
+                DeleteAuth::Verifier(bytes.ok_or_else(|| invalid("Send X-Paste-Verifier as 64 hex characters."))?)
+            }
+            None => DeleteAuth::None,
+        },
+        _ => header_text(&headers, PASSWORD_HEADER)?.map_or(DeleteAuth::None, DeleteAuth::Password),
     };
-    paste::delete(&st, id, auth, ip, domain::now()).await?;
+    paste::delete(&st, id, auth, ip, now).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// Download one file.
 ///
-/// Does not count as a read. A private paste's files need `X-Paste-Password`; a secret paste's
-/// files come back as their encrypted containers. A burned or expired paste's files are gone.
+/// Does not count as a read. A private paste's files need `X-Paste-Grant` (from reading the
+/// paste with its password) or `X-Paste-Password`. A burned paste's files are reachable only with
+/// the grant from its burning read, for 600 seconds; an expired paste's files are gone. A secret
+/// paste's files come back as their encrypted containers.
 #[utoipa::path(
     get,
     path = "/api/v1/pastes/{words}/files/{position}",
@@ -667,13 +684,14 @@ async fn delete_paste(
     params(
         ("words" = String, Path, description = "The three-word address."),
         ("position" = u32, Path, description = "The file's position, from 1."),
-        ("X-Paste-Password" = Option<String>, Header, description = "Required for private pastes."),
+        ("X-Paste-Grant" = Option<String>, Header, description = "The `grant` from reading the paste; takes precedence over the password."),
+        ("X-Paste-Password" = Option<String>, Header, description = "For private pastes, when no grant is sent."),
     ),
     responses(
         (status = 200, description = "The file's bytes.", content_type = "application/octet-stream", body = inline(FileBytes)),
         (status = 401, description = "A private paste without a password (`PASSWORD_REQUIRED`).", body = ErrorBody),
-        (status = 403, description = "The password is wrong (`WRONG_PASSWORD`).", body = ErrorBody),
-        (status = 404, description = "No such paste or file (`NOT_FOUND`).", body = ErrorBody),
+        (status = 403, description = "The password is wrong (`WRONG_PASSWORD`), or the grant is invalid or expired (`FORBIDDEN`).", body = ErrorBody),
+        (status = 404, description = "No such paste or file, or burned without a grant (`NOT_FOUND`).", body = ErrorBody),
     )
 )]
 async fn get_file(
@@ -684,7 +702,11 @@ async fn get_file(
 ) -> Result<Response, ApiError> {
     let id = paste_id(&words)?;
     let position = crate::web::files::position(&position)?;
-    let (p, dek) = paste::files_access(&st, id, password_access(&headers)?, ip, domain::now()).await?;
+    let access = match header_text(&headers, GRANT_HEADER)? {
+        Some(g) => Access::Grant(g),
+        None => password_access(&headers)?,
+    };
+    let (p, dek) = paste::files_access(&st, id, access, ip, domain::now()).await?;
     let (meta, body) = files::open(&st, id, position, dek.as_ref()).await?;
     Ok(crate::web::files::download(&p, &meta, body)?)
 }

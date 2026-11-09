@@ -152,6 +152,7 @@ pub fn secure(router: Router, dep: Arc<Deployment>, proxies: Vec<IpNet>) -> Rout
             header::HeaderName::from_static("x-paste-password"),
             header::HeaderName::from_static("x-paste-verifier"),
             header::HeaderName::from_static("x-uploader-password"),
+            header::HeaderName::from_static("x-paste-grant"),
         ]))
 }
 
