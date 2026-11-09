@@ -1,3 +1,7 @@
 <div class="oc-page-head"><h1>{{ heading }}</h1></div>
 <p class="bv-lead">{{ message }}</p>
+{%- if let Some(href) = paste_href %}
+<p><a class="oc-btn oc-btn--primary" href="{{ href }}">Open the paste</a></p>
+{%- else %}
 <p><a class="oc-btn" href="/">Back to the start</a></p>
+{%- endif %}

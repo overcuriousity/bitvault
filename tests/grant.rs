@@ -23,7 +23,7 @@ fn a_grant_opens_the_paste_it_was_issued_for() {
 fn a_grant_for_one_paste_does_not_open_another() {
     let key = GrantKey::random();
     let token = grant::issue(&key, PasteId(42), None, NOW);
-    assert!(matches!(grant::check(&key, &token, PasteId(43), NOW), Err(Error::Forbidden)));
+    assert!(matches!(grant::check(&key, &token, PasteId(43), NOW), Err(Error::GrantExpired)));
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn a_grant_expires_after_ten_minutes() {
     assert_eq!(TTL_SECS, 600);
     let key = GrantKey::random();
     let token = grant::issue(&key, PasteId(7), None, NOW);
-    assert!(matches!(grant::check(&key, &token, PasteId(7), NOW + 601), Err(Error::Forbidden)));
+    assert!(matches!(grant::check(&key, &token, PasteId(7), NOW + 601), Err(Error::GrantExpired)));
     assert!(grant::check(&key, &token, PasteId(7), NOW + 599).is_ok());
     assert!(grant::check(&key, &token, PasteId(7), NOW + 600).is_ok());
 }
@@ -52,10 +52,10 @@ fn a_tampered_grant_is_refused() {
     for i in 0..raw.len() {
         raw[i] ^= 0x01;
         let bad = URL_SAFE_NO_PAD.encode(&raw);
-        assert!(matches!(grant::check(&key, &bad, PasteId(9), NOW), Err(Error::Forbidden)), "byte {i}");
+        assert!(matches!(grant::check(&key, &bad, PasteId(9), NOW), Err(Error::GrantExpired)), "byte {i}");
         raw[i] ^= 0x01;
     }
-    assert!(matches!(grant::check(&GrantKey::random(), &token, PasteId(9), NOW), Err(Error::Forbidden)));
+    assert!(matches!(grant::check(&GrantKey::random(), &token, PasteId(9), NOW), Err(Error::GrantExpired)));
 }
 
 #[test]
@@ -64,13 +64,13 @@ fn malformed_grants_are_refused_without_panicking() {
     let key = GrantKey::random();
     let mut rng = rand::rng();
     for token in ["", "=", "not base64!", "AAAA", &"A".repeat(10_000)] {
-        assert!(matches!(grant::check(&key, token, PasteId(1), NOW), Err(Error::Forbidden)), "{token}");
+        assert!(matches!(grant::check(&key, token, PasteId(1), NOW), Err(Error::GrantExpired)), "{token}");
     }
     for _ in 0..500 {
         let len = rng.random_range(0..120);
         let bytes: Vec<u8> = (0..len).map(|_| rng.random()).collect();
         let token = URL_SAFE_NO_PAD.encode(&bytes);
-        assert!(matches!(grant::check(&key, &token, PasteId(1), NOW), Err(Error::Forbidden)));
+        assert!(matches!(grant::check(&key, &token, PasteId(1), NOW), Err(Error::GrantExpired)));
     }
 }
 

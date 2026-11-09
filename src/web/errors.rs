@@ -19,6 +19,8 @@ struct NoticeFragment<'a> {
 struct ErrorPage<'a> {
     heading: &'a str,
     message: &'a str,
+    /// `/word-word-word` when the page should lead back to that paste.
+    paste_href: Option<String>,
 }
 
 fn heading(status: StatusCode) -> &'static str {
@@ -37,6 +39,15 @@ pub async fn render(State(st): State<AppState>, req: Request, next: Next) -> Res
     let api = req.uri().path().starts_with("/api/");
     let htmx = req.headers().contains_key("hx-request");
     let admin = req.extensions().get::<super::admin::MaybeAdmin>().is_some_and(|a| a.0);
+    // Only a well-formed address becomes a link, in its canonical spelling.
+    let paste_href = req
+        .uri()
+        .path()
+        .trim_start_matches('/')
+        .split('/')
+        .next()
+        .and_then(|w| crate::domain::words::parse(w).ok())
+        .map(|id| format!("/{}", id.words()));
     let res = next.run(req).await;
     let Some(notice) = res.extensions().get::<ErrorNotice>().cloned() else {
         return res;
@@ -51,7 +62,8 @@ pub async fn render(State(st): State<AppState>, req: Request, next: Next) -> Res
             Err(_) => res,
         };
     }
-    let page = ErrorPage { heading: heading(notice.status), message: &notice.message }
+    let paste_href = paste_href.filter(|_| notice.back_to_paste);
+    let page = ErrorPage { heading: heading(notice.status), message: &notice.message, paste_href }
         .render()
         .map_err(Error::internal)
         .and_then(|body| page(&st, admin, "", heading(notice.status), body));

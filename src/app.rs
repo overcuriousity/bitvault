@@ -62,6 +62,14 @@ pub async fn build_with(
         Duration::from_secs(3600),
     )
     .layer(from_fn(api::json_errors));
+    // Edits carry a whole paste's text, which escaping can grow sixfold, like a JSON create.
+    let edits = Router::new()
+        .merge(web::paste::edit_routes())
+        .merge(api.edits)
+        .layer(from_fn_with_state(st.clone(), web::errors::render))
+        .layer(from_fn_with_state(st.clone(), web::admin::session))
+        .with_state(st.clone());
+    let edits = security::limited(edits, api::JSON_LIMIT, Duration::from_secs(30)).layer(from_fn(api::json_errors));
     let rest = Router::new()
         .merge(web::home::routes())
         .merge(web::paste::routes())
@@ -79,7 +87,10 @@ pub async fn build_with(
         .with_state(st.clone());
     // Outside the limits, so their plain-text refusals under /api/ become JSON errors too.
     let rest = security::limited(rest, 1 << 20, Duration::from_secs(30)).layer(from_fn(api::json_errors));
-    let router =
-        security::secure(uploads.merge(rest).merge(assets::router()), st.dep.clone(), st.cfg.trusted_proxies.clone());
+    let router = security::secure(
+        uploads.merge(edits).merge(rest).merge(assets::router()),
+        st.dep.clone(),
+        st.cfg.trusted_proxies.clone(),
+    );
     Ok((router, st))
 }

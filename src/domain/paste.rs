@@ -21,6 +21,8 @@ use crate::state::AppState;
 /// A burned row stays (invisible) this long, so the burning read's grant can still fetch files.
 pub const BURNED_TTL_SECS: i64 = 600;
 pub const PAGE_SIZE: u32 = 50;
+/// The most text a paste may hold, in bytes.
+pub const TEXT_LIMIT: usize = 1 << 20;
 const INSERT_ATTEMPTS: usize = 8;
 
 /// What a creator submits. `content` is ignored for secret pastes, whose text is inside `secret`.
@@ -403,10 +405,9 @@ pub async fn create(st: &AppState, new: NewPaste, staging: Option<Staging>, now:
     if !cfg.privacy_levels.iter().any(|l| l == new.privacy.as_str()) {
         return Err(Error::Invalid("That privacy level is not offered here. Choose another one.".into()));
     }
-    let max = expiry::max(cfg);
     if !expiry::allowed(cfg, new.expiry) {
-        let msg = if new.expiry.seconds().zip(max.seconds()).is_none_or(|(e, m)| e > m) {
-            format!("Choose an expiry of {} or less.", max.label())
+        let msg = if !expiry::within_max(cfg, new.expiry) {
+            format!("Choose an expiry of {} or less.", expiry::max(cfg).label())
         } else {
             "That expiry is not offered here. Choose one from the list.".to_owned()
         };
@@ -620,7 +621,7 @@ pub async fn read(st: &AppState, id: PasteId, access: Access, ip: IpAddr, now: i
             Some(unlock(st, &found, &pw, ip).await?)
         }
         (Privacy::Private, Access::Grant(token)) => {
-            Some(grant::check(&st.grant_key, &token, id, now)?.ok_or(Error::Forbidden)?)
+            Some(grant::check(&st.grant_key, &token, id, now)?.ok_or(Error::GrantExpired)?)
         }
         (Privacy::Private, Access::Anonymous | Access::Admin) => return Err(Error::PasswordRequired),
         _ => None,
@@ -656,7 +657,7 @@ pub async fn files_access(
         let dek = grant::check(&st.grant_key, &token, id, now)?;
         let p = meta_for_grant(st, id, now).await?;
         if p.privacy == Privacy::Private && dek.is_none() {
-            return Err(Error::Forbidden);
+            return Err(Error::GrantExpired);
         }
         return Ok((p, dek));
     }
@@ -689,6 +690,9 @@ pub async fn edit(
     let p = meta(st, id, now).await?;
     if !editable(st, &p) {
         return Err(Error::Forbidden);
+    }
+    if content.len() > TEXT_LIMIT {
+        return Err(Error::TooLarge);
     }
     let has_files = !p.files.is_empty();
     require_content(&content, has_files)?;

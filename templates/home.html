@@ -11,7 +11,15 @@
     <label for="content">Content</label>
     <textarea class="oc-input bv-mono" id="content" name="content" rows="10" spellcheck="false" autocomplete="off"></textarea>
   </div>
-  {% call select::select("privacy", "privacy", "Privacy", privacy_options) %}{% endcall %}
+  {#- Secret starts disabled: without create.js it would post the plaintext. create.js enables it. #}
+  <div class="oc-field">
+    <label for="privacy">Privacy</label>
+    <select id="privacy" name="privacy" data-oc-menu>
+      {%- for (value, text, chosen) in privacy_options %}
+      <option value="{{ value }}"{% if chosen %} selected{% endif %}{% if value == "secret" %} disabled{% endif %}>{{ text }}</option>
+      {%- endfor %}
+    </select>
+  </div>
   <div class="bv-password" data-for="readonly private">
     {% call field::password("password", "password", "Password", "new-password") %}{% endcall %}
   </div>

@@ -91,13 +91,16 @@ pub fn max(cfg: &AppConfig) -> Expiry {
     Expiry::parse(&cfg.max_expiry).unwrap_or(Expiry::Week1)
 }
 
-/// Whether `e` is offered in `expiry_choices` and no longer than `max_expiry`.
-pub fn allowed(cfg: &AppConfig, e: Expiry) -> bool {
-    let offered = cfg.expiry_choices.iter().any(|c| c == e.as_str());
-    let within = match (e.seconds(), max(cfg).seconds()) {
+/// Whether `e` is no longer than `max_expiry`; everything is within a maximum of never.
+pub fn within_max(cfg: &AppConfig, e: Expiry) -> bool {
+    match (e.seconds(), max(cfg).seconds()) {
         (_, None) => true,
         (None, Some(_)) => false,
         (Some(s), Some(m)) => s <= m,
-    };
-    offered && within
+    }
+}
+
+/// Whether `e` is offered in `expiry_choices` and no longer than `max_expiry`.
+pub fn allowed(cfg: &AppConfig, e: Expiry) -> bool {
+    cfg.expiry_choices.iter().any(|c| c == e.as_str()) && within_max(cfg, e)
 }

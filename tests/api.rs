@@ -503,3 +503,28 @@ async fn delete_reads_only_the_proof_for_the_paste_level() {
     let headers = [("x-paste-verifier", "abc"), ("x-paste-password", "pw")];
     assert_eq!(delete(&app, &format!("/api/v1/pastes/{readonly}"), &headers).await.status(), StatusCode::NO_CONTENT);
 }
+
+#[tokio::test]
+async fn an_invalid_grant_is_forbidden_and_says_it_expired() {
+    let app = app().await;
+    let words = public_with_file(&app).await;
+    let res = get(&app, &format!("/api/v1/pastes/{words}/files/1"), &[("x-paste-grant", "expired-or-forged")]).await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let v = json_of(res).await;
+    assert_eq!(v["error"]["code"], "FORBIDDEN");
+    assert!(v["error"]["message"].as_str().unwrap().contains("grant has expired"), "{v}");
+}
+
+#[tokio::test]
+async fn a_patch_may_carry_a_whole_escaped_paste() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let words = create(&app, json!({"content": "before", "privacy": "public", "editable": true})).await;
+    let uri = format!("/api/v1/pastes/{words}");
+    // A control character is one byte of text and six in JSON, so this body is about 6 MiB.
+    let text = "\u{1}".repeat((1 << 20) - 64);
+    let res = send_json(&app, "PATCH", &uri, &json!({"content": text}), &[]).await;
+    assert_eq!(res.status(), StatusCode::OK, "{}", support::body_text(res).await);
+    assert_eq!(json_of(get(&app, &uri, &[]).await).await["content"].as_str().unwrap().len(), text.len());
+    let res = send_json(&app, "PATCH", &uri, &json!({"content": "x".repeat((1 << 20) + 1)}), &[]).await;
+    assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}

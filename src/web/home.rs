@@ -30,7 +30,7 @@ use crate::state::AppState;
 
 const MIB: u64 = 1 << 20;
 /// Each text field of the create form, and the text of an API create.
-pub(crate) const TEXT_LIMIT: usize = 1 << 20;
+pub(crate) const TEXT_LIMIT: usize = paste::TEXT_LIMIT;
 const SECRET_IN_BROWSER: &str = "Secret pastes are encrypted in the browser. Create them on the web page instead.";
 // A secret paste's content container holds JSON of up to TEXT_LIMIT of text, which escaping can
 // grow sixfold (a control character becomes \u00XX), plus 64 KiB of file names and the container

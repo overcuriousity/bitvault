@@ -14,6 +14,9 @@ pub enum Error {
     TooManyAttempts,
     #[error("You do not have access to this.")]
     Forbidden,
+    /// A download grant that expired, was voided by a restart, or was never valid.
+    #[error("This link has expired. Open the paste again.")]
+    GrantExpired,
     /// Forbidden, with the copy that tells an uploader what is missing.
     #[error("Enter the uploader password to create pastes.")]
     UploaderPassword,
@@ -38,7 +41,9 @@ impl Error {
         match self {
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::PasswordRequired => StatusCode::UNAUTHORIZED,
-            Self::WrongPassword | Self::Forbidden | Self::UploaderPassword => StatusCode::FORBIDDEN,
+            Self::WrongPassword | Self::Forbidden | Self::UploaderPassword | Self::GrantExpired => {
+                StatusCode::FORBIDDEN
+            }
             Self::TooManyAttempts => StatusCode::TOO_MANY_REQUESTS,
             Self::Invalid(_) | Self::UnsupportedFormat => StatusCode::UNPROCESSABLE_ENTITY,
             Self::TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
@@ -86,12 +91,18 @@ impl Error {
 pub struct ErrorNotice {
     pub status: StatusCode,
     pub message: String,
+    /// The page should link back to the paste its address names, rather than to the start.
+    pub back_to_paste: bool,
 }
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         self.log();
-        let notice = ErrorNotice { status: self.status(), message: self.to_string() };
+        let notice = ErrorNotice {
+            status: self.status(),
+            message: self.to_string(),
+            back_to_paste: matches!(self, Self::GrantExpired),
+        };
         let mut res = (notice.status, notice.message.clone()).into_response();
         res.extensions_mut().insert(notice);
         res

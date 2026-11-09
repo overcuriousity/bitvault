@@ -6,7 +6,7 @@ use askama::Template;
 use axum::Form;
 use axum::Router;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use serde::Deserialize;
@@ -32,6 +32,9 @@ pub const HIGHLIGHT_LIMIT: usize = 128 * 1024;
 /// stall the async workers nor take over the pool.
 const HIGHLIGHT_PERMITS: usize = 2;
 static HIGHLIGHT_SLOTS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(HIGHLIGHT_PERMITS)));
+const HTML: &str = "text/html; charset=utf-8";
+const TEXT: &str = "text/plain; charset=utf-8";
+const OCTETS: &str = "application/octet-stream";
 const PASSWORD_MISMATCH: &str = "That password does not open this paste. Check it and try again.";
 
 pub fn routes() -> Router<AppState> {
@@ -39,8 +42,14 @@ pub fn routes() -> Router<AppState> {
         .route("/{words}", get(view))
         .route("/{words}/unlock", post(unlock))
         .route("/{words}/raw", get(raw))
-        .route("/{words}/edit", get(edit_form).post(edit))
+        .route("/{words}/edit", get(edit_form))
         .route("/{words}/delete", post(delete))
+}
+
+/// `POST /{words}/edit`, for the edit group: its body may carry a whole paste's text, which form
+/// encoding can grow up to threefold.
+pub fn edit_routes() -> Router<AppState> {
+    Router::new().route("/{words}/edit", post(edit))
 }
 
 /// How a page's delete form proves the right to delete.
@@ -253,6 +262,12 @@ fn render_paste(st: &AppState, admin: bool, view: &PasteView, words: &str) -> Re
     Ok(no_store(page_with(st, admin, "", words, body, extras)?.into_response()))
 }
 
+/// The answer to a HEAD request on a route whose GET counts a read: the type and headers only,
+/// without reading (and so without counting or burning) the paste.
+pub fn head_only(content_type: &'static str) -> Response {
+    ([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, "no-store")]).into_response()
+}
+
 /// Pages that carry paste content (decrypted private text, burned pages) must not persist in
 /// browser caches or history.
 fn no_store(mut res: Response) -> Response {
@@ -298,6 +313,7 @@ async fn view(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
     ClientIp(ip): ClientIp,
+    method: Method,
     Path(words): Path<String>,
 ) -> Result<Response, Error> {
     let id = paste_id(&words)?;
@@ -310,6 +326,7 @@ async fn view(
             let view = paste_view(&st, admin, &p, None, None);
             render_paste(&st, admin, &view, &id.words())
         }
+        _ if method == Method::HEAD => Ok(head_only(HTML)),
         _ => {
             let opened = paste::read(&st, id, Access::Anonymous, ip, now).await?;
             match &opened.body {
@@ -359,6 +376,7 @@ async fn unlock(
 async fn raw(
     State(st): State<AppState>,
     ClientIp(ip): ClientIp,
+    method: Method,
     Path(words): Path<String>,
     Query(q): Query<GrantQuery>,
     headers: HeaderMap,
@@ -374,10 +392,13 @@ async fn raw(
         }
         _ => Access::Anonymous,
     };
+    if method == Method::HEAD {
+        return Ok(head_only(if p.privacy == Privacy::Secret { OCTETS } else { TEXT }));
+    }
     let opened = paste::read(&st, id, access, ip, now).await?;
     let (content_type, bytes) = match opened.body {
-        Body::Text(t) | Body::Url(t) => ("text/plain; charset=utf-8", t.into_bytes()),
-        Body::Cipher(c) => ("application/octet-stream", c),
+        Body::Text(t) | Body::Url(t) => (TEXT, t.into_bytes()),
+        Body::Cipher(c) => (OCTETS, c),
     };
     let mut res = ([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, "no-store")], bytes).into_response();
     // On the burning read (and after a password unlock) the grant lets the reader fetch the files.
@@ -428,6 +449,7 @@ async fn edit_form(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
     ClientIp(ip): ClientIp,
+    method: Method,
     Path(words): Path<String>,
     Query(q): Query<GrantQuery>,
 ) -> Result<Response, Error> {
@@ -440,6 +462,9 @@ async fn edit_form(
         (Privacy::Private, None) => return Ok(Redirect::to(&format!("/{}", id.words())).into_response()),
         _ => Access::Anonymous,
     };
+    if method == Method::HEAD {
+        return Ok(head_only(HTML));
+    }
     let opened = paste::read(&st, id, access, ip, now).await?;
     let content = match opened.body {
         Body::Text(t) | Body::Url(t) => t,

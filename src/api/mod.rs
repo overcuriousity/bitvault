@@ -8,7 +8,7 @@ use std::sync::Arc;
 use axum::body::Bytes;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{FromRequest, Path, Query, Request, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -33,11 +33,12 @@ use crate::web::{paste_id, paste_urls};
 
 /// A JSON create body: the text may grow sixfold when escaped (a control character becomes
 /// `\u00XX`), plus room for the other fields.
-const JSON_LIMIT: usize = 6 * TEXT_LIMIT + (64 << 10);
+pub const JSON_LIMIT: usize = 6 * TEXT_LIMIT + (64 << 10);
 const PASSWORD_HEADER: &str = "x-paste-password";
 const VERIFIER_HEADER: &str = "x-paste-verifier";
 const UPLOADER_HEADER: &str = "x-uploader-password";
 const GRANT_HEADER: &str = "x-paste-grant";
+const GRANT_EXPIRED: &str = "The download grant has expired or is no longer valid. Read the paste again for a new one.";
 
 #[derive(OpenApi)]
 #[openapi(
@@ -63,21 +64,25 @@ for an edit or delete, editing switched off, or a missing or wrong uploader pass
 )]
 struct Doc;
 
-/// The API's routes, split by route group: creates take large bodies, the rest the usual limits.
+/// The API's routes, split by route group: creates take large bodies, edits a whole paste's
+/// escaped text, the rest the usual limits.
 pub struct Routes {
     pub uploads: Router<AppState>,
+    pub edits: Router<AppState>,
     pub rest: Router<AppState>,
 }
 
 pub fn routes() -> Result<Routes, Error> {
     let (uploads, upload_spec) = OpenApiRouter::new().routes(routes!(create_paste)).split_for_parts();
+    let (edits, edit_spec) = OpenApiRouter::new().routes(routes!(update_paste)).split_for_parts();
     let (rest, mut spec) = OpenApiRouter::with_openapi(Doc::openapi())
         .routes(routes!(list_pastes))
-        .routes(routes!(get_paste, update_paste, delete_paste))
+        .routes(routes!(get_paste, delete_paste))
         .routes(routes!(get_file))
         .routes(routes!(health))
         .split_for_parts();
     spec.merge(upload_spec);
+    spec.merge(edit_spec);
     let json = Bytes::from(spec.to_json().map_err(Error::internal)?);
     let rest = rest.route(
         "/api/v1/openapi.json",
@@ -86,9 +91,12 @@ pub fn routes() -> Result<Routes, Error> {
             async move { ([(header::CONTENT_TYPE, "application/json")], json) }
         }),
     );
+    let api_limiter = Arc::new(RateLimiter::new(120, 30));
     Ok(Routes {
         uploads: uploads.route_layer(ratelimit::layer(Arc::new(RateLimiter::new(30, 10)))),
-        rest: rest.route_layer(ratelimit::layer(Arc::new(RateLimiter::new(120, 30)))),
+        // Edits count against the same per-address budget as every other non-create call.
+        edits: edits.route_layer(ratelimit::layer(api_limiter.clone())),
+        rest: rest.route_layer(ratelimit::layer(api_limiter)),
     })
 }
 
@@ -124,7 +132,7 @@ fn code(e: &Error) -> &'static str {
         Error::PasswordRequired => "PASSWORD_REQUIRED",
         Error::WrongPassword => "WRONG_PASSWORD",
         Error::TooManyAttempts => "TOO_MANY_ATTEMPTS",
-        Error::Forbidden | Error::UploaderPassword => "FORBIDDEN",
+        Error::Forbidden | Error::UploaderPassword | Error::GrantExpired => "FORBIDDEN",
         Error::Invalid(_) => "INVALID",
         Error::TooLarge => "TOO_LARGE",
         Error::UnsupportedFormat => "UNSUPPORTED_FORMAT",
@@ -136,7 +144,11 @@ fn code(e: &Error) -> &'static str {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         self.0.log();
-        let body = ErrorBody { error: ErrorDetail { code: code(&self.0).to_owned(), message: self.0.to_string() } };
+        let message = match self.0 {
+            Error::GrantExpired => GRANT_EXPIRED.to_owned(),
+            ref e => e.to_string(),
+        };
+        let body = ErrorBody { error: ErrorDetail { code: code(&self.0).to_owned(), message } };
         (self.0.status(), Json(body)).into_response()
     }
 }
@@ -558,10 +570,16 @@ fn paste_response(st: &AppState, p: &Paste, encrypted: bool, content: String, gr
 async fn get_paste(
     State(st): State<AppState>,
     ClientIp(ip): ClientIp,
+    method: Method,
     Path(words): Path<String>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let id = paste_id(&words)?;
+    // HEAD must not count a read, or it could burn the paste.
+    if method == Method::HEAD {
+        paste::meta(&st, id, domain::now()).await?;
+        return Ok(crate::web::paste::head_only("application/json"));
+    }
     let opened = paste::read(&st, id, password_access(&headers)?, ip, domain::now()).await?;
     let (encrypted, content) = match opened.body {
         Body::Text(t) | Body::Url(t) => (false, t),

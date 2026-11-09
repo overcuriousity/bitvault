@@ -141,6 +141,8 @@ function bindSecretSubmit(form) {
 if (typeof document !== "undefined") {
   const form = document.getElementById("create-form");
   if (form) {
+    // The page ships Secret disabled, so a browser without this script cannot post plaintext as secret.
+    form.querySelector('#privacy option[value="secret"]')?.removeAttribute("disabled");
     bindPrivacy(form);
     bindDropZone(form);
     bindSecretSubmit(form);

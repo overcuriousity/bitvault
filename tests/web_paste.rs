@@ -566,3 +566,61 @@ async fn the_right_password_on_raw_is_never_limited() {
         assert_eq!(get_with(&app, &format!("/{w}/raw"), "x-paste-password", "right").await.status(), StatusCode::OK);
     }
 }
+
+#[tokio::test]
+async fn head_requests_neither_count_a_read_nor_burn_the_paste() {
+    let app = app_with("[app]\neditable = true\nread_stats = true\n").await;
+    let w = create(&app, NewPaste { burn_after_reads: 1, editable: true, ..new("once", Privacy::Unlisted) }).await;
+    for uri in [format!("/{w}"), format!("/{w}/raw"), format!("/{w}/edit"), format!("/api/v1/pastes/{w}")] {
+        let res = app.send(app.req("HEAD", &uri).body(Body::empty()).unwrap()).await;
+        assert_eq!(res.status(), StatusCode::OK, "{uri}");
+        assert!(bytes_of(res).await.is_empty(), "{uri}");
+    }
+    assert_eq!(read_count(&app, &w).await, 0);
+    let s = create(&app, secret(1)).await;
+    let res = app.send(app.req("HEAD", &format!("/{s}/raw")).body(Body::empty()).unwrap()).await;
+    assert_eq!(res.headers()[header::CONTENT_TYPE], "application/octet-stream");
+    assert_eq!(read_count(&app, &s).await, 0);
+    assert_eq!(body_text(app.get(&format!("/{w}/raw")).await).await, "once");
+    assert_eq!(app.get(&format!("/{w}/raw")).await.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn an_expired_grant_link_leads_back_to_the_paste() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let w = create_with_file(
+        &app,
+        NewPaste { editable: true, ..with_password("x", Privacy::Private, "pw") },
+        "a.txt",
+        b"a",
+    )
+    .await;
+    for uri in
+        [format!("/{w}/raw?g=old"), format!("/{w}/file/1?g=old"), format!("/{w}/zip?g=old"), format!("/{w}/edit?g=old")]
+    {
+        let res = app.get(&uri).await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN, "{uri}");
+        let html = body_text(res).await;
+        assert!(html.contains("This link has expired. Open the paste again."), "{uri}: {html}");
+        assert!(html.contains(&format!("href=\"/{w}\"")), "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn an_edit_of_almost_a_mebibyte_of_text_is_saved_and_a_larger_one_refused() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let w = create(&app, NewPaste { editable: true, ..new("small", Privacy::Public) }).await;
+    // Every é is two bytes of text and six once form-encoded, so the body is about 3 MiB.
+    let text = "é".repeat((1 << 19) - 8);
+    let encoded: String = url::form_urlencoded::byte_serialize(text.as_bytes()).collect();
+    assert!(encoded.len() > 3 * ((1 << 20) - 64));
+    let res = app.post_form(&format!("/{w}/edit"), &format!("content={encoded}&syntax=plain")).await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER, "{}", body_text(res).await);
+    assert_eq!(body_text(app.get(&format!("/{w}/raw")).await).await, text);
+    let over: String = url::form_urlencoded::byte_serialize("é".repeat((1 << 19) + 1).as_bytes()).collect();
+    let res = app.post_form(&format!("/{w}/edit"), &format!("content={over}&syntax=plain")).await;
+    assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    // Every other form keeps the 1 MiB limit.
+    let res = app.post_form(&format!("/{w}/delete"), &format!("password={}", "x".repeat(1 << 20))).await;
+    assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}

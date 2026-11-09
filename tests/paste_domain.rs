@@ -158,8 +158,8 @@ async fn an_unlock_returns_a_grant_that_opens_the_paste_again() {
     let again = read(&app.st, id, Access::Grant(grant.clone())).await.unwrap();
     assert_eq!(text(&again.body), "granted");
     let other = create(&app.st, with_password("other", Privacy::Private, "pw")).await;
-    assert!(matches!(read(&app.st, other, Access::Grant(grant)).await, Err(Error::Forbidden)));
-    assert!(matches!(read(&app.st, id, Access::Grant("garbage".into())).await, Err(Error::Forbidden)));
+    assert!(matches!(read(&app.st, other, Access::Grant(grant)).await, Err(Error::GrantExpired)));
+    assert!(matches!(read(&app.st, id, Access::Grant("garbage".into())).await, Err(Error::GrantExpired)));
 }
 
 #[tokio::test]
@@ -670,4 +670,20 @@ async fn a_paste_debug_print_hides_its_content_and_secrets() {
     let printed = format!("{:?}", paste::meta(&app.st, id, NOW).await.unwrap());
     assert!(!printed.contains("very secret words"));
     assert!(!printed.contains("argon2id"));
+}
+
+#[tokio::test]
+async fn an_expiry_that_is_not_offered_says_so_even_when_the_maximum_is_never() {
+    let app = support::app_with(
+        "[app]\nexpiry_choices = [\"1hour\", \"never\"]\nmax_expiry = \"never\"\ndefault_expiry = \"1hour\"\n",
+    )
+    .await;
+    let res = paste::create(&app.st, NewPaste { expiry: Expiry::Year1, ..new("x", Privacy::Public) }, None, NOW).await;
+    let Err(Error::Invalid(msg)) = res else { panic!("{res:?}") };
+    assert_eq!(msg, "That expiry is not offered here. Choose one from the list.");
+    let capped = support::app_with("[app]\nexpiry_choices = [\"1hour\", \"1week\", \"never\"]\nmax_expiry = \"1week\"\ndefault_expiry = \"1hour\"\n").await;
+    let res =
+        paste::create(&capped.st, NewPaste { expiry: Expiry::Never, ..new("x", Privacy::Public) }, None, NOW).await;
+    let Err(Error::Invalid(msg)) = res else { panic!("{res:?}") };
+    assert_eq!(msg, "Choose an expiry of 1 week or less.");
 }

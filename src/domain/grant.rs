@@ -69,25 +69,28 @@ pub fn issue(key: &GrantKey, paste: PasteId, dek: Option<&Dek>, now: i64) -> Str
 }
 
 /// Checks a grant for `paste` at `now` and returns the data key it carries, if any.
-/// Anything malformed, tampered, expired or for another paste is `Forbidden`.
+/// Anything malformed, tampered, expired, voided by a restart or for another paste is
+/// [`Error::GrantExpired`].
 pub fn check(key: &GrantKey, token: &str, paste: PasteId, now: i64) -> Result<Option<Dek>, Error> {
     if token.len() > MAX_TOKEN_LEN {
-        return Err(Error::Forbidden);
+        return Err(Error::GrantExpired);
     }
-    let raw = URL_SAFE_NO_PAD.decode(token).map_err(|_| Error::Forbidden)?;
-    let (nonce, sealed) = raw.split_first_chunk::<NONCE_LEN>().ok_or(Error::Forbidden)?;
+    let raw = URL_SAFE_NO_PAD.decode(token).map_err(|_| Error::GrantExpired)?;
+    let (nonce, sealed) = raw.split_first_chunk::<NONCE_LEN>().ok_or(Error::GrantExpired)?;
     let payload = Zeroizing::new(
-        key.cipher().decrypt(&XNonce::from(*nonce), Payload { msg: sealed, aad: AAD }).map_err(|_| Error::Forbidden)?,
+        key.cipher()
+            .decrypt(&XNonce::from(*nonce), Payload { msg: sealed, aad: AAD })
+            .map_err(|_| Error::GrantExpired)?,
     );
-    let (id, rest) = payload.split_first_chunk::<8>().ok_or(Error::Forbidden)?;
-    let (expires_at, rest) = rest.split_first_chunk::<8>().ok_or(Error::Forbidden)?;
+    let (id, rest) = payload.split_first_chunk::<8>().ok_or(Error::GrantExpired)?;
+    let (expires_at, rest) = rest.split_first_chunk::<8>().ok_or(Error::GrantExpired)?;
     let dek = match rest.split_first() {
         Some((0, [])) => None,
-        Some((1, bytes)) => Some(Dek::from_slice(bytes).ok_or(Error::Forbidden)?),
-        _ => return Err(Error::Forbidden),
+        Some((1, bytes)) => Some(Dek::from_slice(bytes).ok_or(Error::GrantExpired)?),
+        _ => return Err(Error::GrantExpired),
     };
     if u64::from_be_bytes(*id) != paste.0 || now > i64::from_be_bytes(*expires_at) {
-        return Err(Error::Forbidden);
+        return Err(Error::GrantExpired);
     }
     Ok(dek)
 }

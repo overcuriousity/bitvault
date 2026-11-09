@@ -53,6 +53,15 @@ async fn the_uploader_password_matches_in_either_unicode_form() {
 }
 
 #[tokio::test]
+async fn the_secret_choice_is_disabled_until_create_js_enables_it() {
+    let html = body_text(app().await.get("/").await).await;
+    assert!(html.contains("<option value=\"secret\" disabled>Secret</option>"), "{html}");
+    assert!(html.contains("<option value=\"unlisted\" selected>Unlisted</option>"));
+    let script = String::from_utf8(bitvault::assets::Assets::get("js/create.js").unwrap().data.to_vec()).unwrap();
+    assert!(script.contains("option[value=\"secret\"]')?.removeAttribute(\"disabled\")"));
+}
+
+#[tokio::test]
 async fn the_password_field_never_has_a_name_for_secret_submissions() {
     let html = body_text(app().await.get("/").await).await;
     let at = html.find("id=\"secret-password\"").expect("secret password input");
