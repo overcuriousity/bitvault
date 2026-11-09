@@ -197,7 +197,9 @@ function bind(view) {
       labelFiles();
       preview();
     } catch (err) {
-      showNotice(region, "danger", failureMessage(err));
+      // After a burning read the paste is gone on the server; only this page still holds it.
+      const retry = state.grant && err?.name === "WrongPassword" ? " Do not reload this page; try the password again." : "";
+      showNotice(region, "danger", failureMessage(err) + retry);
       input?.select();
     } finally {
       setBusy(form, false);

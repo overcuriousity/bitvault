@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 import { CHUNK_LEN, HEADER_LEN, ITERATIONS, open, seal, verifier } from "./crypto.js";
 
@@ -75,6 +75,14 @@ test("reordered and truncated chunks fail", async () => {
   await rejectsAs(open(PASSWORD, extended), "WrongPassword");
 });
 
+test("a final piece shorter than a tag is refused, not a crash", async () => {
+  const sealed = await seal(PASSWORD, pattern(CHUNK_LEN + 100));
+  for (const tail of [1, 5, TAG_LEN - 1]) {
+    const cut = sealed.subarray(0, HEADER_LEN + CT_CHUNK_LEN + tail);
+    await rejectsAs(open(PASSWORD, cut), "WrongPassword");
+  }
+});
+
 test("the header records 600000 iterations", async () => {
   const sealed = await seal(PASSWORD, pattern(10));
   assert.deepEqual([...sealed.subarray(0, 6)], [0x42, 0x56, 0x43, 0x01, 0x02, 0x02]);
@@ -115,7 +123,21 @@ test("containers sealed in Rust open in JavaScript", async () => {
   assert.equal(hex(await verifier(fixture.password, salt)), fixture.verifier_hex);
 });
 
-test("writes interop fixtures", async () => {
+const JS_FIXTURE = new URL("../../tests/fixtures/js/alg2.json", import.meta.url);
+
+test("the committed JavaScript fixture still opens", async () => {
+  const fixture = JSON.parse(readFileSync(JS_FIXTURE));
+  assert.equal(b64(await open(fixture.password, Buffer.from(fixture.container_b64, "base64"))), fixture.plain_b64);
+  assert.ok(fixture.cases.length >= 3);
+  for (const c of fixture.cases) {
+    assert.equal(b64(await open(fixture.password, Buffer.from(c.container_b64, "base64"))), c.plain_b64);
+  }
+  const salt = Buffer.from(fixture.verifier_salt_hex, "hex");
+  assert.equal(hex(await verifier(fixture.password, salt)), fixture.verifier_hex);
+});
+
+// Like the Rust fixture, written only when missing or on request, so test runs leave the tree clean.
+test("writes interop fixtures", { skip: existsSync(JS_FIXTURE) && process.env.BITVAULT_WRITE_FIXTURES !== "1" }, async () => {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const plain = new TextEncoder().encode(JSON.stringify({ text: "héllo from the browser ✓", files: ["a.png"] }));
   const cases = [];
@@ -132,5 +154,5 @@ test("writes interop fixtures", async () => {
   };
   const dir = new URL("../../tests/fixtures/js/", import.meta.url);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(new URL("alg2.json", dir), `${JSON.stringify(fixture, null, 2)}\n`);
+  writeFileSync(JS_FIXTURE, `${JSON.stringify(fixture, null, 2)}\n`);
 });

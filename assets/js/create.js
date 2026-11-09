@@ -96,12 +96,14 @@ async function secretBody(form, password, files) {
 
 function bindSecretSubmit(form) {
   const region = form.querySelector("#create-notice");
+  const privacySelect = form.querySelector("#privacy");
   const passwordInput = form.querySelector("#secret-password");
   const fileInput = form.querySelector("#files");
   const maxMb = Number(form.dataset.maxSecretMb) || 256;
   let running = false;
   form.addEventListener("submit", async (e) => {
-    if (form.dataset.privacy !== "secret") return;
+    // The live select decides, not the mirrored attribute, which could lag behind it.
+    if (privacySelect?.value !== "secret") return;
     e.preventDefault();
     if (running) return;
     const password = passwordInput?.value ?? "";

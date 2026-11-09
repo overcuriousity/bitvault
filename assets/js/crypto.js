@@ -111,6 +111,9 @@ export async function open(password, container) {
   const { header, iterations, salt, prefix } = parseHeader(bytes);
   const { aesKey } = await deriveKeys(password, salt, iterations);
   const body = bytes.subarray(HEADER_LEN);
+  // A final piece shorter than a tag cannot authenticate; Rust's open fails it on the tag too.
+  const tail = body.length % CT_CHUNK_LEN;
+  if (tail > 0 && tail < TAG_LEN) throw wrongPassword();
   const chunks = Math.max(1, Math.ceil(body.length / CT_CHUNK_LEN));
   const out = new Uint8Array(body.length - chunks * TAG_LEN);
   let at = 0;
