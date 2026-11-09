@@ -24,18 +24,23 @@ pub async fn app() -> App {
 
 /// Builds the app from a TOML config on a fresh data directory.
 pub async fn app_with(toml: &str) -> App {
+    app_with_routes(toml, Router::new()).await
+}
+
+/// Like [`app_with`], with test-only routes registered next to the app's own.
+pub async fn app_with_routes(toml: &str, extra: Router<AppState>) -> App {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("config.toml");
     std::fs::write(&file, toml).unwrap();
     let mut cfg = bitvault::config::load(Some(&file)).unwrap();
     cfg.data_dir = Some(dir.path().join("data"));
     cfg.validate().unwrap();
-    app_from(cfg, dir).await
+    app_from(cfg, dir, extra).await
 }
 
-async fn app_from(cfg: Config, dir: tempfile::TempDir) -> App {
+async fn app_from(cfg: Config, dir: tempfile::TempDir, extra: Router<AppState>) -> App {
     let pool = bitvault::db::open(&cfg.data_dir()).await.unwrap();
-    let (router, st) = bitvault::app::build(cfg, pool).unwrap();
+    let (router, st) = bitvault::app::build_with(cfg, pool, extra).unwrap();
     let router = router.layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 5000))));
     App { router, st, _dir: dir }
 }

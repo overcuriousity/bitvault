@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 
 use crate::config::Config;
 use crate::deployment::Deployment;
+use crate::ratelimit::RateLimiter;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -12,4 +13,6 @@ pub struct AppState {
     pub cfg: Arc<Config>,
     pub dep: Arc<Deployment>,
     pub files_dir: PathBuf,
+    /// Failed password and verifier attempts, 10 per minute with a burst of 5.
+    pub failures: Arc<RateLimiter>,
 }
