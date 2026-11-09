@@ -1,10 +1,9 @@
-# Security Policy
+# Security
 
-## Version Support
+Report vulnerabilities privately through GitHub: **Security → Report a vulnerability** on this repository. Do not open public issues for security problems.
 
-We don´t offer centralized support. The Project is published under GPL-3 and thus should be maintained by the FOSS community.
-There is no guarantee of continued maintenance by overcuriousity or the original developer.
+Supported: the latest release.
 
-## Reporting a Vulnerability
+BitVault is maintained by volunteers under the GPL-3.0-only licence, with no guarantee of response times.
 
-We strongly recommend to immediately disclose any vulnerabilities via GitHub issue, or better, make contributions to fix them.
+Secret pastes are encrypted in the browser: the server never sees the password or the key, and a lost password cannot be recovered. Private pastes are encrypted on the server with a key derived from the paste password.

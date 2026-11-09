@@ -1,0 +1,47 @@
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+# Every ignore needs a written reachability argument next to it.
+ignore = [
+  { id = "RUSTSEC-2026-0459", reason = "libsqlite3-sys 0.30 (via sqlx 0.8) bundles an SQLite older than 3.54. The flaw needs a process to open a database file together with a crafted -wal file written by someone else. bitvault only opens the database it creates itself in its own data directory (mode 0700 under the service's dynamic user) and never opens a user-supplied database. Remove this ignore when sqlx moves to libsqlite3-sys 0.39 or later." },
+  { id = "RUSTSEC-2024-0320", reason = "yaml-rust is pulled in by syntect only to read .sublime-syntax YAML when building syntax dumps. bitvault loads the dump bundled with syntect and never parses YAML at runtime; it is an unmaintained notice, not a vulnerability." },
+  { id = "RUSTSEC-2025-0141", reason = "bincode 1.x is used by syntect only to deserialise its own bundled syntax and theme dumps, which are compiled in and trusted. bitvault never feeds it untrusted bytes." },
+  { id = "RUSTSEC-2026-0374", reason = "basic-toml is used by askama_derive at compile time to read askama.toml; it never parses untrusted input at runtime." },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# bitvault is GPL-3.0-only itself; no dependency may be.
+exceptions = [{ allow = ["GPL-3.0-only"], crate = "bitvault" }]
+unused-allowed-license = "allow"
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "0BSD",
+  "CC0-1.0",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "MPL-2.0",
+  "OFL-1.1",
+  "CDLA-Permissive-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

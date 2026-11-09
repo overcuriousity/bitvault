@@ -1,0 +1,30 @@
+# Every key is optional. Environment variables override this file as BITVAULT__SECTION__KEY,
+# for example BITVAULT__BIND=127.0.0.1:9000 or BITVAULT__APP__LISTING=false.
+# A key ending in _FILE reads the value from a file: BITVAULT__APP__ADMIN_PASSWORD_FILE=/run/credentials/bitvault.service/admin-password
+
+# The https address users see. Required when bind is not a loopback address.
+# public_url = "https://vault.example.org"
+
+bind = "127.0.0.1:8080"
+trusted_proxies = ["127.0.0.1/32", "::1/128"] # X-Forwarded-For and -Proto are trusted only from these
+# data_dir = "/var/lib/bitvault"              # default: $STATE_DIRECTORY, then $XDG_DATA_HOME/bitvault, then ~/.local/share/bitvault
+
+[app]
+title = "BitVault"
+# short_url = "https://short.example.org"     # https URL of a second host that serves the same pastes
+# admin_password = "change-me"                # unset means no admin page at all; prefer the _FILE variant
+# uploader_password = "change-me"             # unset means anyone can create; API clients send X-Uploader-Password
+listing = true                                # show the public list at /list
+editable = false                              # default for the "allow edits" choice on new pastes
+read_stats = false                            # show read counts on paste pages
+highlight = true                              # syntax highlighting for public, unlisted and read-only pastes
+qr = true                                     # QR code on paste pages (needs a public_url)
+# translate_url = "https://translate.example.org" # adds a Translate link on text paste pages: translate_url?from=<url-encoded raw URL of the paste>
+privacy_levels = ["public", "unlisted", "readonly", "private", "secret"]
+default_privacy = "unlisted"                  # must be one of privacy_levels
+expiry_choices = ["1min", "10min", "1hour", "24hour", "3days", "1week", "1month", "6months", "1year", "never"]
+default_expiry = "24hour"                     # must be one of expiry_choices
+max_expiry = "1week"                          # longest choice users may pick; "never" only if it is also in expiry_choices
+default_burn_after = 0                        # delete after this many reads; 0 turns it off
+max_file_mb = 2048                            # per request, all files together; raise nginx client_max_body_size too
+max_secret_file_mb = 256                      # per file in a Secret paste
