@@ -20,6 +20,7 @@ figment = { version = "0.10", features = ["toml", "env"] }
 hex = "0.4"
 ipnet = { version = "2", features = ["serde"] }
 mime_guess = "2"
+rand = "0.10.3"
 rust-embed = { version = "8", features = ["debug-embed", "include-exclude"] }
 sd-notify = "0.4"
 serde = { version = "1", features = ["derive"] }
