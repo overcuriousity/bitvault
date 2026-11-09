@@ -32,7 +32,7 @@ async fn run(cli: Cli) -> Result<(), bitvault::error::Error> {
     cfg.validate()?;
     let bind = cfg.bind;
     let pool = db::open(&cfg.data_dir()).await?;
-    let (router, st) = app::build(cfg, pool)?;
+    let (router, st) = app::build(cfg, pool).await?;
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .map_err(|e| bitvault::error::Error::Invalid(format!("Cannot listen on {bind}: {e}.")))?;

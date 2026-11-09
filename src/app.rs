@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 
 use crate::config::Config;
 use crate::deployment::Deployment;
+use crate::domain::files;
 use crate::domain::grant::GrantKey;
 use crate::error::Error;
 use crate::ratelimit::RateLimiter;
@@ -14,12 +15,13 @@ use crate::security;
 use crate::state::AppState;
 use crate::{assets, web};
 
-pub fn build(cfg: Config, pool: SqlitePool) -> Result<(Router, AppState), Error> {
-    build_with(cfg, pool, Router::new())
+pub async fn build(cfg: Config, pool: SqlitePool) -> Result<(Router, AppState), Error> {
+    build_with(cfg, pool, Router::new()).await
 }
 
 /// Builds the router and state; `extra` holds routes a caller (or test) adds next to the app's own.
-pub fn build_with(cfg: Config, pool: SqlitePool, extra: Router<AppState>) -> Result<(Router, AppState), Error> {
+/// File directories without a paste are removed first, before anything is served.
+pub async fn build_with(cfg: Config, pool: SqlitePool, extra: Router<AppState>) -> Result<(Router, AppState), Error> {
     cfg.validate()?;
     let dep = Deployment::from_config(&cfg)?;
     let files_dir = cfg.data_dir().join("files");
@@ -32,9 +34,15 @@ pub fn build_with(cfg: Config, pool: SqlitePool, extra: Router<AppState>) -> Res
         failures: Arc::new(RateLimiter::new(10, 5)),
         grant_key: Arc::new(GrantKey::random()),
     };
-    // Uploads get their own group (filled in by the paste routes) so only they may be large and slow.
+    files::remove_orphans(&st).await?;
+    // Uploads get their own group so only they may be large and slow. The limits wrap the routes
+    // themselves: a router merged in after `limited` would not get them.
+    let uploads = Router::new()
+        .merge(web::home::upload_routes())
+        .layer(from_fn_with_state(st.clone(), web::errors::render))
+        .with_state(st.clone());
     let uploads = security::limited(
-        Router::new(),
+        uploads,
         usize::try_from(st.cfg.app.max_file_mb.saturating_add(1).saturating_mul(1 << 20)).unwrap_or(usize::MAX),
         Duration::from_secs(3600),
     );

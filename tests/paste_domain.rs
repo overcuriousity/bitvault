@@ -35,7 +35,7 @@ fn with_password(content: &str, privacy: Privacy, password: &str) -> NewPaste {
 }
 
 async fn create(st: &AppState, p: NewPaste) -> PasteId {
-    paste::create(st, p, NOW).await.unwrap()
+    paste::create(st, p, None, NOW).await.unwrap()
 }
 
 async fn read(st: &AppState, id: PasteId, access: Access) -> Result<paste::Opened, Error> {
@@ -92,7 +92,7 @@ async fn unlisted_pastes_are_not_listed() {
 async fn the_public_list_is_newest_first_in_pages_of_fifty() {
     let app = support::app().await;
     for i in 0..51 {
-        paste::create(&app.st, new(&format!("paste {i}"), Privacy::Public), NOW + i).await.unwrap();
+        paste::create(&app.st, new(&format!("paste {i}"), Privacy::Public), None, NOW + i).await.unwrap();
     }
     let first = paste::list_public(&app.st, 1, NOW + 100).await.unwrap();
     let second = paste::list_public(&app.st, 2, NOW + 100).await.unwrap();
@@ -267,7 +267,7 @@ async fn a_secret_paste_stores_only_a_hash_of_its_verifier() {
 async fn secret_pastes_with_weak_parameters_are_refused() {
     let app = support::app().await;
     let weak = secret_paste(PBKDF2_ITERATIONS - 1);
-    assert!(matches!(paste::create(&app.st, weak, NOW).await, Err(Error::UnsupportedFormat)));
+    assert!(matches!(paste::create(&app.st, weak, None, NOW).await, Err(Error::UnsupportedFormat)));
     let server_container = NewPaste {
         secret: Some(SecretParts {
             container: crypto::seal(&crypto::Dek::random(), b"x"),
@@ -276,7 +276,7 @@ async fn secret_pastes_with_weak_parameters_are_refused() {
         }),
         ..new("", Privacy::Secret)
     };
-    assert!(matches!(paste::create(&app.st, server_container, NOW).await, Err(Error::UnsupportedFormat)));
+    assert!(matches!(paste::create(&app.st, server_container, None, NOW).await, Err(Error::UnsupportedFormat)));
     assert_eq!(row_count(&app.st).await, 0);
 }
 
@@ -399,12 +399,12 @@ async fn purge_keeps_live_pastes() {
 #[tokio::test]
 async fn expiry_beyond_the_maximum_is_refused() {
     let app = support::app().await;
-    let res = paste::create(&app.st, NewPaste { expiry: Expiry::Month1, ..new("x", Privacy::Public) }, NOW).await;
+    let res = paste::create(&app.st, NewPaste { expiry: Expiry::Month1, ..new("x", Privacy::Public) }, None, NOW).await;
     match res {
         Err(Error::Invalid(msg)) => assert!(msg.contains("1 week"), "{msg}"),
         other => panic!("expected Invalid, got {other:?}"),
     }
-    let res = paste::create(&app.st, NewPaste { expiry: Expiry::Never, ..new("x", Privacy::Public) }, NOW).await;
+    let res = paste::create(&app.st, NewPaste { expiry: Expiry::Never, ..new("x", Privacy::Public) }, None, NOW).await;
     assert!(matches!(res, Err(Error::Invalid(_))));
 }
 
@@ -422,9 +422,10 @@ async fn expiry_and_privacy_outside_the_offered_choices_are_refused() {
          privacy_levels = [\"public\"]\ndefault_privacy = \"public\"\n",
     )
     .await;
-    let res = paste::create(&app.st, NewPaste { expiry: Expiry::Min1, ..new("x", Privacy::Public) }, NOW).await;
+    let res = paste::create(&app.st, NewPaste { expiry: Expiry::Min1, ..new("x", Privacy::Public) }, None, NOW).await;
     assert!(matches!(res, Err(Error::Invalid(_))));
-    let res = paste::create(&app.st, NewPaste { expiry: Expiry::Hour1, ..new("x", Privacy::Unlisted) }, NOW).await;
+    let res =
+        paste::create(&app.st, NewPaste { expiry: Expiry::Hour1, ..new("x", Privacy::Unlisted) }, None, NOW).await;
     assert!(matches!(res, Err(Error::Invalid(_))));
     create(&app.st, NewPaste { expiry: Expiry::Hour1, ..new("x", Privacy::Public) }).await;
 }
@@ -433,12 +434,12 @@ async fn expiry_and_privacy_outside_the_offered_choices_are_refused() {
 async fn password_levels_need_a_password_and_secret_needs_its_container() {
     let app = support::app().await;
     for privacy in [Privacy::Readonly, Privacy::Private] {
-        assert!(matches!(paste::create(&app.st, new("x", privacy), NOW).await, Err(Error::Invalid(_))));
+        assert!(matches!(paste::create(&app.st, new("x", privacy), None, NOW).await, Err(Error::Invalid(_))));
         let empty = with_password("x", privacy, "");
-        assert!(matches!(paste::create(&app.st, empty, NOW).await, Err(Error::Invalid(_))));
+        assert!(matches!(paste::create(&app.st, empty, None, NOW).await, Err(Error::Invalid(_))));
     }
-    assert!(matches!(paste::create(&app.st, new("x", Privacy::Secret), NOW).await, Err(Error::Invalid(_))));
-    assert!(matches!(paste::create(&app.st, new("  \n", Privacy::Public), NOW).await, Err(Error::Invalid(_))));
+    assert!(matches!(paste::create(&app.st, new("x", Privacy::Secret), None, NOW).await, Err(Error::Invalid(_))));
+    assert!(matches!(paste::create(&app.st, new("  \n", Privacy::Public), None, NOW).await, Err(Error::Invalid(_))));
 }
 
 #[test]
@@ -533,7 +534,7 @@ async fn eight_collisions_exhaust_the_id_space() {
     let app = support::app().await;
     let taken = create(&app.st, new("first", Privacy::Public)).await;
     paste::set_id_source(vec![taken.0; 8]);
-    let res = paste::create(&app.st, new("second", Privacy::Public), NOW).await;
+    let res = paste::create(&app.st, new("second", Privacy::Public), None, NOW).await;
     assert!(matches!(res, Err(Error::IdSpaceExhausted)));
 }
 

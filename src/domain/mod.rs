@@ -1,5 +1,6 @@
 pub mod crypto;
 pub mod expiry;
+pub mod files;
 pub mod grant;
 pub mod highlight;
 pub mod paste;

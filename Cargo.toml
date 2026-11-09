@@ -16,17 +16,21 @@ publish = false
 aes-gcm = { version = "0.11", optional = true, features = ["zeroize"] }
 argon2 = { version = "0.6", features = ["zeroize"] }
 askama = "0.16"
+async_zip = { version = "0.0.19", default-features = false, features = ["tokio"] }
 axum = { version = "0.8", features = ["multipart"] }
 base64 = "0.22"
+bytes = "1"
 chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 clap = { version = "4", features = ["derive"] }
 figment = { version = "0.10", features = ["toml", "env"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hex = "0.4"
 hmac = { version = "0.13", features = ["zeroize"] }
 ipnet = { version = "2", features = ["serde"] }
 mime_guess = "2"
 pbkdf2 = { version = "0.13", optional = true, default-features = false, features = ["hmac"] }
 rand = "0.10.3"
+sanitize-filename = "0.6"
 rust-embed = { version = "8", features = ["debug-embed", "include-exclude"] }
 sd-notify = "0.4"
 serde = { version = "1", features = ["derive"] }
@@ -35,6 +39,7 @@ subtle = "2.6"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io", "compat"] }
 tower-http = { version = "0.6", features = ["limit", "timeout", "compression-gzip", "compression-br", "trace", "sensitive-headers"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

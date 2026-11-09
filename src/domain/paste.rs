@@ -6,12 +6,12 @@
 
 use std::fmt;
 use std::net::IpAddr;
-use std::path::PathBuf;
 
 use linkify::{LinkFinder, LinkKind};
 
 use crate::domain::crypto::{self, Dek, KdfParams, SALT_LEN};
 use crate::domain::expiry::{self, Expiry};
+use crate::domain::files::{self, FileMeta, PLACEHOLDER_MIME, Staging};
 use crate::domain::grant;
 use crate::domain::words::PasteId;
 use crate::domain::{Kind, Privacy};
@@ -101,6 +101,8 @@ pub struct Paste {
     pub burned_at: Option<i64>,
     pub created_at: i64,
     pub expires_at: Option<i64>,
+    /// Attachments in position order.
+    pub files: Vec<FileMeta>,
 }
 
 impl fmt::Debug for Paste {
@@ -122,6 +124,7 @@ impl fmt::Debug for Paste {
             .field("burned_at", &self.burned_at)
             .field("created_at", &self.created_at)
             .field("expires_at", &self.expires_at)
+            .field("files", &self.files.len())
             .finish()
     }
 }
@@ -207,6 +210,7 @@ impl TryFrom<Row> for Paste {
             burned_at: r.burned_at,
             created_at: r.created_at,
             expires_at: r.expires_at,
+            files: Vec::new(),
         })
     }
 }
@@ -249,9 +253,11 @@ fn whole_url(content: &str) -> Option<&str> {
     (whole && web).then_some(trimmed)
 }
 
-/// Kind and stored bytes for plaintext content at `privacy`.
-fn plain_content(privacy: Privacy, content: String) -> (Kind, Vec<u8>) {
+/// Kind and stored bytes for plaintext content at `privacy`. A paste with files stays text, so
+/// its files are never hidden behind a redirect.
+fn plain_content(privacy: Privacy, content: String, has_files: bool) -> (Kind, Vec<u8>) {
     if matches!(privacy, Privacy::Public | Privacy::Unlisted)
+        && !has_files
         && let Some(url) = whole_url(&content)
     {
         return (Kind::Url, url.as_bytes().to_vec());
@@ -259,8 +265,9 @@ fn plain_content(privacy: Privacy, content: String) -> (Kind, Vec<u8>) {
     (Kind::Text, content.into_bytes())
 }
 
-fn require_content(content: &str) -> Result<(), Error> {
-    if content.trim().is_empty() {
+/// Text is optional only when the paste carries files.
+fn require_content(content: &str, has_files: bool) -> Result<(), Error> {
+    if content.trim().is_empty() && !has_files {
         return Err(Error::Invalid("Enter some text to paste.".into()));
     }
     Ok(())
@@ -284,26 +291,34 @@ struct Stored {
     verifier_hash: Option<Vec<u8>>,
 }
 
-async fn prepare(new: NewPaste) -> Result<Stored, Error> {
+/// `dek` is the staging's data key when files were encrypted for this paste.
+async fn prepare(new: NewPaste, has_files: bool, dek: Option<&Dek>) -> Result<Stored, Error> {
     let none = |kind, content| Stored { kind, content, password_hash: None, wrapped_key: None, verifier_hash: None };
     match new.privacy {
         Privacy::Public | Privacy::Unlisted => {
-            require_content(&new.content)?;
-            let (kind, content) = plain_content(new.privacy, new.content);
+            require_content(&new.content, has_files)?;
+            let (kind, content) = plain_content(new.privacy, new.content, has_files);
             Ok(none(kind, content))
         }
         Privacy::Readonly => {
-            require_content(&new.content)?;
+            require_content(&new.content, has_files)?;
             let pw = require_password(new.privacy, new.password.as_deref())?;
             let hash = crypto::hash_password(pw).await?;
             Ok(Stored { password_hash: Some(hash), ..none(Kind::Text, new.content.into_bytes()) })
         }
         Privacy::Private => {
-            require_content(&new.content)?;
+            require_content(&new.content, has_files)?;
             let pw = require_password(new.privacy, new.password.as_deref())?;
-            let dek = Dek::random();
-            let sealed = crypto::seal(&dek, new.content.as_bytes());
-            let wrapped = crypto::wrap_dek(pw, &dek, KdfParams::DEFAULT).await?;
+            let fresh;
+            let dek = match dek {
+                Some(dek) => dek,
+                None => {
+                    fresh = Dek::random();
+                    &fresh
+                }
+            };
+            let sealed = crypto::seal(dek, new.content.as_bytes());
+            let wrapped = crypto::wrap_dek(pw, dek, KdfParams::DEFAULT).await?;
             Ok(Stored { wrapped_key: Some(wrapped), ..none(Kind::Text, sealed) })
         }
         Privacy::Secret => {
@@ -320,8 +335,26 @@ async fn prepare(new: NewPaste) -> Result<Stored, Error> {
     }
 }
 
-/// Stores a new paste under a fresh random ID, retrying on collisions.
-pub async fn create(st: &AppState, new: NewPaste, now: i64) -> Result<PasteId, Error> {
+/// The staged files must have been written the way this paste's level stores them.
+fn check_staging(privacy: Privacy, staging: &Staging) -> Result<(), Error> {
+    if staging.files().is_empty() {
+        return Ok(());
+    }
+    if staging.dek().is_some() != (privacy == Privacy::Private) {
+        return Err(Error::internal("the staged files are not encrypted the way this privacy level needs"));
+    }
+    let placeholders =
+        staging.files().iter().all(|f| f.name == format!("file-{}", f.position) && f.mime == PLACEHOLDER_MIME);
+    if privacy == Privacy::Secret && !placeholders {
+        return Err(Error::internal("a secret paste's files must carry placeholder names"));
+    }
+    Ok(())
+}
+
+/// Stores a new paste under a fresh random ID, retrying on collisions. Staged files are moved
+/// into `files/<id>/` in the same transaction that inserts the row and its `paste_files`, so a
+/// failure anywhere leaves neither the row nor the files.
+pub async fn create(st: &AppState, new: NewPaste, staging: Option<Staging>, now: i64) -> Result<PasteId, Error> {
     let cfg = &st.cfg.app;
     if !cfg.privacy_levels.iter().any(|l| l == new.privacy.as_str()) {
         return Err(Error::Invalid("That privacy level is not offered here. Choose another one.".into()));
@@ -340,11 +373,16 @@ pub async fn create(st: &AppState, new: NewPaste, now: i64) -> Result<PasteId, E
     let editable = new.editable && privacy != Privacy::Secret;
     let burn = i64::from(new.burn_after_reads);
     let expires_at = new.expiry.seconds().map(|s| now.saturating_add(s));
-    let s = prepare(new).await?;
+    let mut staging = staging.filter(|s| !s.files().is_empty());
+    if let Some(staging) = &staging {
+        check_staging(privacy, staging)?;
+    }
+    let s = prepare(new, staging.is_some(), staging.as_ref().and_then(Staging::dek)).await?;
     let (kind, privacy) = (s.kind.as_str(), privacy.as_str());
     for _ in 0..INSERT_ATTEMPTS {
         let id = next_id();
         let db = db_id(id);
+        let mut tx = st.pool.begin().await?;
         let inserted = sqlx::query!(
             "INSERT INTO pastes (id, kind, privacy, content, syntax, editable, password_hash, wrapped_key,
                                  verifier_hash, burn_after_reads, created_at, expires_at)
@@ -363,11 +401,39 @@ pub async fn create(st: &AppState, new: NewPaste, now: i64) -> Result<PasteId, E
             now,
             expires_at,
         )
-        .execute(&st.pool)
+        .execute(&mut *tx)
         .await?;
-        if inserted.rows_affected() == 1 {
-            return Ok(id);
+        if inserted.rows_affected() == 0 {
+            continue;
         }
+        let Some(staging) = staging.as_mut() else {
+            tx.commit().await?;
+            return Ok(id);
+        };
+        for f in staging.files() {
+            let (position, size) = (i64::from(f.position), i64::try_from(f.size).map_err(|_| Error::TooLarge)?);
+            sqlx::query!(
+                "INSERT INTO paste_files (paste_id, position, name, size, mime) VALUES (?, ?, ?, ?, ?)",
+                db,
+                position,
+                f.name,
+                size,
+                f.mime,
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+        // Dropping the transaction on any error below rolls the row back; dropping the staging
+        // removes the files it still holds.
+        let target = files::dir(st, id);
+        staging.commit(&target).await?;
+        if let Err(e) = tx.commit().await {
+            if let Err(rm) = tokio::fs::remove_dir_all(&target).await {
+                tracing::warn!(error = %rm, "could not remove the files of a paste that failed to commit");
+            }
+            return Err(e.into());
+        }
+        return Ok(id);
     }
     Err(Error::IdSpaceExhausted)
 }
@@ -390,7 +456,12 @@ pub async fn meta(st: &AppState, id: PasteId, now: i64) -> Result<Paste, Error> 
     .fetch_optional(&st.pool)
     .await?
     .ok_or(Error::NotFound)?;
-    row.try_into()
+    with_files(st, row.try_into()?).await
+}
+
+async fn with_files(st: &AppState, mut p: Paste) -> Result<Paste, Error> {
+    p.files = files::list(st, p.id).await?;
+    Ok(p)
 }
 
 /// Counts one read in a single statement, burning the row on its last allowed read.
@@ -415,7 +486,10 @@ async fn count_read(st: &AppState, id: PasteId, now: i64) -> Result<Option<Paste
     )
     .fetch_optional(&st.pool)
     .await?;
-    row.map(Paste::try_from).transpose()
+    match row {
+        Some(row) => Ok(Some(with_files(st, row.try_into()?).await?)),
+        None => Ok(None),
+    }
 }
 
 /// Recovers a private paste's data key, counting a wrong password as a failed attempt.
@@ -489,9 +563,10 @@ pub async fn edit(
     if !st.cfg.app.editable || !p.editable || p.privacy == Privacy::Secret {
         return Err(Error::Forbidden);
     }
-    require_content(&content)?;
+    let has_files = !p.files.is_empty();
+    require_content(&content, has_files)?;
     let (kind, stored) = match (p.privacy, access) {
-        (Privacy::Public | Privacy::Unlisted, _) => plain_content(p.privacy, content),
+        (Privacy::Public | Privacy::Unlisted, _) => plain_content(p.privacy, content, has_files),
         (Privacy::Readonly, Access::Password(pw)) => {
             check_readonly(st, &p, &pw, ip).await?;
             (Kind::Text, content.into_bytes())
@@ -523,12 +598,8 @@ pub async fn edit(
     Ok(())
 }
 
-fn files_dir(st: &AppState, id: PasteId) -> PathBuf {
-    st.files_dir.join(id.0.to_string())
-}
-
 async fn remove_files(st: &AppState, id: PasteId) -> Result<(), Error> {
-    match tokio::fs::remove_dir_all(files_dir(st, id)).await {
+    match tokio::fs::remove_dir_all(files::dir(st, id)).await {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
         _ => Ok(()),
     }
@@ -555,11 +626,23 @@ pub async fn delete(st: &AppState, id: PasteId, auth: DeleteAuth, ip: IpAddr, no
         _ => return Err(Error::Forbidden),
     }
     let db = db_id(id);
-    let deleted = sqlx::query!("DELETE FROM pastes WHERE id = ?", db).execute(&st.pool).await?;
+    // The same liveness guard as every other statement: a paste that burned or expired since
+    // `meta` keeps its files for the burning read's grant until the purge.
+    let deleted = sqlx::query!(
+        "DELETE FROM pastes WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+        db,
+        now,
+    )
+    .execute(&st.pool)
+    .await?;
     if deleted.rows_affected() == 0 {
         return Err(Error::NotFound);
     }
-    remove_files(st, id).await
+    // The paste is gone either way; a leftover directory is removed by the start-up orphan sweep.
+    if let Err(e) = remove_files(st, id).await {
+        tracing::warn!(error = %e, "could not remove a deleted paste's files");
+    }
+    Ok(())
 }
 
 /// Live public pastes, newest first, [`PAGE_SIZE`] per page; pages count from 1 (0 is page 1).
@@ -583,7 +666,11 @@ pub async fn list_public(st: &AppState, page: u32, now: i64) -> Result<Vec<Paste
     )
     .fetch_all(&st.pool)
     .await?;
-    rows.into_iter().map(Paste::try_from).collect()
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        out.push(with_files(st, row.try_into()?).await?);
+    }
+    Ok(out)
 }
 
 /// Every live paste of any level, newest first, for the admin table.
@@ -602,7 +689,11 @@ pub async fn list_all(st: &AppState, now: i64) -> Result<Vec<Paste>, Error> {
     )
     .fetch_all(&st.pool)
     .await?;
-    rows.into_iter().map(Paste::try_from).collect()
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        out.push(with_files(st, row.try_into()?).await?);
+    }
+    Ok(out)
 }
 
 /// Removes expired rows and rows burned more than [`BURNED_TTL_SECS`] ago, with their files.

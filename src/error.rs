@@ -14,6 +14,9 @@ pub enum Error {
     TooManyAttempts,
     #[error("You do not have access to this.")]
     Forbidden,
+    /// Forbidden, with the copy that tells an uploader what is missing.
+    #[error("Enter the uploader password to create pastes.")]
+    UploaderPassword,
     #[error("{0}")]
     Invalid(String),
     #[error("That upload is too large. Remove some files or choose smaller ones.")]
@@ -35,7 +38,7 @@ impl Error {
         match self {
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::PasswordRequired => StatusCode::UNAUTHORIZED,
-            Self::WrongPassword | Self::Forbidden => StatusCode::FORBIDDEN,
+            Self::WrongPassword | Self::Forbidden | Self::UploaderPassword => StatusCode::FORBIDDEN,
             Self::TooManyAttempts => StatusCode::TOO_MANY_REQUESTS,
             Self::Invalid(_) | Self::UnsupportedFormat => StatusCode::UNPROCESSABLE_ENTITY,
             Self::TooLarge => StatusCode::PAYLOAD_TOO_LARGE,

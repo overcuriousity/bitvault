@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT privacy AS \"privacy!\" FROM pastes WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "privacy!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c4620b1d3f3c9e95f289986f5c481c515be10817a37f4d846967d004c27fd25b"
+}

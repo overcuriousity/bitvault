@@ -17,7 +17,7 @@ async fn router(dir: &tempfile::TempDir) -> Router {
     let pool = bitvault::db::open(&cfg.data_dir()).await.unwrap();
     let extra: Router<AppState> =
         Router::new().route("/boom", get(|| async { Error::Invalid("Fix the name and try again.".into()) }));
-    let (router, _) = bitvault::app::build_with(cfg, pool, extra).unwrap();
+    let (router, _) = bitvault::app::build_with(cfg, pool, extra).await.unwrap();
     router.layer(MockConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 5000))))
 }
 

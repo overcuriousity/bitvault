@@ -40,7 +40,7 @@ pub async fn app_with_routes(toml: &str, extra: Router<AppState>) -> App {
 
 async fn app_from(cfg: Config, dir: tempfile::TempDir, extra: Router<AppState>) -> App {
     let pool = bitvault::db::open(&cfg.data_dir()).await.unwrap();
-    let (router, st) = bitvault::app::build_with(cfg, pool, extra).unwrap();
+    let (router, st) = bitvault::app::build_with(cfg, pool, extra).await.unwrap();
     let router = router.layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 5000))));
     App { router, st, _dir: dir }
 }
