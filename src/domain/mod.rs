@@ -1,7 +1,9 @@
 pub mod crypto;
 pub mod expiry;
 pub mod grant;
+pub mod highlight;
 pub mod paste;
+pub mod qr;
 pub mod words;
 
 /// Who can find and open a paste.
