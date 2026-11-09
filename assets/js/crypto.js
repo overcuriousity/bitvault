@@ -32,9 +32,11 @@ const wrongPassword = () => failure("WrongPassword", "That password does not ope
 const unsupported = () => failure("UnsupportedFormat", "This paste was saved in a format this page cannot read.");
 
 // PBKDF2-HMAC-SHA256 → 512 bits: the first half becomes a non-extractable AES-GCM key, the
-// second the verifier HMAC key (also non-extractable).
+// second the verifier HMAC key (also non-extractable). The password is normalised to NFC first,
+// as the server does, so composed and decomposed spellings of the same password agree.
 export async function deriveKeys(password, salt, iterations = ITERATIONS) {
-  const base = await subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bytes = new TextEncoder().encode(password.normalize("NFC"));
+  const base = await subtle.importKey("raw", bytes, "PBKDF2", false, ["deriveBits"]);
   const bits = new Uint8Array(
     await subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, base, 512),
   );

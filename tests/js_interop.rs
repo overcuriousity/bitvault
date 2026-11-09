@@ -23,6 +23,14 @@ struct Case {
 }
 
 #[derive(Deserialize)]
+struct Decomposed {
+    password_nfd: String,
+    password_nfc: String,
+    container_b64: String,
+    plain_b64: String,
+}
+
+#[derive(Deserialize)]
 struct JsFixture {
     password: String,
     container_b64: String,
@@ -30,6 +38,7 @@ struct JsFixture {
     verifier_salt_hex: String,
     verifier_hex: String,
     cases: Vec<Case>,
+    decomposed: Decomposed,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -72,6 +81,16 @@ fn containers_sealed_in_javascript_open_in_rust() {
         crypto::open_alg2("not the password", &b64(&f.container_b64)),
         Err(bitvault::error::Error::WrongPassword)
     ));
+}
+
+#[test]
+fn a_container_sealed_in_javascript_with_a_decomposed_password_opens_in_rust_with_the_composed_one() {
+    let d = js_fixture().decomposed;
+    assert_ne!(d.password_nfd, d.password_nfc);
+    assert_eq!(crypto::open_alg2(&d.password_nfc, &b64(&d.container_b64)).unwrap(), b64(&d.plain_b64));
+    assert_eq!(crypto::open_alg2(&d.password_nfd, &b64(&d.container_b64)).unwrap(), b64(&d.plain_b64));
+    let salt = [3; 16];
+    assert_eq!(crypto::browser_verifier(&d.password_nfd, &salt), crypto::browser_verifier(&d.password_nfc, &salt));
 }
 
 #[test]

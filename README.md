@@ -33,10 +33,6 @@ Copy [`config.example.toml`](config.example.toml) and pass it with `--config`. E
 
 The API needs no key. Browse it at `/docs` on your instance, or fetch `/api/v1/openapi.json`. When you upload with `multipart/form-data`, send `privacy` and the other text fields before the `file` parts. If the server sets an uploader password, send it in `X-Uploader-Password`.
 
-## Known limitation
-
-Secret paste passwords are not Unicode-normalised, so the same password typed with differently composed accents on two devices may not open the paste.
-
 ## Build from source
 
 ```sh

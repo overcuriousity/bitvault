@@ -13,6 +13,7 @@ use multer::{Field, Multipart};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
+use zeroize::Zeroizing;
 
 use super::admin::MaybeAdmin;
 use super::multipart::{Guarded, too_large};
@@ -135,8 +136,10 @@ struct Gate<'a> {
 impl Gate<'_> {
     fn check(&mut self, given: &[u8]) -> Result<(), Error> {
         let Some(expected) = self.expected else { return Ok(()) };
+        // Both sides in NFC, like every other password; bytes that are not UTF-8 are compared as sent.
+        let given = std::str::from_utf8(given).map_or_else(|_| Zeroizing::new(given.to_vec()), crypto::password_bytes);
         // Hashing first makes the comparison independent of both lengths.
-        if bool::from(Sha256::digest(given).ct_eq(&Sha256::digest(expected.as_bytes()))) {
+        if bool::from(Sha256::digest(&*given).ct_eq(&Sha256::digest(&*crypto::password_bytes(expected)))) {
             self.passed = true;
             Ok(())
         } else {

@@ -42,6 +42,17 @@ async fn the_uploader_password_is_required_when_configured() {
 }
 
 #[tokio::test]
+async fn the_uploader_password_matches_in_either_unicode_form() {
+    // Configured composed (U+00E9), typed decomposed (e + U+0301).
+    let app = app_with("[app]\nuploader_password = \"caf\\u00e9\"\n").await;
+    let typed = "cafe\u{301}".as_bytes();
+    let res = app.post_multipart("/", &[("uploader_password", None, typed), ("content", None, b"hello")]).await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    let res = app.post_multipart("/", &[("uploader_password", None, b"cafe"), ("content", None, b"hello")]).await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn the_password_field_never_has_a_name_for_secret_submissions() {
     let html = body_text(app().await.get("/").await).await;
     let at = html.find("id=\"secret-password\"").expect("secret password input");

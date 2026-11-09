@@ -259,6 +259,28 @@ async fn parallel_wrong_passwords_cannot_outrun_the_limit() {
     assert!(checked <= 5, "{checked} guesses were checked");
 }
 
+/// "café" with the é composed (U+00E9) and decomposed (e + U+0301).
+const NFC_PASSWORD: &str = "caf\u{e9}";
+const NFD_PASSWORD: &str = "cafe\u{301}";
+
+#[tokio::test]
+async fn a_private_paste_opens_with_its_password_in_either_unicode_form() {
+    let app = support::app().await;
+    assert_ne!(NFC_PASSWORD, NFD_PASSWORD);
+    let id = create(&app.st, with_password("accented", Privacy::Private, NFC_PASSWORD)).await;
+    assert_eq!(text(&read(&app.st, id, Access::Password(NFD_PASSWORD.into())).await.unwrap().body), "accented");
+    let id = create(&app.st, with_password("the other way", Privacy::Private, NFD_PASSWORD)).await;
+    assert_eq!(text(&read(&app.st, id, Access::Password(NFC_PASSWORD.into())).await.unwrap().body), "the other way");
+}
+
+#[tokio::test]
+async fn a_readonly_paste_takes_its_password_in_either_unicode_form() {
+    let app = support::app_with("[app]\neditable = true\n").await;
+    let id = create(&app.st, NewPaste { editable: true, ..with_password("v1", Privacy::Readonly, NFC_PASSWORD) }).await;
+    paste::edit(&app.st, id, Access::Password(NFD_PASSWORD.into()), IP, "v2".into(), None, NOW).await.unwrap();
+    paste::delete(&app.st, id, DeleteAuth::Password(NFD_PASSWORD.into()), IP, NOW).await.unwrap();
+}
+
 #[tokio::test]
 async fn a_readonly_paste_is_readable_by_anyone_but_deletable_only_with_its_password() {
     let app = support::app().await;

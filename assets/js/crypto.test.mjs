@@ -5,6 +5,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { CHUNK_LEN, HEADER_LEN, ITERATIONS, open, seal, verifier } from "./crypto.js";
 
 const PASSWORD = "correct horse battery staple";
+// "café ✓" with the é decomposed (e + U+0301) and composed (U+00E9).
+const NFD_PASSWORD = "cafe\u0301 \u2713";
+const NFC_PASSWORD = "caf\u00e9 \u2713";
 const TAG_LEN = 16;
 const CT_CHUNK_LEN = CHUNK_LEN + TAG_LEN;
 
@@ -47,6 +50,15 @@ test("an exact multiple of the chunk size ends with a full final chunk", async (
 test("wrong password throws WrongPassword", async () => {
   const sealed = await seal(PASSWORD, pattern(100));
   await rejectsAs(open("not the password", sealed), "WrongPassword");
+});
+
+test("a password typed decomposed opens what its composed form sealed, and the other way round", async () => {
+  assert.notEqual(NFD_PASSWORD, NFC_PASSWORD);
+  const plain = pattern(100);
+  assert.deepEqual(await open(NFD_PASSWORD, await seal(NFC_PASSWORD, plain)), plain);
+  assert.deepEqual(await open(NFC_PASSWORD, await seal(NFD_PASSWORD, plain)), plain);
+  const salt = pattern(16);
+  assert.deepEqual(await verifier(NFD_PASSWORD, salt), await verifier(NFC_PASSWORD, salt));
 });
 
 test("flipping a header or chunk byte fails", async () => {
@@ -134,6 +146,8 @@ test("the committed JavaScript fixture still opens", async () => {
   }
   const salt = Buffer.from(fixture.verifier_salt_hex, "hex");
   assert.equal(hex(await verifier(fixture.password, salt)), fixture.verifier_hex);
+  const nfd = fixture.decomposed;
+  assert.equal(b64(await open(nfd.password_nfc, Buffer.from(nfd.container_b64, "base64"))), nfd.plain_b64);
 });
 
 // Like the Rust fixture, written only when missing or on request, so test runs leave the tree clean.
@@ -151,6 +165,13 @@ test("writes interop fixtures", { skip: existsSync(JS_FIXTURE) && process.env.BI
     verifier_salt_hex: hex(salt),
     verifier_hex: hex(await verifier(PASSWORD, salt)),
     cases,
+    // Sealed with the decomposed spelling; Rust opens it with the composed one.
+    decomposed: {
+      password_nfd: NFD_PASSWORD,
+      password_nfc: NFC_PASSWORD,
+      container_b64: b64(await seal(NFD_PASSWORD, pattern(40))),
+      plain_b64: b64(pattern(40)),
+    },
   };
   const dir = new URL("../../tests/fixtures/js/", import.meta.url);
   mkdirSync(dir, { recursive: true });

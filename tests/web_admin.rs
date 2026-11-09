@@ -149,3 +149,11 @@ async fn sessions_expire_after_twelve_idle_hours() {
     auth.sign_out(&other);
     assert!(!auth.is_valid(&other, 1));
 }
+
+#[tokio::test]
+async fn the_admin_password_matches_in_either_unicode_form() {
+    let app = app_with("[app]\nadmin_password = \"caf\\u00e9-admin\"\n").await;
+    let typed: String = url::form_urlencoded::byte_serialize("cafe\u{301}-admin".as_bytes()).collect();
+    let res = app.post_form("/admin/sign-in", &format!("password={typed}")).await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+}

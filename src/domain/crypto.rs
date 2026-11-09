@@ -19,6 +19,8 @@
 //! extension all fail authentication. Empty plaintext is one empty final chunk. A plaintext that
 //! is an exact multiple of 65 536 bytes ends with a full final chunk, never an extra empty one.
 //!
+//! Every password is normalised to Unicode NFC before any derivation or hash, here and in the browser.
+//!
 //! alg 2 keys: PBKDF2-HMAC-SHA256(password, salt, iterations) → 64 bytes; the first 32 are the
 //! AES-256-GCM key and the last 32 the verifier HMAC key (WebCrypto `deriveBits(512)`).
 
@@ -35,6 +37,7 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::Semaphore;
+use unicode_normalization::UnicodeNormalization;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::error::Error;
@@ -124,6 +127,13 @@ pub(crate) fn random_bytes<const N: usize>() -> [u8; N] {
         panic!("the operating system random number generator failed: {e}");
     }
     out
+}
+
+/// A password's bytes in Unicode NFC, so the same password typed with composed or decomposed
+/// characters (é as one code point or as e plus an accent) derives the same key. The browser
+/// normalises the same way before PBKDF2.
+pub fn password_bytes(password: &str) -> Zeroizing<Vec<u8>> {
+    Zeroizing::new(password.nfc().collect::<String>().into_bytes())
 }
 
 /// A 32-byte data encryption key. Compared in constant time; never printed.
@@ -528,7 +538,7 @@ async fn derive_argon2id(
     params: KdfParams,
 ) -> Result<Zeroizing<[u8; KEY_LEN]>, Error> {
     let argon = argon2id(params)?;
-    let password = Zeroizing::new(password.as_bytes().to_vec());
+    let password = password_bytes(password);
     run_argon(move || {
         let mut key = Zeroizing::new([0u8; KEY_LEN]);
         argon.hash_password_into(&password, &salt, key.as_mut_slice()).map_err(Error::internal)?;
@@ -565,7 +575,7 @@ pub async fn unwrap_dek(password: &str, wrapped: &[u8]) -> Result<Dek, Error> {
 /// An argon2id PHC string at [`KdfParams::DEFAULT`] with a random 16-byte salt.
 pub async fn hash_password(password: &str) -> Result<String, Error> {
     let argon = argon2id(KdfParams::DEFAULT)?;
-    let password = Zeroizing::new(password.as_bytes().to_vec());
+    let password = password_bytes(password);
     let salt = random_bytes::<SALT_LEN>();
     run_argon(move || argon.hash_password_with_salt(&password, &salt).map(|h| h.to_string()).map_err(Error::internal))
         .await?
@@ -581,7 +591,7 @@ pub async fn verify_password(password: &str, phc: &str) -> bool {
     if hash.algorithm != ARGON2ID_IDENT || !within_caps {
         return false;
     }
-    let password = Zeroizing::new(password.as_bytes().to_vec());
+    let password = password_bytes(password);
     run_argon(move || Argon2::default().verify_password(&password, &hash).is_ok()).await.unwrap_or(false)
 }
 
@@ -621,7 +631,7 @@ pub fn check_browser_container(container: &[u8]) -> Result<(), Error> {
 #[cfg(feature = "test-hooks")]
 fn pbkdf2_keys(password: &str, salt: &[u8], iterations: u32) -> Zeroizing<[u8; 64]> {
     let mut okm = Zeroizing::new([0u8; 64]);
-    pbkdf2::pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, iterations, okm.as_mut_slice());
+    pbkdf2::pbkdf2_hmac::<Sha256>(&password_bytes(password), salt, iterations, okm.as_mut_slice());
     okm
 }
 
