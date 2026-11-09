@@ -124,6 +124,8 @@ async fn sign_in(
             // A session cookie: the server ends the session after 12 idle hours.
             let mut res = Redirect::to("/admin").into_response();
             res.headers_mut().insert(header::SET_COOKIE, cookie(&token, None)?);
+            // The request carried no session yet, so the session layer does not add this.
+            res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             Ok(res)
         }
         None => {

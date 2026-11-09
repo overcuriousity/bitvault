@@ -69,6 +69,7 @@ async fn the_session_cookie_is_host_only_and_http_only() {
     let res = app.post_form("/admin/sign-in", "password=admin-pw-123").await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     assert_eq!(res.headers()[header::LOCATION], "/admin");
+    assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
     let cookie = res.headers()[header::SET_COOKIE].to_str().unwrap();
     assert!(cookie.starts_with("__Host-bitvault-admin="), "{cookie}");
     for attr in ["HttpOnly", "Secure", "SameSite=Lax", "Path=/"] {
@@ -104,7 +105,7 @@ async fn the_admin_sees_every_paste_and_can_delete_a_private_one() {
 async fn admin_responses_are_not_cached() {
     let mut app = app_with(ADMIN_CONFIG).await;
     let w = create(&app, new("a", Privacy::Public, None)).await;
-    assert!(app.get(&format!("/{w}")).await.headers().get(header::CACHE_CONTROL).is_none());
+    assert!(app.get("/").await.headers().get(header::CACHE_CONTROL).is_none());
     app.sign_in_admin().await;
     for uri in ["/admin", "/", &format!("/{w}")] {
         let res = app.get(uri).await;

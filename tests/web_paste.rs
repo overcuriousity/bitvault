@@ -485,3 +485,36 @@ async fn pages_carry_no_inline_styles_scripts_or_handlers() {
         }
     }
 }
+
+#[tokio::test]
+async fn pages_that_show_paste_content_are_never_cached() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let no_store = |res: &axum::http::Response<Body>, what: &str| {
+        assert_eq!(res.headers().get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap()), Some("no-store"), "{what}");
+    };
+    let public = create(&app, NewPaste { editable: true, ..new("plain", Privacy::Public) }).await;
+    no_store(&app.get(&format!("/{public}")).await, "plaintext page");
+    let burning = create(&app, NewPaste { burn_after_reads: 1, ..new("once", Privacy::Public) }).await;
+    no_store(&app.get(&format!("/{burning}")).await, "burning read");
+    no_store(&app.get(&format!("/{public}/edit")).await, "edit form");
+    let private = create(&app, NewPaste { editable: true, ..with_password("decrypted", Privacy::Private, "pw") }).await;
+    let res = app.post_form(&format!("/{private}/unlock"), "password=pw").await;
+    no_store(&res, "unlocked page");
+    let html = body_text(res).await;
+    no_store(&app.get(&grant_link(&html, "/edit")).await, "private edit form");
+    let secret = create(&app, secret(0)).await;
+    no_store(&app.get(&format!("/{secret}")).await, "secret shell");
+}
+
+#[tokio::test]
+async fn editing_without_a_password_asks_for_one() {
+    let app = app_with("[app]\neditable = true\n").await;
+    for privacy in [Privacy::Readonly, Privacy::Private] {
+        let w = create(&app, NewPaste { editable: true, ..with_password("before", privacy, "pw") }).await;
+        let res = app.post_form(&format!("/{w}/edit"), "content=after&syntax=plain&password=").await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        let html = body_text(res).await;
+        assert!(html.contains("Enter the password to change this paste."), "{privacy:?}");
+        assert!(!html.contains("That password does not open this paste."));
+    }
+}

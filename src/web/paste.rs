@@ -232,7 +232,14 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, text: Option<&str>, grant: 
 fn render_paste(st: &AppState, admin: bool, view: &PasteView, words: &str) -> Result<Response, Error> {
     let body = render(view)?;
     let extras = Extras { css: vec![Assets::url("css/syntax.css")], ..Extras::default() };
-    Ok(page_with(st, admin, "", words, body, extras)?.into_response())
+    Ok(no_store(page_with(st, admin, "", words, body, extras)?.into_response()))
+}
+
+/// Pages that carry paste content (decrypted private text, burned pages) must not persist in
+/// browser caches or history.
+fn no_store(mut res: Response) -> Response {
+    res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    res
 }
 
 fn render_opened(st: &AppState, admin: bool, opened: &Opened) -> Result<Response, Error> {
@@ -392,7 +399,8 @@ fn edit_page(
         notice,
     };
     let body = render(&view)?;
-    Ok((status, page_with(st, admin, "", &format!("Edit {words}"), body, Extras::default())?).into_response())
+    let page = page_with(st, admin, "", &format!("Edit {words}"), body, Extras::default())?;
+    Ok(no_store((status, page).into_response()))
 }
 
 /// `GET /{words}/edit`: the form, prefilled. Showing the content counts as a read; a private
@@ -444,12 +452,14 @@ async fn edit(
     let p = paste::meta(&st, id, now).await?;
     editable(&st, &p)?;
     let syntax = super::home::parse_syntax(&form.syntax)?;
-    let access = if form.password.is_empty() { Access::Anonymous } else { Access::Password(form.password) };
+    let proved = !form.password.is_empty();
+    let access = if proved { Access::Password(form.password) } else { Access::Anonymous };
     match paste::edit(&st, id, access, ip, form.content.clone(), syntax.clone(), now).await {
         Ok(()) => Ok(Redirect::to(&format!("/{}", id.words())).into_response()),
         Err(e @ (Error::Forbidden | Error::TooManyAttempts | Error::Invalid(_))) => {
             let message = match &e {
-                Error::Forbidden if p.privacy.needs_password() => PASSWORD_MISMATCH.to_owned(),
+                Error::Forbidden if p.privacy.needs_password() && proved => PASSWORD_MISMATCH.to_owned(),
+                Error::Forbidden if p.privacy.needs_password() => "Enter the password to change this paste.".to_owned(),
                 other => other.to_string(),
             };
             edit_page(&st, admin, &p, form.content, syntax.as_deref(), Some(message), e.status())
