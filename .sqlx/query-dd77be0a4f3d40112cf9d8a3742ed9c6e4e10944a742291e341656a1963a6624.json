@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM pastes\n           WHERE (expires_at IS NOT NULL AND expires_at <= ?) OR (burned_at IS NOT NULL AND burned_at <= ?)\n           RETURNING id AS \"id!\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "dd77be0a4f3d40112cf9d8a3742ed9c6e4e10944a742291e341656a1963a6624"
+}

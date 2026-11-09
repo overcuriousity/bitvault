@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE pastes SET content = ?, syntax = ?, kind = ?\n         WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "9785f73966f46b427966103efd0411f01487e0d89704984e933319404c97d1e9"
+}

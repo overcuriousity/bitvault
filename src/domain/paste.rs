@@ -1,0 +1,628 @@
+//! Text and URL pastes: creation, reads with burn-after-read, edits, deletes and the purge.
+//!
+//! Every function takes `now` in Unix seconds, so expiry and burning are decided by the caller's
+//! clock. A burned or expired row is invisible here: every lookup filters on
+//! `burned_at IS NULL AND (expires_at IS NULL OR expires_at > now)`.
+
+use std::fmt;
+use std::net::IpAddr;
+use std::path::PathBuf;
+
+use linkify::{LinkFinder, LinkKind};
+
+use crate::domain::crypto::{self, Dek, KdfParams, SALT_LEN};
+use crate::domain::expiry::{self, Expiry};
+use crate::domain::grant;
+use crate::domain::words::PasteId;
+use crate::domain::{Kind, Privacy};
+use crate::error::Error;
+use crate::state::AppState;
+
+/// A burned row stays (invisible) this long, so the burning read's grant can still fetch files.
+pub const BURNED_TTL_SECS: i64 = 600;
+pub const PAGE_SIZE: u32 = 50;
+const INSERT_ATTEMPTS: usize = 8;
+
+/// What a creator submits. `content` is ignored for secret pastes, whose text is inside `secret`.
+pub struct NewPaste {
+    pub content: String,
+    pub privacy: Privacy,
+    pub expiry: Expiry,
+    pub burn_after_reads: u32,
+    pub syntax: Option<String>,
+    pub editable: bool,
+    pub password: Option<String>,
+    pub secret: Option<SecretParts>,
+}
+
+/// What the browser sends for a secret paste; the password itself never reaches the server.
+pub struct SecretParts {
+    pub container: Vec<u8>,
+    pub verifier_salt: [u8; SALT_LEN],
+    pub verifier: [u8; 32],
+}
+
+/// How a reader or editor proves access. The admin gets no extra read or edit rights.
+pub enum Access {
+    Anonymous,
+    Password(String),
+    Grant(String),
+    Admin,
+}
+
+impl fmt::Debug for Access {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Anonymous => "Anonymous",
+            Self::Password(_) => "Password(..)",
+            Self::Grant(_) => "Grant(..)",
+            Self::Admin => "Admin",
+        })
+    }
+}
+
+/// How a deleter proves the right to delete.
+pub enum DeleteAuth {
+    None,
+    Password(String),
+    Verifier([u8; 32]),
+    Admin,
+}
+
+impl fmt::Debug for DeleteAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::None => "None",
+            Self::Password(_) => "Password(..)",
+            Self::Verifier(_) => "Verifier(..)",
+            Self::Admin => "Admin",
+        })
+    }
+}
+
+/// A stored paste, as in the `pastes` table.
+#[derive(Clone)]
+pub struct Paste {
+    pub id: PasteId,
+    pub kind: Kind,
+    pub privacy: Privacy,
+    /// UTF-8 text, or a crypto container for private and secret pastes.
+    pub content: Vec<u8>,
+    pub syntax: Option<String>,
+    pub editable: bool,
+    pub password_hash: Option<String>,
+    pub wrapped_key: Option<Vec<u8>>,
+    /// `verifier_salt ‖ SHA-256(verifier)`.
+    pub verifier_hash: Option<Vec<u8>>,
+    pub verifier_salt: Option<[u8; SALT_LEN]>,
+    pub burn_after_reads: u32,
+    pub read_count: u64,
+    pub last_read_at: Option<i64>,
+    pub burned_at: Option<i64>,
+    pub created_at: i64,
+    pub expires_at: Option<i64>,
+}
+
+impl fmt::Debug for Paste {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let redact = |present: bool| if present { "***" } else { "-" };
+        f.debug_struct("Paste")
+            .field("id", &self.id)
+            .field("kind", &self.kind)
+            .field("privacy", &self.privacy)
+            .field("content", &format_args!("{} bytes", self.content.len()))
+            .field("syntax", &self.syntax)
+            .field("editable", &self.editable)
+            .field("password_hash", &redact(self.password_hash.is_some()))
+            .field("wrapped_key", &redact(self.wrapped_key.is_some()))
+            .field("verifier_hash", &redact(self.verifier_hash.is_some()))
+            .field("burn_after_reads", &self.burn_after_reads)
+            .field("read_count", &self.read_count)
+            .field("last_read_at", &self.last_read_at)
+            .field("burned_at", &self.burned_at)
+            .field("created_at", &self.created_at)
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
+/// What a read hands back.
+pub enum Body {
+    Text(String),
+    /// The target of a URL paste.
+    Url(String),
+    /// A secret paste's browser container, decrypted only in the browser.
+    Cipher(Vec<u8>),
+}
+
+impl fmt::Debug for Body {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Text(t) => write!(f, "Text({} bytes)", t.len()),
+            Self::Url(u) => write!(f, "Url({} bytes)", u.len()),
+            Self::Cipher(c) => write!(f, "Cipher({} bytes)", c.len()),
+        }
+    }
+}
+
+/// A counted read. `grant` is set after a private unlock and on the burning read.
+pub struct Opened {
+    pub paste: Paste,
+    pub body: Body,
+    pub grant: Option<String>,
+}
+
+impl fmt::Debug for Opened {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Opened")
+            .field("paste", &self.paste)
+            .field("body", &self.body)
+            .field("grant", &self.grant.as_ref().map(|_| "***"))
+            .finish()
+    }
+}
+
+/// Row shape shared by every query that reads whole pastes.
+struct Row {
+    id: i64,
+    kind: String,
+    privacy: String,
+    content: Vec<u8>,
+    syntax: Option<String>,
+    editable: bool,
+    password_hash: Option<String>,
+    wrapped_key: Option<Vec<u8>>,
+    verifier_hash: Option<Vec<u8>>,
+    burn_after_reads: i64,
+    read_count: i64,
+    last_read_at: Option<i64>,
+    burned_at: Option<i64>,
+    created_at: i64,
+    expires_at: Option<i64>,
+}
+
+impl TryFrom<Row> for Paste {
+    type Error = Error;
+
+    fn try_from(r: Row) -> Result<Self, Error> {
+        let corrupt = |what: &str| Error::internal(format!("paste {} has an invalid {what}", r.id));
+        let verifier_salt = match r.verifier_hash.as_deref() {
+            Some(v) => Some(v.first_chunk::<SALT_LEN>().copied().ok_or_else(|| corrupt("verifier"))?),
+            None => None,
+        };
+        Ok(Self {
+            id: PasteId(u64::try_from(r.id).map_err(|_| corrupt("id"))?),
+            kind: Kind::parse(&r.kind).ok_or_else(|| corrupt("kind"))?,
+            privacy: Privacy::parse(&r.privacy).ok_or_else(|| corrupt("privacy"))?,
+            burn_after_reads: u32::try_from(r.burn_after_reads).map_err(|_| corrupt("burn count"))?,
+            read_count: u64::try_from(r.read_count).map_err(|_| corrupt("read count"))?,
+            verifier_salt,
+            content: r.content,
+            syntax: r.syntax,
+            editable: r.editable,
+            password_hash: r.password_hash,
+            wrapped_key: r.wrapped_key,
+            verifier_hash: r.verifier_hash,
+            last_read_at: r.last_read_at,
+            burned_at: r.burned_at,
+            created_at: r.created_at,
+            expires_at: r.expires_at,
+        })
+    }
+}
+
+fn db_id(id: PasteId) -> i64 {
+    // IDs are below 2^33, so this never saturates.
+    i64::try_from(id.0).unwrap_or(i64::MAX)
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static ID_SOURCE: std::cell::RefCell<std::collections::VecDeque<u64>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+}
+
+/// Makes the next creates on this thread try these IDs, in order, before random ones. Test-only.
+#[cfg(feature = "test-hooks")]
+pub fn set_id_source(ids: Vec<u64>) {
+    ID_SOURCE.with_borrow_mut(|q| *q = ids.into());
+}
+
+fn next_id() -> PasteId {
+    #[cfg(feature = "test-hooks")]
+    if let Some(id) = ID_SOURCE.with_borrow_mut(|q| q.pop_front()) {
+        return PasteId(id & ((1 << crate::domain::words::ID_BITS) - 1));
+    }
+    PasteId::random()
+}
+
+/// The URL when the whole trimmed content is exactly one http(s) link.
+fn whole_url(content: &str) -> Option<&str> {
+    let trimmed = content.trim();
+    let mut finder = LinkFinder::new();
+    finder.kinds(&[LinkKind::Url]);
+    let mut links = finder.links(trimmed);
+    let link = links.next()?;
+    let whole = links.next().is_none() && link.start() == 0 && link.end() == trimmed.len();
+    // Only web links become redirects; other schemes stay text.
+    let web = url::Url::parse(trimmed).is_ok_and(|u| matches!(u.scheme(), "http" | "https"));
+    (whole && web).then_some(trimmed)
+}
+
+/// Kind and stored bytes for plaintext content at `privacy`.
+fn plain_content(privacy: Privacy, content: String) -> (Kind, Vec<u8>) {
+    if matches!(privacy, Privacy::Public | Privacy::Unlisted)
+        && let Some(url) = whole_url(&content)
+    {
+        return (Kind::Url, url.as_bytes().to_vec());
+    }
+    (Kind::Text, content.into_bytes())
+}
+
+fn require_content(content: &str) -> Result<(), Error> {
+    if content.trim().is_empty() {
+        return Err(Error::Invalid("Enter some text to paste.".into()));
+    }
+    Ok(())
+}
+
+fn require_password(privacy: Privacy, password: Option<&str>) -> Result<&str, Error> {
+    match password {
+        Some(pw) if !pw.is_empty() => Ok(pw),
+        _ => {
+            let level = if privacy == Privacy::Readonly { "read-only" } else { "private" };
+            Err(Error::Invalid(format!("Enter a password for a {level} paste.")))
+        }
+    }
+}
+
+struct Stored {
+    kind: Kind,
+    content: Vec<u8>,
+    password_hash: Option<String>,
+    wrapped_key: Option<Vec<u8>>,
+    verifier_hash: Option<Vec<u8>>,
+}
+
+async fn prepare(new: NewPaste) -> Result<Stored, Error> {
+    let none = |kind, content| Stored { kind, content, password_hash: None, wrapped_key: None, verifier_hash: None };
+    match new.privacy {
+        Privacy::Public | Privacy::Unlisted => {
+            require_content(&new.content)?;
+            let (kind, content) = plain_content(new.privacy, new.content);
+            Ok(none(kind, content))
+        }
+        Privacy::Readonly => {
+            require_content(&new.content)?;
+            let pw = require_password(new.privacy, new.password.as_deref())?;
+            let hash = crypto::hash_password(pw).await?;
+            Ok(Stored { password_hash: Some(hash), ..none(Kind::Text, new.content.into_bytes()) })
+        }
+        Privacy::Private => {
+            require_content(&new.content)?;
+            let pw = require_password(new.privacy, new.password.as_deref())?;
+            let dek = Dek::random();
+            let sealed = crypto::seal(&dek, new.content.as_bytes());
+            let wrapped = crypto::wrap_dek(pw, &dek, KdfParams::DEFAULT).await?;
+            Ok(Stored { wrapped_key: Some(wrapped), ..none(Kind::Text, sealed) })
+        }
+        Privacy::Secret => {
+            let Some(parts) = new.secret else {
+                return Err(Error::Invalid(
+                    "A secret paste must be encrypted in the browser. Enable JavaScript.".into(),
+                ));
+            };
+            crypto::check_browser_container(&parts.container)?;
+            let mut verifier = parts.verifier_salt.to_vec();
+            verifier.extend_from_slice(&crypto::verifier_hash(&parts.verifier));
+            Ok(Stored { verifier_hash: Some(verifier), ..none(Kind::Text, parts.container) })
+        }
+    }
+}
+
+/// Stores a new paste under a fresh random ID, retrying on collisions.
+pub async fn create(st: &AppState, new: NewPaste, now: i64) -> Result<PasteId, Error> {
+    let cfg = &st.cfg.app;
+    if !cfg.privacy_levels.iter().any(|l| l == new.privacy.as_str()) {
+        return Err(Error::Invalid("That privacy level is not offered here. Choose another one.".into()));
+    }
+    let max = expiry::max(cfg);
+    if !expiry::allowed(cfg, new.expiry) {
+        let msg = if new.expiry.seconds().zip(max.seconds()).is_none_or(|(e, m)| e > m) {
+            format!("Choose an expiry of {} or less.", max.label())
+        } else {
+            "That expiry is not offered here. Choose one from the list.".to_owned()
+        };
+        return Err(Error::Invalid(msg));
+    }
+    let privacy = new.privacy;
+    let syntax = new.syntax.clone();
+    let editable = new.editable && privacy != Privacy::Secret;
+    let burn = i64::from(new.burn_after_reads);
+    let expires_at = new.expiry.seconds().map(|s| now.saturating_add(s));
+    let s = prepare(new).await?;
+    let (kind, privacy) = (s.kind.as_str(), privacy.as_str());
+    for _ in 0..INSERT_ATTEMPTS {
+        let id = next_id();
+        let db = db_id(id);
+        let inserted = sqlx::query!(
+            "INSERT INTO pastes (id, kind, privacy, content, syntax, editable, password_hash, wrapped_key,
+                                 verifier_hash, burn_after_reads, created_at, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (id) DO NOTHING",
+            db,
+            kind,
+            privacy,
+            s.content,
+            syntax,
+            editable,
+            s.password_hash,
+            s.wrapped_key,
+            s.verifier_hash,
+            burn,
+            now,
+            expires_at,
+        )
+        .execute(&st.pool)
+        .await?;
+        if inserted.rows_affected() == 1 {
+            return Ok(id);
+        }
+    }
+    Err(Error::IdSpaceExhausted)
+}
+
+/// The paste without counting a read.
+pub async fn meta(st: &AppState, id: PasteId, now: i64) -> Result<Paste, Error> {
+    let db = db_id(id);
+    let row = sqlx::query_as!(
+        Row,
+        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", content AS "content!", syntax AS "syntax?",
+                  editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
+                  verifier_hash AS "verifier_hash?", burn_after_reads AS "burn_after_reads!",
+                  read_count AS "read_count!", last_read_at AS "last_read_at?", burned_at AS "burned_at?",
+                  created_at AS "created_at!", expires_at AS "expires_at?"
+           FROM pastes
+           WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)"#,
+        db,
+        now,
+    )
+    .fetch_optional(&st.pool)
+    .await?
+    .ok_or(Error::NotFound)?;
+    row.try_into()
+}
+
+/// Counts one read in a single statement, burning the row on its last allowed read.
+/// `None` means the row is gone, burned or expired.
+async fn count_read(st: &AppState, id: PasteId, now: i64) -> Result<Option<Paste>, Error> {
+    let db = db_id(id);
+    let row = sqlx::query_as!(
+        Row,
+        r#"UPDATE pastes SET read_count = read_count + 1, last_read_at = ?,
+                  burned_at = CASE WHEN burn_after_reads > 0 AND read_count + 1 >= burn_after_reads THEN ? END
+           WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
+           RETURNING id AS "id!", kind AS "kind!", privacy AS "privacy!", content AS "content!",
+                     syntax AS "syntax?", editable AS "editable!: bool", password_hash AS "password_hash?",
+                     wrapped_key AS "wrapped_key?", verifier_hash AS "verifier_hash?",
+                     burn_after_reads AS "burn_after_reads!", read_count AS "read_count!",
+                     last_read_at AS "last_read_at?", burned_at AS "burned_at?", created_at AS "created_at!",
+                     expires_at AS "expires_at?""#,
+        now,
+        now,
+        db,
+        now,
+    )
+    .fetch_optional(&st.pool)
+    .await?;
+    row.map(Paste::try_from).transpose()
+}
+
+/// Recovers a private paste's data key, counting a wrong password as a failed attempt.
+async fn unlock(st: &AppState, p: &Paste, password: &str, ip: IpAddr) -> Result<Dek, Error> {
+    st.failures.check(ip)?;
+    let wrapped = p.wrapped_key.as_deref().ok_or_else(|| Error::internal("a private paste has no wrapped key"))?;
+    match crypto::unwrap_dek(password, wrapped).await {
+        Err(Error::WrongPassword) => {
+            st.failures.fail(ip);
+            Err(Error::WrongPassword)
+        }
+        other => other,
+    }
+}
+
+/// Checks a read-only paste's password, counting a wrong one as a failed attempt.
+async fn check_readonly(st: &AppState, p: &Paste, password: &str, ip: IpAddr) -> Result<(), Error> {
+    st.failures.check(ip)?;
+    let phc = p.password_hash.as_deref().ok_or_else(|| Error::internal("a read-only paste has no password hash"))?;
+    if crypto::verify_password(password, phc).await {
+        Ok(())
+    } else {
+        st.failures.fail(ip);
+        Err(Error::Forbidden)
+    }
+}
+
+fn utf8(bytes: Vec<u8>) -> Result<String, Error> {
+    String::from_utf8(bytes).map_err(Error::internal)
+}
+
+/// Opens a paste for reading and counts the read. Private pastes need the password or a grant;
+/// a secret paste returns its ciphertext.
+pub async fn read(st: &AppState, id: PasteId, access: Access, ip: IpAddr, now: i64) -> Result<Opened, Error> {
+    let found = meta(st, id, now).await?;
+    let mut fresh_grant = false;
+    let dek = match (found.privacy, access) {
+        (Privacy::Private, Access::Password(pw)) => {
+            fresh_grant = true;
+            Some(unlock(st, &found, &pw, ip).await?)
+        }
+        (Privacy::Private, Access::Grant(token)) => {
+            Some(grant::check(&st.grant_key, &token, id, now)?.ok_or(Error::Forbidden)?)
+        }
+        (Privacy::Private, Access::Anonymous | Access::Admin) => return Err(Error::PasswordRequired),
+        _ => None,
+    };
+    let paste = count_read(st, id, now).await?.ok_or(Error::NotFound)?;
+    let burning = paste.burned_at.is_some();
+    let body = match (&dek, paste.kind) {
+        (Some(dek), _) => Body::Text(utf8(crypto::open(dek, &paste.content)?)?),
+        (None, _) if paste.privacy == Privacy::Secret => Body::Cipher(paste.content.clone()),
+        (None, Kind::Url) => Body::Url(utf8(paste.content.clone())?),
+        (None, Kind::Text) => Body::Text(utf8(paste.content.clone())?),
+    };
+    let grant = (fresh_grant || burning).then(|| grant::issue(&st.grant_key, id, dek.as_ref(), now));
+    Ok(Opened { paste, body, grant })
+}
+
+/// Replaces the content and syntax of an editable paste. Secret pastes are never editable.
+pub async fn edit(
+    st: &AppState,
+    id: PasteId,
+    access: Access,
+    ip: IpAddr,
+    content: String,
+    syntax: Option<String>,
+    now: i64,
+) -> Result<(), Error> {
+    let p = meta(st, id, now).await?;
+    if !st.cfg.app.editable || !p.editable || p.privacy == Privacy::Secret {
+        return Err(Error::Forbidden);
+    }
+    require_content(&content)?;
+    let (kind, stored) = match (p.privacy, access) {
+        (Privacy::Public | Privacy::Unlisted, _) => plain_content(p.privacy, content),
+        (Privacy::Readonly, Access::Password(pw)) => {
+            check_readonly(st, &p, &pw, ip).await?;
+            (Kind::Text, content.into_bytes())
+        }
+        (Privacy::Private, Access::Password(pw)) => {
+            let dek = match unlock(st, &p, &pw, ip).await {
+                Err(Error::WrongPassword) => return Err(Error::Forbidden),
+                other => other?,
+            };
+            (Kind::Text, crypto::seal(&dek, content.as_bytes()))
+        }
+        _ => return Err(Error::Forbidden),
+    };
+    let (db, kind) = (db_id(id), kind.as_str());
+    let updated = sqlx::query!(
+        "UPDATE pastes SET content = ?, syntax = ?, kind = ?
+         WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+        stored,
+        syntax,
+        kind,
+        db,
+        now,
+    )
+    .execute(&st.pool)
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Err(Error::NotFound);
+    }
+    Ok(())
+}
+
+fn files_dir(st: &AppState, id: PasteId) -> PathBuf {
+    st.files_dir.join(id.0.to_string())
+}
+
+async fn remove_files(st: &AppState, id: PasteId) -> Result<(), Error> {
+    match tokio::fs::remove_dir_all(files_dir(st, id)).await {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+        _ => Ok(()),
+    }
+}
+
+/// Deletes a paste and its files at once, under the §4 rules; the admin may delete any paste.
+pub async fn delete(st: &AppState, id: PasteId, auth: DeleteAuth, ip: IpAddr, now: i64) -> Result<(), Error> {
+    let p = meta(st, id, now).await?;
+    match (p.privacy, auth) {
+        (_, DeleteAuth::Admin) | (Privacy::Public | Privacy::Unlisted, _) => {}
+        (Privacy::Readonly, DeleteAuth::Password(pw)) => check_readonly(st, &p, &pw, ip).await?,
+        (Privacy::Private, DeleteAuth::Password(pw)) => match unlock(st, &p, &pw, ip).await {
+            Err(Error::WrongPassword) => return Err(Error::Forbidden),
+            other => other.map(|_| ())?,
+        },
+        (Privacy::Secret, DeleteAuth::Verifier(v)) => {
+            st.failures.check(ip)?;
+            let stored = p.verifier_hash.as_deref().and_then(|h| h.get(SALT_LEN..)).unwrap_or_default();
+            if !crypto::verifier_matches(stored, &v) {
+                st.failures.fail(ip);
+                return Err(Error::Forbidden);
+            }
+        }
+        _ => return Err(Error::Forbidden),
+    }
+    let db = db_id(id);
+    let deleted = sqlx::query!("DELETE FROM pastes WHERE id = ?", db).execute(&st.pool).await?;
+    if deleted.rows_affected() == 0 {
+        return Err(Error::NotFound);
+    }
+    remove_files(st, id).await
+}
+
+/// Live public pastes, newest first, [`PAGE_SIZE`] per page; pages count from 1 (0 is page 1).
+pub async fn list_public(st: &AppState, page: u32, now: i64) -> Result<Vec<Paste>, Error> {
+    let offset = i64::from(page.saturating_sub(1)) * i64::from(PAGE_SIZE);
+    let limit = i64::from(PAGE_SIZE);
+    let rows = sqlx::query_as!(
+        Row,
+        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", content AS "content!", syntax AS "syntax?",
+                  editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
+                  verifier_hash AS "verifier_hash?", burn_after_reads AS "burn_after_reads!",
+                  read_count AS "read_count!", last_read_at AS "last_read_at?", burned_at AS "burned_at?",
+                  created_at AS "created_at!", expires_at AS "expires_at?"
+           FROM pastes
+           WHERE privacy = 'public' AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
+           ORDER BY created_at DESC, id DESC
+           LIMIT ? OFFSET ?"#,
+        now,
+        limit,
+        offset,
+    )
+    .fetch_all(&st.pool)
+    .await?;
+    rows.into_iter().map(Paste::try_from).collect()
+}
+
+/// Every live paste of any level, newest first, for the admin table.
+pub async fn list_all(st: &AppState, now: i64) -> Result<Vec<Paste>, Error> {
+    let rows = sqlx::query_as!(
+        Row,
+        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", content AS "content!", syntax AS "syntax?",
+                  editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
+                  verifier_hash AS "verifier_hash?", burn_after_reads AS "burn_after_reads!",
+                  read_count AS "read_count!", last_read_at AS "last_read_at?", burned_at AS "burned_at?",
+                  created_at AS "created_at!", expires_at AS "expires_at?"
+           FROM pastes
+           WHERE burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
+           ORDER BY created_at DESC, id DESC"#,
+        now,
+    )
+    .fetch_all(&st.pool)
+    .await?;
+    rows.into_iter().map(Paste::try_from).collect()
+}
+
+/// Removes expired rows and rows burned more than [`BURNED_TTL_SECS`] ago, with their files.
+/// Returns how many rows went.
+pub async fn purge(st: &AppState, now: i64) -> Result<u64, Error> {
+    let burned_before = now.saturating_sub(BURNED_TTL_SECS);
+    let ids = sqlx::query_scalar!(
+        r#"DELETE FROM pastes
+           WHERE (expires_at IS NOT NULL AND expires_at <= ?) OR (burned_at IS NOT NULL AND burned_at <= ?)
+           RETURNING id AS "id!""#,
+        now,
+        burned_before,
+    )
+    .fetch_all(&st.pool)
+    .await?;
+    for id in ids.iter().filter_map(|id| u64::try_from(*id).ok()) {
+        // A leftover directory must not stop the rest of the purge; start-up removes orphans.
+        if let Err(e) = remove_files(st, PasteId(id)).await {
+            tracing::warn!(error = %e, "could not remove a purged paste's files");
+        }
+    }
+    Ok(u64::try_from(ids.len()).unwrap_or(u64::MAX))
+}
