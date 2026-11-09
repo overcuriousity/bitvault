@@ -1,8 +1,11 @@
-//! File and zip downloads. `files::open` and `files::zip` apply no access rules, so every rule
-//! is enforced here before they are called: liveness and expiry, grants for private and burned
-//! pastes, and no zip for secret pastes.
+//! File and zip downloads. `files::open` and `files::zip` apply no access rules, so
+//! `paste::files_access` decides first (liveness and expiry, grants for private and burned
+//! pastes); this module adds that secret pastes have no zip.
+
+use std::net::IpAddr;
 
 use axum::Router;
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
@@ -11,11 +14,12 @@ use serde::Deserialize;
 
 use super::paste_id;
 use crate::domain::crypto::Dek;
-use crate::domain::files::{self, PLACEHOLDER_MIME};
-use crate::domain::paste::{self, Paste};
+use crate::domain::files::{self, FileMeta, PLACEHOLDER_MIME};
+use crate::domain::paste::{self, Access, Paste};
 use crate::domain::words::PasteId;
-use crate::domain::{self, Privacy, grant};
+use crate::domain::{self, Privacy};
 use crate::error::Error;
+use crate::security::ClientIp;
 use crate::state::AppState;
 
 /// Only these types are shown in the browser; anything else (SVG and HTML included, which can
@@ -35,29 +39,12 @@ pub fn routes() -> Router<AppState> {
     Router::new().route("/{words}/file/{position}", get(file)).route("/{words}/zip", get(zip))
 }
 
-/// The paste whose files may be served, and the data key to decrypt them with.
-///
-/// - A live paste of a plaintext level, or a secret paste (served as ciphertext): no grant needed.
-/// - A private paste: a grant carrying its data key; without one, 401.
-/// - A burned paste: only with a valid grant, within its ten minutes; otherwise not found.
-async fn access(st: &AppState, id: PasteId, g: Option<&str>) -> Result<(Paste, Option<Dek>), Error> {
-    let now = domain::now();
-    let Some(token) = g else {
-        let p = paste::meta(st, id, now).await?;
-        if p.privacy == Privacy::Private {
-            return Err(Error::PasswordRequired);
-        }
-        return Ok((p, None));
-    };
-    let dek = grant::check(&st.grant_key, token, id, now)?;
-    let p = paste::meta_for_grant(st, id, now).await?;
-    if p.privacy == Privacy::Private && dek.is_none() {
-        return Err(Error::Forbidden);
-    }
-    Ok((p, dek))
+/// The domain's file access rules, with a grant from the query string when there is one.
+async fn access(st: &AppState, id: PasteId, ip: IpAddr, g: Option<String>) -> Result<(Paste, Option<Dek>), Error> {
+    paste::files_access(st, id, g.map_or(Access::Anonymous, Access::Grant), ip, domain::now()).await
 }
 
-fn position(raw: &str) -> Result<u32, Error> {
+pub fn position(raw: &str) -> Result<u32, Error> {
     raw.parse().map_err(|_| Error::NotFound)
 }
 
@@ -80,13 +67,20 @@ fn disposition(kind: &str, name: &str) -> Result<HeaderValue, Error> {
 /// `GET /{words}/file/{position}`.
 async fn file(
     State(st): State<AppState>,
+    ClientIp(ip): ClientIp,
     Path((words, position_raw)): Path<(String, String)>,
     Query(q): Query<GrantQuery>,
 ) -> Result<Response, Error> {
     let id = paste_id(&words)?;
     let position = position(&position_raw)?;
-    let (p, dek) = access(&st, id, q.g.as_deref()).await?;
+    let (p, dek) = access(&st, id, ip, q.g).await?;
     let (meta, body) = files::open(&st, id, position, dek.as_ref()).await?;
+    download(&p, &meta, body)
+}
+
+/// A file download: raster images inline, everything else (and every secret file, which is
+/// ciphertext) as an attachment, never cached.
+pub fn download(p: &Paste, meta: &FileMeta, body: Body) -> Result<Response, Error> {
     let (content_type, kind) = if p.privacy == Privacy::Secret {
         (PLACEHOLDER_MIME, "attachment")
     } else if inline_image(&meta.mime) {
@@ -108,11 +102,12 @@ async fn file(
 /// browser can open.
 async fn zip(
     State(st): State<AppState>,
+    ClientIp(ip): ClientIp,
     Path(words): Path<String>,
     Query(q): Query<GrantQuery>,
 ) -> Result<Response, Error> {
     let id = paste_id(&words)?;
-    let (p, dek) = access(&st, id, q.g.as_deref()).await?;
+    let (p, dek) = access(&st, id, ip, q.g).await?;
     if p.privacy == Privacy::Secret || p.files.is_empty() {
         return Err(Error::NotFound);
     }

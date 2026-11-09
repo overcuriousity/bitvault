@@ -573,6 +573,45 @@ pub async fn read(st: &AppState, id: PasteId, access: Access, ip: IpAddr, now: i
     Ok(Opened { paste, body, grant })
 }
 
+/// The paste whose files may be served, and the data key to decrypt them with. Downloads do not
+/// count as reads, and `files::open` and `files::zip` apply no rules, so every caller goes
+/// through here first.
+///
+/// - A live paste of a plaintext level, or a secret paste (served as ciphertext): no proof needed.
+/// - A private paste: the password (a wrong one counts as a failed attempt) or a grant carrying
+///   its data key; with neither, [`Error::PasswordRequired`].
+/// - A burned paste: only with a valid grant, within its ten minutes; otherwise not found.
+pub async fn files_access(
+    st: &AppState,
+    id: PasteId,
+    access: Access,
+    ip: IpAddr,
+    now: i64,
+) -> Result<(Paste, Option<Dek>), Error> {
+    if let Access::Grant(token) = access {
+        let dek = grant::check(&st.grant_key, &token, id, now)?;
+        let p = meta_for_grant(st, id, now).await?;
+        if p.privacy == Privacy::Private && dek.is_none() {
+            return Err(Error::Forbidden);
+        }
+        return Ok((p, dek));
+    }
+    let p = meta(st, id, now).await?;
+    match (p.privacy, access) {
+        (Privacy::Private, Access::Password(pw)) => {
+            let dek = unlock(st, &p, &pw, ip).await?;
+            Ok((p, Some(dek)))
+        }
+        (Privacy::Private, _) => Err(Error::PasswordRequired),
+        _ => Ok((p, None)),
+    }
+}
+
+/// Editing needs the config switch and the paste's own flag, and is never allowed for secret.
+pub fn editable(st: &AppState, p: &Paste) -> bool {
+    st.cfg.app.editable && p.editable && p.privacy != Privacy::Secret
+}
+
 /// Replaces the content and syntax of an editable paste. Secret pastes are never editable.
 pub async fn edit(
     st: &AppState,
@@ -584,7 +623,7 @@ pub async fn edit(
     now: i64,
 ) -> Result<(), Error> {
     let p = meta(st, id, now).await?;
-    if !st.cfg.app.editable || !p.editable || p.privacy == Privacy::Secret {
+    if !editable(st, &p) {
         return Err(Error::Forbidden);
     }
     let has_files = !p.files.is_empty();

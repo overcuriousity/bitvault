@@ -28,8 +28,9 @@ use crate::ratelimit::{self, RateLimiter};
 use crate::state::AppState;
 
 const MIB: u64 = 1 << 20;
-/// Each text field of the create form.
-const TEXT_LIMIT: usize = 1 << 20;
+/// Each text field of the create form, and the text of an API create.
+pub(crate) const TEXT_LIMIT: usize = 1 << 20;
+const SECRET_IN_BROWSER: &str = "Secret pastes are encrypted in the browser. Create them on the web page instead.";
 // A secret paste's content container holds JSON of up to TEXT_LIMIT of text, which escaping can
 // grow sixfold (a control character becomes \u00XX), plus 64 KiB of file names and the container
 // overhead.
@@ -148,18 +149,43 @@ impl Gate<'_> {
     }
 }
 
+/// Checks an uploader password given up front (the API's header) against the configured one.
+pub(crate) fn check_uploader(st: &AppState, given: Option<&[u8]>) -> Result<(), Error> {
+    let mut gate = Gate { expected: st.cfg.app.uploader_password.as_deref(), passed: false };
+    if let Some(given) = given {
+        gate.check(given)?;
+    }
+    gate.require()
+}
+
+/// Where the create form and the API's multipart create differ.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CreateRules {
+    /// The uploader password was already checked, from the API's header.
+    pub uploader_checked: bool,
+    /// Only the browser can encrypt a secret paste, so the API refuses them.
+    pub allow_secret: bool,
+}
+
+impl CreateRules {
+    fn allows(self, privacy: Privacy) -> Result<(), Error> {
+        if privacy == Privacy::Secret && !self.allow_secret { Err(invalid(SECRET_IN_BROWSER)) } else { Ok(()) }
+    }
+}
+
+/// A create request's fields, from the form or the API, before defaults are applied.
 #[derive(Default)]
-struct Form {
-    content: String,
-    privacy: Option<Privacy>,
-    expiry: Option<Expiry>,
-    burn_after_reads: Option<u32>,
-    syntax: Option<String>,
-    editable: bool,
-    password: Option<String>,
-    content_container: Option<Vec<u8>>,
-    verifier_salt: Option<[u8; SALT_LEN]>,
-    verifier: Option<[u8; 32]>,
+pub(crate) struct Form {
+    pub content: String,
+    pub privacy: Option<Privacy>,
+    pub expiry: Option<Expiry>,
+    pub burn_after_reads: Option<u32>,
+    pub syntax: Option<String>,
+    pub editable: bool,
+    pub password: Option<String>,
+    pub content_container: Option<Vec<u8>>,
+    pub verifier_salt: Option<[u8; SALT_LEN]>,
+    pub verifier: Option<[u8; 32]>,
 }
 
 fn invalid(msg: &str) -> Error {
@@ -192,8 +218,12 @@ fn hex_array<const N: usize>(value: &[u8]) -> Result<[u8; N], Error> {
         .ok_or_else(|| invalid("The browser sent an incomplete secret paste. Reload the page and try again."))
 }
 
-fn parse_privacy(value: &str) -> Result<Privacy, Error> {
+pub(crate) fn parse_privacy(value: &str) -> Result<Privacy, Error> {
     Privacy::parse(value.trim()).ok_or_else(|| invalid("Choose a privacy level from the list."))
+}
+
+pub(crate) fn parse_expiry(value: &str) -> Result<Expiry, Error> {
+    Expiry::parse(value.trim()).ok_or_else(|| invalid("Choose an expiry from the list."))
 }
 
 fn default_privacy(st: &AppState) -> Result<Privacy, Error> {
@@ -229,10 +259,7 @@ impl Form {
                 }
                 self.privacy = Some(privacy);
             }
-            "expiry" => {
-                let v = text(value)?;
-                self.expiry = Some(Expiry::parse(v.trim()).ok_or_else(|| invalid("Choose an expiry from the list."))?);
-            }
+            "expiry" => self.expiry = Some(parse_expiry(&text(value)?)?),
             "burn_after_reads" => {
                 let v = text(value)?;
                 if !v.trim().is_empty() {
@@ -255,12 +282,14 @@ impl Form {
         Ok(())
     }
 
-    fn into_new(self, st: &AppState) -> Result<NewPaste, Error> {
+    /// The paste to create, with the configured defaults for what was left out.
+    pub(crate) fn into_new(self, st: &AppState, rules: CreateRules) -> Result<NewPaste, Error> {
         let app = &st.cfg.app;
         let privacy = match self.privacy {
             Some(p) => p,
             None => default_privacy(st)?,
         };
+        rules.allows(privacy)?;
         let expiry = match self.expiry {
             Some(e) => e,
             None => Expiry::parse(&app.default_expiry).ok_or_else(|| Error::internal("default_expiry is invalid"))?,
@@ -284,9 +313,22 @@ impl Form {
     }
 }
 
-/// `POST /`: reads the multipart form in order, streaming each file into a staging directory
-/// (encrypted for private pastes) and keeping only the small fields in memory.
+/// `POST /`.
 async fn create(State(st): State<AppState>, req: Request) -> Result<Redirect, Error> {
+    let rules = CreateRules { uploader_checked: false, allow_secret: true };
+    let (new, staging) = read_multipart(&st, req, rules).await?;
+    let id = paste::create(&st, new, staging, domain::now()).await?;
+    Ok(Redirect::to(&format!("/{}", id.words())))
+}
+
+/// Reads a multipart create in order, streaming each file into a staging directory (encrypted
+/// for private pastes) and keeping only the small fields in memory. Fields that decide how files
+/// are stored (`uploader_password`, `privacy`) must come before the first file.
+pub(crate) async fn read_multipart(
+    st: &AppState,
+    req: Request,
+    rules: CreateRules,
+) -> Result<(NewPaste, Option<Staging>), Error> {
     let boundary = req
         .headers()
         .get(header::CONTENT_TYPE)
@@ -299,7 +341,7 @@ async fn create(State(st): State<AppState>, req: Request) -> Result<Redirect, Er
     let budget = app.max_file_mb.saturating_mul(MIB);
     // The browser limits plaintext; the server sees the container, which is slightly larger.
     let secret_limit = crypto::browser_container_max_len(app.max_secret_file_mb.saturating_mul(MIB));
-    let mut gate = Gate { expected: app.uploader_password.as_deref(), passed: false };
+    let mut gate = Gate { expected: app.uploader_password.as_deref(), passed: rules.uploader_checked };
     let mut form = Form::default();
     let mut staging: Option<Staging> = None;
     while let Some(field) = multipart.next_field().await.map_err(|e| multipart_error(&e))? {
@@ -311,14 +353,18 @@ async fn create(State(st): State<AppState>, req: Request) -> Result<Redirect, Er
                 gate.check(&value)?;
             } else {
                 form.set(&name, value, staging.is_some(), &app.privacy_levels)?;
+                if let Some(privacy) = form.privacy {
+                    rules.allows(privacy)?;
+                }
             }
             continue;
         }
         gate.require()?;
         let privacy = match form.privacy {
             Some(p) => p,
-            None => *form.privacy.insert(default_privacy(&st)?),
+            None => *form.privacy.insert(default_privacy(st)?),
         };
+        rules.allows(privacy)?;
         let filename = field.file_name().unwrap_or_default().to_owned();
         let claimed_mime = field.content_type().map(ToString::to_string).unwrap_or_default();
         // Browsers send an empty, unnamed part when no file was chosen, so a part is only
@@ -359,7 +405,5 @@ async fn create(State(st): State<AppState>, req: Request) -> Result<Redirect, Er
         };
     }
     gate.require()?;
-    let new = form.into_new(&st)?;
-    let id = paste::create(&st, new, staging, domain::now()).await?;
-    Ok(Redirect::to(&format!("/{}", id.words())))
+    Ok((form.into_new(st, rules)?, staging))
 }

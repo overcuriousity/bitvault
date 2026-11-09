@@ -159,6 +159,12 @@ pub fn copy_icons() -> String {
     format!("{}{}", icon("copy", IconSize::Row), icon("check", IconSize::Row))
 }
 
+/// A paste's full address on the public origin, and on the short host when one is configured.
+pub fn paste_urls(st: &AppState, words: &str) -> (String, Option<String>) {
+    let short = st.cfg.app.short_url.as_deref().map(|s| format!("{}/{words}", s.trim_end_matches('/')));
+    (format!("{}/{words}", st.dep.origin), short)
+}
+
 /// Paste words from a path segment; anything else is simply not found.
 pub fn paste_id(words: &str) -> Result<crate::domain::words::PasteId, Error> {
     crate::domain::words::parse(words).map_err(|_| Error::NotFound)

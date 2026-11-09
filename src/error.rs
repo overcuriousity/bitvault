@@ -50,6 +50,16 @@ impl Error {
     pub fn internal(e: impl std::fmt::Display) -> Self {
         Self::Internal(e.to_string())
     }
+
+    /// Logs the detail of an internal error, which its message never shows.
+    pub fn log(&self) {
+        match self {
+            Self::Db(e) => tracing::error!(detail = %e, "database error"),
+            Self::Io(e) => tracing::error!(detail = %e, "io error"),
+            Self::Internal(d) => tracing::error!(detail = %d, "internal error"),
+            _ => {}
+        }
+    }
 }
 
 /// Carried in the response extensions so the page layer can render `error.html` with the app's own config.
@@ -61,12 +71,7 @@ pub struct ErrorNotice {
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
-        match &self {
-            Self::Db(e) => tracing::error!(detail = %e, "database error"),
-            Self::Io(e) => tracing::error!(detail = %e, "io error"),
-            Self::Internal(d) => tracing::error!(detail = %d, "internal error"),
-            _ => {}
-        }
+        self.log();
         let notice = ErrorNotice { status: self.status(), message: self.to_string() };
         let mut res = (notice.status, notice.message.clone()).into_response();
         res.extensions_mut().insert(notice);

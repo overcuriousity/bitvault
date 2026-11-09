@@ -12,8 +12,8 @@ use serde::Deserialize;
 use super::admin::MaybeAdmin;
 use super::files::{GrantQuery, inline_image};
 use super::{
-    Extras, IconSize, copy_icons, date, escape_text, icon, page_with, paste_id, privacy_icon, privacy_label, render,
-    size,
+    Extras, IconSize, copy_icons, date, escape_text, icon, page_with, paste_id, paste_urls, privacy_icon,
+    privacy_label, render, size,
 };
 use crate::assets::Assets;
 use crate::domain::paste::{self, Access, Body, DeleteAuth, Opened, Paste};
@@ -133,10 +133,6 @@ struct DeletePage {
     trash: String,
 }
 
-fn full_url(st: &AppState, words: &str) -> String {
-    format!("{}/{words}", st.dep.origin)
-}
-
 fn content_html(st: &AppState, text: &str, syntax: Option<&str>) -> (String, bool) {
     if st.cfg.app.highlight
         && text.len() <= HIGHLIGHT_LIMIT
@@ -161,7 +157,7 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, text: Option<&str>, grant: 
     let files_g = grant.map(|g| format!("?g={g}")).unwrap_or_default();
     // Raw and edit only take a grant from an unlock; a burned paste has neither.
     let read_g = if p.privacy == Privacy::Private { files_g.clone() } else { String::new() };
-    let full = full_url(st, &words);
+    let (full, short_url) = paste_urls(st, &words);
     let raw_href = format!("/{words}/raw{read_g}");
     let mut facts = vec![("Created", date(p.created_at))];
     facts.push(("Expires", p.expires_at.map_or_else(|| "Never".to_owned(), date)));
@@ -183,7 +179,7 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, text: Option<&str>, grant: 
         let sep = if base.contains('?') { '&' } else { '?' };
         format!("{base}{sep}from={raw}")
     });
-    let editable = app.editable && p.editable && !secret && !burned;
+    let editable = paste::editable(st, p) && !burned;
     let edit_href =
         editable.then(|| format!("/{words}/edit{read_g}")).filter(|_| p.privacy != Privacy::Private || grant.is_some());
     let (content, highlighted) = match text {
@@ -210,7 +206,7 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, text: Option<&str>, grant: 
         .collect::<Vec<_>>();
     PasteView {
         word_list: words.split('-').map(str::to_owned).collect(),
-        short_url: app.short_url.as_deref().map(|s| format!("{}/{words}", s.trim_end_matches('/'))),
+        short_url,
         privacy_label: privacy_label(p.privacy),
         privacy_icon: privacy_icon(p.privacy),
         facts,
@@ -369,9 +365,9 @@ async fn raw(
     Ok(res)
 }
 
-/// Editing needs the config switch and the paste's own flag, and is never offered for secret.
+/// The edit pages exist only for pastes that can be edited now.
 fn editable(st: &AppState, p: &Paste) -> Result<(), Error> {
-    if st.cfg.app.editable && p.editable && p.privacy != Privacy::Secret { Ok(()) } else { Err(Error::NotFound) }
+    if paste::editable(st, p) { Ok(()) } else { Err(Error::NotFound) }
 }
 
 fn syntax_options(st: &AppState, chosen: Option<&str>) -> Vec<(String, String, bool)> {

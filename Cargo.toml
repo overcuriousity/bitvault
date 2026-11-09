@@ -53,6 +53,8 @@ memchr = "2"
 multer = "3"
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 qrcode = { version = "0.14.1", default-features = false }
+utoipa = { version = "6", features = ["axum_extras"] }
+utoipa-axum = "0.3"
 
 [features]
 # Test-only decoders for the browser format (alg 2); never enabled in release builds.
