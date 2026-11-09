@@ -10,7 +10,11 @@ use bitvault::config::{self, Config};
 use bitvault::error::Error;
 use support::{app, body_text};
 
+// Jail tests set process-wide environment variables, so every test that loads a config takes this lock.
+static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn from_toml(toml: &str) -> Result<Config, Error> {
+    let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("config.toml");
     std::fs::write(&file, toml).unwrap();
@@ -74,6 +78,7 @@ fn a_non_loopback_bind_needs_an_https_public_url() {
 
 #[test]
 fn environment_variables_override_the_file() {
+    let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
     figment::Jail::expect_with(|jail| {
         jail.create_file("config.toml", "[app]\nlisting = true\n")?;
         jail.set_env("BITVAULT__APP__LISTING", "false");
@@ -85,6 +90,7 @@ fn environment_variables_override_the_file() {
 
 #[test]
 fn secrets_can_come_from_files() {
+    let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
     figment::Jail::expect_with(|jail| {
         jail.create_file("admin-secret", "s3cret-pass\n")?;
         jail.set_env("BITVAULT__APP__ADMIN_PASSWORD_FILE", "admin-secret");

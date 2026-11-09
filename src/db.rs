@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::str::FromStr;
 use std::time::Duration;
 
 use sqlx::SqlitePool;
@@ -10,9 +9,8 @@ use crate::error::Error;
 /// Opens `bitvault.sqlite` in `data_dir` (created with mode 0700) and applies the migrations.
 pub async fn open(data_dir: &Path) -> Result<SqlitePool, Error> {
     create_private_dir(data_dir)?;
-    let url = format!("sqlite://{}", data_dir.join("bitvault.sqlite").display());
-    let opts = SqliteConnectOptions::from_str(&url)
-        .map_err(Error::internal)?
+    let opts = SqliteConnectOptions::new()
+        .filename(data_dir.join("bitvault.sqlite"))
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .foreign_keys(true)

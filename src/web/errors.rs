@@ -9,6 +9,12 @@ use crate::error::{Error, ErrorNotice};
 use crate::state::AppState;
 
 #[derive(Template)]
+#[template(path = "notice.html")]
+struct NoticeFragment<'a> {
+    message: &'a str,
+}
+
+#[derive(Template)]
 #[template(path = "error.html")]
 struct ErrorPage<'a> {
     heading: &'a str,
@@ -29,12 +35,20 @@ fn heading(status: StatusCode) -> &'static str {
 /// Turns the plain response of an [`Error`] into an `error.html` page inside the shell.
 pub async fn render(State(st): State<AppState>, req: Request, next: Next) -> Response {
     let api = req.uri().path().starts_with("/api/");
+    let htmx = req.headers().contains_key("hx-request");
     let res = next.run(req).await;
     let Some(notice) = res.extensions().get::<ErrorNotice>().cloned() else {
         return res;
     };
     if api {
         return res;
+    }
+    if htmx {
+        // htmx swaps 422 bodies into the page, so it gets the notice alone, never a document.
+        return match (NoticeFragment { message: &notice.message }).render() {
+            Ok(html) => (notice.status, axum::response::Html(html)).into_response(),
+            Err(_) => res,
+        };
     }
     let page = ErrorPage { heading: heading(notice.status), message: &notice.message }
         .render()
