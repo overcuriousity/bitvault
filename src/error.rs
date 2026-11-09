@@ -51,6 +51,25 @@ impl Error {
         Self::Internal(e.to_string())
     }
 
+    /// The detail behind an internal error's generic message, for logs and the operator.
+    pub fn detail(&self) -> Option<String> {
+        match self {
+            Self::Db(e) => Some(e.to_string()),
+            Self::Io(e) => Some(e.to_string()),
+            Self::Internal(d) => Some(d.clone()),
+            _ => None,
+        }
+    }
+
+    /// One line for the operator when start-up fails: the message, with its cause when the
+    /// message alone would hide it.
+    pub fn startup_message(&self) -> String {
+        match self.detail() {
+            Some(d) => format!("BitVault could not start: {}.", d.trim_end_matches('.')),
+            None => self.to_string(),
+        }
+    }
+
     /// Logs the detail of an internal error, which its message never shows.
     pub fn log(&self) {
         match self {

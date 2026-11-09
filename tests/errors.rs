@@ -52,3 +52,41 @@ async fn an_htmx_error_is_a_notice_fragment_with_the_same_status() {
         assert!(html.contains("oc-notice") && !html.contains("<html"), "{html}");
     }
 }
+
+#[tokio::test]
+async fn a_data_dir_that_is_a_file_names_the_directory_and_the_cause() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("not-a-dir");
+    std::fs::write(&file, b"x").unwrap();
+    let e = bitvault::db::open(&file).await.unwrap_err();
+    let message = e.startup_message();
+    assert_eq!(message, format!("Cannot open the data directory {}: Not a directory (os error 20).", file.display()));
+}
+
+#[test]
+fn an_internal_start_up_error_shows_its_cause_to_the_operator() {
+    let e = Error::Io(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "Permission denied"));
+    assert_eq!(e.to_string(), "Something went wrong. Try again later.");
+    assert_eq!(e.startup_message(), "BitVault could not start: Permission denied.");
+}
+
+#[test]
+fn the_binary_prints_the_cause_when_start_up_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("not-a-dir");
+    std::fs::write(&file, b"x").unwrap();
+    let config = dir.path().join("config.toml");
+    std::fs::write(&config, format!("data_dir = {:?}\n", file.display().to_string())).unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_bitvault"))
+        .arg("--config")
+        .arg(&config)
+        .env_remove("STATE_DIRECTORY")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        stderr.contains(&format!("Cannot open the data directory {}: Not a directory", file.display())),
+        "{stderr}"
+    );
+}

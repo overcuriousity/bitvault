@@ -22,7 +22,8 @@ async fn main() -> ExitCode {
     match run(Cli::parse()).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("{e}");
+            e.log();
+            eprintln!("{}", e.startup_message());
             ExitCode::FAILURE
         }
     }

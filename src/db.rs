@@ -23,7 +23,10 @@ pub async fn open(data_dir: &Path) -> Result<SqlitePool, Error> {
 fn create_private_dir(dir: &Path) -> Result<(), Error> {
     use std::os::unix::fs::DirBuilderExt;
     if dir.exists() {
-        return Ok(());
+        // Listing it proves it is a directory we may use, with the reason when it is not.
+        return std::fs::read_dir(dir)
+            .map(drop)
+            .map_err(|e| Error::Invalid(format!("Cannot open the data directory {}: {e}.", dir.display())));
     }
     std::fs::DirBuilder::new()
         .recursive(true)
