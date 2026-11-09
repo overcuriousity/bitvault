@@ -1,5 +1,7 @@
 //! The paste page, unlock, raw text, edit and delete.
 
+use std::sync::{Arc, LazyLock};
+
 use askama::Template;
 use axum::Form;
 use axum::Router;
@@ -8,6 +10,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use serde::Deserialize;
+use tokio::sync::Semaphore;
 
 use super::admin::MaybeAdmin;
 use super::files::{GrantQuery, inline_image};
@@ -24,7 +27,11 @@ use crate::state::AppState;
 
 /// Content above this size is shown plain: syntect's fancy-regex can backtrack badly on large
 /// or crafted input, which would make every view of such a paste expensive.
-const HIGHLIGHT_LIMIT: usize = 512 * 1024;
+pub const HIGHLIGHT_LIMIT: usize = 128 * 1024;
+/// Highlighting runs on the blocking pool, at most this many at once, so slow input can neither
+/// stall the async workers nor take over the pool.
+const HIGHLIGHT_PERMITS: usize = 2;
+static HIGHLIGHT_SLOTS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(HIGHLIGHT_PERMITS)));
 const PASSWORD_MISMATCH: &str = "That password does not open this paste. Check it and try again.";
 
 pub fn routes() -> Router<AppState> {
@@ -133,23 +140,40 @@ struct DeletePage {
     trash: String,
 }
 
-fn content_html(st: &AppState, text: &str, syntax: Option<&str>) -> (String, bool) {
-    if st.cfg.app.highlight
-        && text.len() <= HIGHLIGHT_LIMIT
-        && let Some(html) = syntax.and_then(|token| highlight::render(text, token))
-    {
-        return (html, true);
+/// Highlighted markup when highlighting is on, the syntax is known and the text is small enough;
+/// escaped plain text otherwise.
+async fn content_html(st: &AppState, text: &str, syntax: Option<&str>) -> Result<(String, bool), Error> {
+    if let Some(token) = syntax.filter(|_| st.cfg.app.highlight && text.len() <= HIGHLIGHT_LIMIT) {
+        // The permit moves into the closure, so it is held until the work ends even if the
+        // request is dropped.
+        let permit = Arc::clone(&HIGHLIGHT_SLOTS).acquire_owned().await.map_err(Error::internal)?;
+        let (owned, token) = (text.to_owned(), token.to_owned());
+        let html = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            highlight::render(&owned, &token)
+        })
+        .await
+        .map_err(Error::internal)?;
+        if let Some(html) = html {
+            return Ok((html, true));
+        }
     }
-    (escape_text(text), false)
+    Ok((escape_text(text), false))
 }
 
 fn reads(n: u32) -> String {
     if n == 1 { "1 read".to_owned() } else { format!("{n} reads") }
 }
 
-/// The page for a paste whose content (if any) has been read. `grant` is set after an unlock
-/// and on the burning read; it is added to the links that need it.
-fn paste_view(st: &AppState, admin: bool, p: &Paste, text: Option<&str>, grant: Option<&str>) -> PasteView {
+/// The page for a paste whose content (if any) has been read and rendered by [`content_html`].
+/// `grant` is set after an unlock and on the burning read; it is added to the links that need it.
+fn paste_view(
+    st: &AppState,
+    admin: bool,
+    p: &Paste,
+    content: Option<(String, bool)>,
+    grant: Option<&str>,
+) -> PasteView {
     let app = &st.cfg.app;
     let words = p.id.words();
     let burned = p.burned_at.is_some();
@@ -182,11 +206,8 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, text: Option<&str>, grant: 
     let editable = paste::editable(st, p) && !burned;
     let edit_href =
         editable.then(|| format!("/{words}/edit{read_g}")).filter(|_| p.privacy != Privacy::Private || grant.is_some());
-    let (content, highlighted) = match text {
-        Some(t) => {
-            let (html, hl) = content_html(st, t, p.syntax.as_deref());
-            (Some(html), hl)
-        }
+    let (content, highlighted) = match content {
+        Some((html, hl)) => (Some(html), hl),
         None => (None, false),
     };
     let files = p
@@ -239,12 +260,13 @@ fn no_store(mut res: Response) -> Response {
     res
 }
 
-fn render_opened(st: &AppState, admin: bool, opened: &Opened) -> Result<Response, Error> {
+async fn render_opened(st: &AppState, admin: bool, opened: &Opened) -> Result<Response, Error> {
     let text = match &opened.body {
         Body::Text(t) | Body::Url(t) => t.as_str(),
         Body::Cipher(_) => return Err(Error::internal("a secret paste cannot be rendered on the server")),
     };
-    let view = paste_view(st, admin, &opened.paste, Some(text), opened.grant.as_deref());
+    let content = content_html(st, text, opened.paste.syntax.as_deref()).await?;
+    let view = paste_view(st, admin, &opened.paste, Some(content), opened.grant.as_deref());
     render_paste(st, admin, &view, &opened.paste.id.words())
 }
 
@@ -292,7 +314,7 @@ async fn view(
             let opened = paste::read(&st, id, Access::Anonymous, ip, now).await?;
             match &opened.body {
                 Body::Url(target) => redirect_to(target),
-                _ => render_opened(&st, admin, &opened),
+                _ => render_opened(&st, admin, &opened).await,
             }
         }
     }
@@ -323,7 +345,7 @@ async fn unlock(
         return unlock_page(&st, admin, id.words(), notice, StatusCode::UNPROCESSABLE_ENTITY);
     }
     match paste::read(&st, id, Access::Password(form.password), ip, now).await {
-        Ok(opened) => render_opened(&st, admin, &opened),
+        Ok(opened) => render_opened(&st, admin, &opened).await,
         Err(e @ Error::WrongPassword) => {
             unlock_page(&st, admin, id.words(), Some(e.to_string()), StatusCode::UNPROCESSABLE_ENTITY)
         }

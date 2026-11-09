@@ -429,6 +429,20 @@ async fn large_or_unhighlighted_content_is_rendered_plain() {
 }
 
 #[tokio::test]
+async fn code_just_over_the_highlight_limit_renders_plain_and_quickly() {
+    let app = app().await;
+    let line = "let x = vec![1, 2, 3]; // (((((a|b)*)*)*)*\n";
+    let mut code = line.repeat(bitvault::web::paste::HIGHLIGHT_LIMIT / line.len() + 1);
+    code.truncate(bitvault::web::paste::HIGHLIGHT_LIMIT + 1);
+    let w = create(&app, NewPaste { syntax: Some("rs".into()), ..new(&code, Privacy::Public) }).await;
+    let started = std::time::Instant::now();
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    assert!(started.elapsed() < std::time::Duration::from_secs(2), "{:?}", started.elapsed());
+    assert!(!html.contains("hl-"));
+    assert!(html.contains("let x = vec![1, 2, 3];"));
+}
+
+#[tokio::test]
 async fn list_is_404_and_out_of_the_navigation_when_listing_is_off() {
     let app = app().await;
     let public = create(&app, new("listed", Privacy::Public)).await;
