@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id AS \"id!\", kind AS \"kind!\", privacy AS \"privacy!\", content AS \"content!\", syntax AS \"syntax?\",\n                  editable AS \"editable!: bool\", password_hash AS \"password_hash?\", wrapped_key AS \"wrapped_key?\",\n                  verifier_hash AS \"verifier_hash?\", burn_after_reads AS \"burn_after_reads!\",\n                  read_count AS \"read_count!\", last_read_at AS \"last_read_at?\", burned_at AS \"burned_at?\",\n                  created_at AS \"created_at!\", expires_at AS \"expires_at?\"\n           FROM pastes\n           WHERE privacy = 'public' AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)\n           ORDER BY created_at DESC, id DESC\n           LIMIT ? OFFSET ?",
+  "query": "SELECT id AS \"id!\", kind AS \"kind!\", privacy AS \"privacy!\", length(content) AS \"content_len!: i64\",\n                  syntax AS \"syntax?\", editable AS \"editable!: bool\", password_hash AS \"password_hash?\", wrapped_key AS \"wrapped_key?\",\n                  verifier_hash AS \"verifier_hash?\", burn_after_reads AS \"burn_after_reads!\",\n                  read_count AS \"read_count!\", last_read_at AS \"last_read_at?\", burned_at AS \"burned_at?\",\n                  created_at AS \"created_at!\", expires_at AS \"expires_at?\"\n           FROM pastes\n           WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
   "describe": {
     "columns": [
       {
@@ -19,9 +19,9 @@
         "type_info": "Text"
       },
       {
-        "name": "content!",
+        "name": "content_len!: i64",
         "ordinal": 3,
-        "type_info": "Blob"
+        "type_info": "Null"
       },
       {
         "name": "syntax?",
@@ -80,13 +80,13 @@
       }
     ],
     "parameters": {
-      "Right": 3
+      "Right": 2
     },
     "nullable": [
-      true,
       false,
       false,
       false,
+      null,
       true,
       false,
       true,
@@ -100,5 +100,5 @@
       true
     ]
   },
-  "hash": "333c9532f8c044b70e29cf802b77b25bab9bcfaf6581d76153d47461faaef42a"
+  "hash": "515a7714d44d2d259ea3e608a185ce262c2b7cdda4f1f24699a9054d597561fb"
 }

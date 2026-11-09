@@ -80,14 +80,15 @@ impl fmt::Debug for DeleteAuth {
     }
 }
 
-/// A stored paste, as in the `pastes` table.
+/// A stored paste's metadata, as in the `pastes` table. The content itself is loaded only by a
+/// counted read ([`read`]), which hands it back in [`Opened::body`].
 #[derive(Clone)]
 pub struct Paste {
     pub id: PasteId,
     pub kind: Kind,
     pub privacy: Privacy,
-    /// UTF-8 text, or a crypto container for private and secret pastes.
-    pub content: Vec<u8>,
+    /// Stored bytes of the content: UTF-8 text, or a crypto container for private and secret pastes.
+    pub content_len: u64,
     pub syntax: Option<String>,
     pub editable: bool,
     pub password_hash: Option<String>,
@@ -112,7 +113,7 @@ impl fmt::Debug for Paste {
             .field("id", &self.id)
             .field("kind", &self.kind)
             .field("privacy", &self.privacy)
-            .field("content", &format_args!("{} bytes", self.content.len()))
+            .field("content_len", &self.content_len)
             .field("syntax", &self.syntax)
             .field("editable", &self.editable)
             .field("password_hash", &redact(self.password_hash.is_some()))
@@ -165,12 +166,13 @@ impl fmt::Debug for Opened {
     }
 }
 
-/// Row shape shared by every query that reads whole pastes.
+/// Row shape shared by every metadata query; `content_len` is `length(content)`, so the content
+/// is never loaded.
 struct Row {
     id: i64,
     kind: String,
     privacy: String,
-    content: Vec<u8>,
+    content_len: i64,
     syntax: Option<String>,
     editable: bool,
     password_hash: Option<String>,
@@ -199,8 +201,8 @@ impl TryFrom<Row> for Paste {
             privacy: Privacy::parse(&r.privacy).ok_or_else(|| corrupt("privacy"))?,
             burn_after_reads: u32::try_from(r.burn_after_reads).map_err(|_| corrupt("burn count"))?,
             read_count: u64::try_from(r.read_count).map_err(|_| corrupt("read count"))?,
+            content_len: u64::try_from(r.content_len).map_err(|_| corrupt("content length"))?,
             verifier_salt,
-            content: r.content,
             syntax: r.syntax,
             editable: r.editable,
             password_hash: r.password_hash,
@@ -212,6 +214,48 @@ impl TryFrom<Row> for Paste {
             expires_at: r.expires_at,
             files: Vec::new(),
         })
+    }
+}
+
+/// [`Row`] plus the content, for the counted read.
+struct ReadRow {
+    id: i64,
+    kind: String,
+    privacy: String,
+    content: Vec<u8>,
+    syntax: Option<String>,
+    editable: bool,
+    password_hash: Option<String>,
+    wrapped_key: Option<Vec<u8>>,
+    verifier_hash: Option<Vec<u8>>,
+    burn_after_reads: i64,
+    read_count: i64,
+    last_read_at: Option<i64>,
+    burned_at: Option<i64>,
+    created_at: i64,
+    expires_at: Option<i64>,
+}
+
+impl ReadRow {
+    fn split(self) -> Result<(Paste, Vec<u8>), Error> {
+        let row = Row {
+            id: self.id,
+            kind: self.kind,
+            privacy: self.privacy,
+            content_len: i64::try_from(self.content.len()).map_err(Error::internal)?,
+            syntax: self.syntax,
+            editable: self.editable,
+            password_hash: self.password_hash,
+            wrapped_key: self.wrapped_key,
+            verifier_hash: self.verifier_hash,
+            burn_after_reads: self.burn_after_reads,
+            read_count: self.read_count,
+            last_read_at: self.last_read_at,
+            burned_at: self.burned_at,
+            created_at: self.created_at,
+            expires_at: self.expires_at,
+        };
+        Ok((row.try_into()?, self.content))
     }
 }
 
@@ -443,8 +487,8 @@ pub async fn meta(st: &AppState, id: PasteId, now: i64) -> Result<Paste, Error> 
     let db = db_id(id);
     let row = sqlx::query_as!(
         Row,
-        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", content AS "content!", syntax AS "syntax?",
-                  editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
+        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", length(content) AS "content_len!: i64",
+                  syntax AS "syntax?", editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
                   verifier_hash AS "verifier_hash?", burn_after_reads AS "burn_after_reads!",
                   read_count AS "read_count!", last_read_at AS "last_read_at?", burned_at AS "burned_at?",
                   created_at AS "created_at!", expires_at AS "expires_at?"
@@ -466,8 +510,8 @@ pub async fn meta_for_grant(st: &AppState, id: PasteId, now: i64) -> Result<Past
     let burned_after = now.saturating_sub(BURNED_TTL_SECS);
     let row = sqlx::query_as!(
         Row,
-        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", content AS "content!", syntax AS "syntax?",
-                  editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
+        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", length(content) AS "content_len!: i64",
+                  syntax AS "syntax?", editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
                   verifier_hash AS "verifier_hash?", burn_after_reads AS "burn_after_reads!",
                   read_count AS "read_count!", last_read_at AS "last_read_at?", burned_at AS "burned_at?",
                   created_at AS "created_at!", expires_at AS "expires_at?"
@@ -488,12 +532,22 @@ async fn with_files(st: &AppState, mut p: Paste) -> Result<Paste, Error> {
     Ok(p)
 }
 
-/// Counts one read in a single statement, burning the row on its last allowed read.
-/// `None` means the row is gone, burned or expired.
-async fn count_read(st: &AppState, id: PasteId, now: i64) -> Result<Option<Paste>, Error> {
+/// The pastes of `rows` with their files, which one query loads for all of them.
+async fn with_files_of_all(st: &AppState, rows: Vec<Row>) -> Result<Vec<Paste>, Error> {
+    let mut pastes = rows.into_iter().map(Paste::try_from).collect::<Result<Vec<_>, _>>()?;
+    let mut files = files::list_for(st, &pastes.iter().map(|p| p.id).collect::<Vec<_>>()).await?;
+    for p in &mut pastes {
+        p.files = files.remove(&p.id).unwrap_or_default();
+    }
+    Ok(pastes)
+}
+
+/// Counts one read in a single statement, burning the row on its last allowed read, and returns
+/// the paste with its content. `None` means the row is gone, burned or expired.
+async fn count_read(st: &AppState, id: PasteId, now: i64) -> Result<Option<(Paste, Vec<u8>)>, Error> {
     let db = db_id(id);
     let row = sqlx::query_as!(
-        Row,
+        ReadRow,
         r#"UPDATE pastes SET read_count = read_count + 1, last_read_at = ?,
                   burned_at = CASE WHEN burn_after_reads > 0 AND read_count + 1 >= burn_after_reads THEN ? END
            WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
@@ -511,7 +565,10 @@ async fn count_read(st: &AppState, id: PasteId, now: i64) -> Result<Option<Paste
     .fetch_optional(&st.pool)
     .await?;
     match row {
-        Some(row) => Ok(Some(with_files(st, row.try_into()?).await?)),
+        Some(row) => {
+            let (paste, content) = row.split()?;
+            Ok(Some((with_files(st, paste).await?, content)))
+        }
         None => Ok(None),
     }
 }
@@ -568,13 +625,13 @@ pub async fn read(st: &AppState, id: PasteId, access: Access, ip: IpAddr, now: i
         (Privacy::Private, Access::Anonymous | Access::Admin) => return Err(Error::PasswordRequired),
         _ => None,
     };
-    let paste = count_read(st, id, now).await?.ok_or(Error::NotFound)?;
+    let (paste, content) = count_read(st, id, now).await?.ok_or(Error::NotFound)?;
     let burning = paste.burned_at.is_some();
     let body = match (&dek, paste.kind) {
-        (Some(dek), _) => Body::Text(utf8(crypto::open(dek, &paste.content)?)?),
-        (None, _) if paste.privacy == Privacy::Secret => Body::Cipher(paste.content.clone()),
-        (None, Kind::Url) => Body::Url(utf8(paste.content.clone())?),
-        (None, Kind::Text) => Body::Text(utf8(paste.content.clone())?),
+        (Some(dek), _) => Body::Text(utf8(crypto::open(dek, &content)?)?),
+        (None, _) if paste.privacy == Privacy::Secret => Body::Cipher(content),
+        (None, Kind::Url) => Body::Url(utf8(content)?),
+        (None, Kind::Text) => Body::Text(utf8(content)?),
     };
     let grant = (fresh_grant || burning).then(|| grant::issue(&st.grant_key, id, dek.as_ref(), now));
     Ok(Opened { paste, body, grant })
@@ -714,8 +771,8 @@ pub async fn list_public(st: &AppState, page: u32, now: i64) -> Result<Vec<Paste
     let limit = i64::from(PAGE_SIZE);
     let rows = sqlx::query_as!(
         Row,
-        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", content AS "content!", syntax AS "syntax?",
-                  editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
+        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", length(content) AS "content_len!: i64",
+                  syntax AS "syntax?", editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
                   verifier_hash AS "verifier_hash?", burn_after_reads AS "burn_after_reads!",
                   read_count AS "read_count!", last_read_at AS "last_read_at?", burned_at AS "burned_at?",
                   created_at AS "created_at!", expires_at AS "expires_at?"
@@ -729,19 +786,15 @@ pub async fn list_public(st: &AppState, page: u32, now: i64) -> Result<Vec<Paste
     )
     .fetch_all(&st.pool)
     .await?;
-    let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        out.push(with_files(st, row.try_into()?).await?);
-    }
-    Ok(out)
+    with_files_of_all(st, rows).await
 }
 
 /// Every live paste of any level, newest first, for the admin table.
 pub async fn list_all(st: &AppState, now: i64) -> Result<Vec<Paste>, Error> {
     let rows = sqlx::query_as!(
         Row,
-        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", content AS "content!", syntax AS "syntax?",
-                  editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
+        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", length(content) AS "content_len!: i64",
+                  syntax AS "syntax?", editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
                   verifier_hash AS "verifier_hash?", burn_after_reads AS "burn_after_reads!",
                   read_count AS "read_count!", last_read_at AS "last_read_at?", burned_at AS "burned_at?",
                   created_at AS "created_at!", expires_at AS "expires_at?"
@@ -752,11 +805,7 @@ pub async fn list_all(st: &AppState, now: i64) -> Result<Vec<Paste>, Error> {
     )
     .fetch_all(&st.pool)
     .await?;
-    let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        out.push(with_files(st, row.try_into()?).await?);
-    }
-    Ok(out)
+    with_files_of_all(st, rows).await
 }
 
 /// Removes expired rows and rows burned more than [`BURNED_TTL_SECS`] ago, with their files.

@@ -64,6 +64,11 @@ fn secret_paste(iterations: u32) -> NewPaste {
     }
 }
 
+/// The stored content bytes, read straight from the table.
+async fn stored_content(st: &AppState, id: PasteId) -> Vec<u8> {
+    sqlx::query_scalar("SELECT content FROM pastes WHERE id = ?").bind(id.0 as i64).fetch_one(&st.pool).await.unwrap()
+}
+
 async fn row_count(st: &AppState) -> i64 {
     sqlx::query_scalar("SELECT COUNT(*) FROM pastes").fetch_one(&st.pool).await.unwrap()
 }
@@ -138,7 +143,9 @@ async fn a_private_paste_needs_its_password() {
     let opened = read(&app.st, id, Access::Password("hunter2".into())).await.unwrap();
     assert_eq!(text(&opened.body), plain);
     let stored = paste::meta(&app.st, id, NOW).await.unwrap();
-    assert!(!stored.content.windows(plain.len()).any(|w| w == plain.as_bytes()));
+    let content = stored_content(&app.st, id).await;
+    assert_eq!(stored.content_len, content.len() as u64);
+    assert!(!content.windows(plain.len()).any(|w| w == plain.as_bytes()));
     assert!(stored.wrapped_key.is_some());
     assert!(stored.password_hash.is_none());
 }
@@ -579,7 +586,7 @@ async fn editing_a_readonly_or_private_paste_needs_its_password() {
         let opened = paste::read(&app.st, id, access, OTHER_IP, NOW).await.unwrap();
         assert_eq!(text(&opened.body), "v2");
         if privacy == Privacy::Private {
-            assert!(!opened.paste.content.windows(2).any(|w| w == b"v2"));
+            assert!(!stored_content(&app.st, id).await.windows(2).any(|w| w == b"v2"));
         }
     }
 }

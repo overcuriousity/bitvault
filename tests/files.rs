@@ -664,3 +664,28 @@ async fn a_file_part_without_a_filename_is_stored_under_a_placeholder() {
     let stored: Vec<_> = p.files.iter().map(|f| (f.name.as_str(), f.size, f.mime.as_str())).collect();
     assert_eq!(stored, vec![("file-1", 3, "application/octet-stream"), ("empty.txt", 0, "text/plain")]);
 }
+
+#[tokio::test]
+async fn lists_carry_each_pastes_files_and_content_size_without_the_content() {
+    let app = support::app().await;
+    let mut with_files = Staging::new(&app.st.files_dir).unwrap();
+    with_files.add("a.txt", "", body(b"aaa"), LIMIT).await.unwrap();
+    with_files.add("b.txt", "", body(b"bbbbb"), LIMIT).await.unwrap();
+    let two = paste::create(&app.st, new("two files", Privacy::Public), Some(with_files), NOW).await.unwrap();
+    let none = paste::create(&app.st, new("no files here", Privacy::Public), None, NOW + 1).await.unwrap();
+    let mut one = Staging::new(&app.st.files_dir).unwrap();
+    one.add("c.txt", "", body(b"c"), LIMIT).await.unwrap();
+    let hidden = paste::create(&app.st, new("x", Privacy::Unlisted), Some(one), NOW + 2).await.unwrap();
+
+    let listed = paste::list_public(&app.st, 1, NOW + 10).await.unwrap();
+    assert_eq!(listed.iter().map(|p| p.id).collect::<Vec<_>>(), [none, two]);
+    let names = |p: &paste::Paste| p.files.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&listed[1]), ["a.txt", "b.txt"]);
+    assert!(listed[0].files.is_empty());
+    assert_eq!((listed[0].content_len, listed[1].content_len), (13, 9));
+
+    let all = paste::list_all(&app.st, NOW + 10).await.unwrap();
+    assert_eq!(all.iter().map(|p| p.id).collect::<Vec<_>>(), [hidden, none, two]);
+    assert_eq!(names(&all[0]), ["c.txt"]);
+    assert_eq!(all[2].files.iter().map(|f| f.size).sum::<u64>(), 8);
+}

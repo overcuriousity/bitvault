@@ -178,7 +178,7 @@ async fn table(
         return Ok(Redirect::to("/admin/sign-in").into_response());
     }
     let pastes = paste::list_all(&st, domain::now()).await?;
-    let content: u64 = pastes.iter().map(|p| p.content.len() as u64).sum();
+    let content: u64 = pastes.iter().map(|p| p.content_len).sum();
     let files: u64 = pastes.iter().flat_map(|p| &p.files).map(|f| f.size).sum();
     let rows = pastes
         .iter()
@@ -186,7 +186,7 @@ async fn table(
             words: p.id.words(),
             privacy: privacy_label(p.privacy),
             kind: if p.kind == domain::Kind::Url { "Link" } else { "Text" },
-            size: size(p.content.len() as u64 + p.files.iter().map(|f| f.size).sum::<u64>()),
+            size: size(p.content_len + p.files.iter().map(|f| f.size).sum::<u64>()),
             files: p.files.len(),
             created: date(p.created_at),
             expires: p.expires_at.map_or_else(|| "Never".to_owned(), date),

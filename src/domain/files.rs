@@ -4,7 +4,7 @@
 //! Bytes are never stored under a user-supplied name: the path is always the paste ID and the
 //! file's position. The sanitised name lives only in `paste_files`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -302,6 +302,32 @@ pub(crate) async fn list(st: &AppState, id: PasteId) -> Result<Vec<FileMeta>, Er
     .fetch_all(&st.pool)
     .await?;
     rows.into_iter().map(FileMeta::try_from).collect()
+}
+
+/// The files of every paste in `ids`, in one query, each paste's in position order. Pastes
+/// without files are absent from the map.
+pub(crate) async fn list_for(st: &AppState, ids: &[PasteId]) -> Result<HashMap<PasteId, Vec<FileMeta>>, Error> {
+    let mut out: HashMap<PasteId, Vec<FileMeta>> = HashMap::new();
+    if ids.is_empty() {
+        return Ok(out);
+    }
+    // A JSON array keeps it one statement for any number of pastes.
+    let ids_json =
+        serde_json::to_string(&ids.iter().map(|id| db_id(*id)).collect::<Vec<_>>()).map_err(Error::internal)?;
+    let rows = sqlx::query!(
+        r#"SELECT paste_id AS "paste_id!", position AS "position!", name AS "name!", size AS "size!", mime AS "mime!"
+           FROM paste_files WHERE paste_id IN (SELECT value FROM json_each(?))
+           ORDER BY paste_id, position"#,
+        ids_json,
+    )
+    .fetch_all(&st.pool)
+    .await?;
+    for r in rows {
+        let id = PasteId(u64::try_from(r.paste_id).map_err(Error::internal)?);
+        let meta = FileMeta::try_from(FileRow { position: r.position, name: r.name, size: r.size, mime: r.mime })?;
+        out.entry(id).or_default().push(meta);
+    }
+    Ok(out)
 }
 
 async fn privacy(st: &AppState, id: PasteId) -> Result<String, Error> {

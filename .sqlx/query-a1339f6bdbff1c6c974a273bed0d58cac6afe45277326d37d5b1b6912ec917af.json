@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id AS \"id!\", kind AS \"kind!\", privacy AS \"privacy!\", content AS \"content!\", syntax AS \"syntax?\",\n                  editable AS \"editable!: bool\", password_hash AS \"password_hash?\", wrapped_key AS \"wrapped_key?\",\n                  verifier_hash AS \"verifier_hash?\", burn_after_reads AS \"burn_after_reads!\",\n                  read_count AS \"read_count!\", last_read_at AS \"last_read_at?\", burned_at AS \"burned_at?\",\n                  created_at AS \"created_at!\", expires_at AS \"expires_at?\"\n           FROM pastes\n           WHERE burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)\n           ORDER BY created_at DESC, id DESC",
+  "query": "SELECT id AS \"id!\", kind AS \"kind!\", privacy AS \"privacy!\", length(content) AS \"content_len!: i64\",\n                  syntax AS \"syntax?\", editable AS \"editable!: bool\", password_hash AS \"password_hash?\", wrapped_key AS \"wrapped_key?\",\n                  verifier_hash AS \"verifier_hash?\", burn_after_reads AS \"burn_after_reads!\",\n                  read_count AS \"read_count!\", last_read_at AS \"last_read_at?\", burned_at AS \"burned_at?\",\n                  created_at AS \"created_at!\", expires_at AS \"expires_at?\"\n           FROM pastes\n           WHERE burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)\n           ORDER BY created_at DESC, id DESC",
   "describe": {
     "columns": [
       {
@@ -19,9 +19,9 @@
         "type_info": "Text"
       },
       {
-        "name": "content!",
+        "name": "content_len!: i64",
         "ordinal": 3,
-        "type_info": "Blob"
+        "type_info": "Null"
       },
       {
         "name": "syntax?",
@@ -86,7 +86,7 @@
       false,
       false,
       false,
-      false,
+      null,
       true,
       false,
       true,
@@ -100,5 +100,5 @@
       true
     ]
   },
-  "hash": "b30a2cb5a92f8389d8bc54db711a66ce0306fa02fbc5cc2a6d99dac8c4cde0fc"
+  "hash": "a1339f6bdbff1c6c974a273bed0d58cac6afe45277326d37d5b1b6912ec917af"
 }
