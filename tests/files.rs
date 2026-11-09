@@ -520,3 +520,147 @@ async fn a_secret_paste_needs_its_parts_and_files_keep_their_container() {
     let res = weak.add_container(body(&secret_container(b"x", 1000)), LIMIT).await;
     assert!(matches!(res, Err(Error::UnsupportedFormat)));
 }
+
+fn status_of(res: axum::http::Response<axum::body::Body>) -> StatusCode {
+    res.status()
+}
+
+#[tokio::test]
+async fn part_headers_that_never_end_are_refused() {
+    let app = support::app().await;
+    let b = support::BOUNDARY;
+    let junk = vec![b'a'; 4 * MIB];
+    let first_part =
+        [format!("--{b}\r\nContent-Disposition: form-data; name=\"x\"\r\nX-Junk: ").as_bytes(), &junk].concat();
+    let second_part = [
+        support::multipart_parts(&[("content", None, b"hi")]).as_slice(),
+        format!("--{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a\"\r\nX-Junk: ").as_bytes(),
+        &junk,
+    ]
+    .concat();
+    let headerless = [format!("--{b}\r\n\r\n").as_bytes(), &junk].concat();
+    let preamble = junk.clone();
+    for body in [first_part, second_part, headerless, preamble] {
+        let res = app.post_multipart_body("/", axum::body::Body::from(body)).await;
+        assert_eq!(status_of(res), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+    assert_eq!(staging_entries(&app.st), 0);
+    assert_eq!(row_count(&app.st).await, 0);
+}
+
+#[tokio::test]
+async fn a_form_split_into_tiny_chunks_still_parses() {
+    let app = support::app().await;
+    let file = bytes(200_000, 13);
+    let encoded = support::multipart_body(&[
+        ("content", None, b"split"),
+        ("privacy", None, b"public"),
+        ("file", Some("a.bin"), &file),
+        ("file", Some("b.txt"), b"second"),
+    ]);
+    let chunks: Vec<Result<Bytes, std::io::Error>> = encoded.chunks(7).map(|c| Ok(Bytes::copy_from_slice(c))).collect();
+    let trickle = stream::iter(chunks).then(|chunk| async {
+        tokio::task::yield_now().await;
+        chunk
+    });
+    let res = app.post_multipart_body("/", axum::body::Body::from_stream(trickle)).await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    let location = res.headers()[header::LOCATION].to_str().unwrap().to_owned();
+    let id = words::parse(location.trim_start_matches('/')).unwrap();
+    let (_, b) = files::open(&app.st, id, 1, None).await.unwrap();
+    assert_eq!(collect(b).await.unwrap(), file);
+    let (meta, b) = files::open(&app.st, id, 2, None).await.unwrap();
+    assert_eq!(meta.name, "b.txt");
+    assert_eq!(collect(b).await.unwrap(), b"second");
+}
+
+async fn post_secret(app: &support::App, content: &[u8], file: &[u8]) -> StatusCode {
+    let salt = [5u8; 16];
+    let verifier = hex::encode(crypto::browser_verifier(SECRET_PASSWORD, &salt));
+    app.post_multipart(
+        "/",
+        &[
+            ("privacy", None, b"secret"),
+            ("content_container", None, content),
+            ("verifier_salt", None, hex::encode(salt).as_bytes()),
+            ("verifier", None, verifier.as_bytes()),
+            ("file", Some("blob"), file),
+        ],
+    )
+    .await
+    .status()
+}
+
+#[tokio::test]
+async fn secret_limits_allow_for_the_container_overhead() {
+    let app = support::app_with("[app]\nmax_secret_file_mb = 1\n").await;
+    let content = secret_container(br#"{"text":"","files":["a"]}"#, PBKDF2_ITERATIONS);
+    let at_limit = secret_container(&bytes(MIB, 14), PBKDF2_ITERATIONS);
+    assert_eq!(post_secret(&app, &content, &at_limit).await, StatusCode::SEE_OTHER);
+    let over = secret_container(&bytes(MIB + (64 << 10), 15), PBKDF2_ITERATIONS);
+    assert_eq!(post_secret(&app, &content, &over).await, StatusCode::PAYLOAD_TOO_LARGE);
+
+    // A megabyte of text can grow sixfold as JSON (control characters become \u00XX).
+    let escaped = format!(r#"{{"text":"{}","files":["a"]}}"#, "\\u0001".repeat(MIB));
+    let big_content = secret_container(escaped.as_bytes(), PBKDF2_ITERATIONS);
+    let file = secret_container(b"x", PBKDF2_ITERATIONS);
+    assert_eq!(post_secret(&app, &big_content, &file).await, StatusCode::SEE_OTHER);
+}
+
+/// A body whose last file part never finishes: the request can only complete if the server
+/// refuses the form before reading that file.
+fn stalled_after(parts: &[(&str, Option<&str>, &[u8])]) -> axum::body::Body {
+    let mut head = support::multipart_parts(parts);
+    head.extend_from_slice(
+        format!("--{}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.bin\"\r\n\r\n", support::BOUNDARY)
+            .as_bytes(),
+    );
+    head.extend_from_slice(&bytes(100_000, 16));
+    let s = stream::iter([Ok::<_, std::io::Error>(Bytes::from(head))]).chain(stream::pending());
+    axum::body::Body::from_stream(s)
+}
+
+#[tokio::test]
+async fn a_refused_level_or_container_stops_the_form_before_any_file() {
+    let app = support::app_with("[app]\nprivacy_levels = [\"public\", \"unlisted\", \"secret\"]\n").await;
+    let within = std::time::Duration::from_secs(10);
+    let res = tokio::time::timeout(
+        within,
+        app.post_multipart_body("/", stalled_after(&[("content", None, b"x"), ("privacy", None, b"private")])),
+    )
+    .await
+    .expect("the form is refused without waiting for the file");
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(body_text(res).await.contains("That privacy level is not offered here."));
+
+    let weak = secret_container(br#"{"text":"hi","files":["a"]}"#, 1000);
+    let res = tokio::time::timeout(
+        within,
+        app.post_multipart_body(
+            "/",
+            stalled_after(&[("privacy", None, b"secret"), ("content_container", None, &weak)]),
+        ),
+    )
+    .await
+    .expect("the form is refused without waiting for the file");
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(staging_entries(&app.st), 0);
+    assert_eq!(row_count(&app.st).await, 0);
+}
+
+#[tokio::test]
+async fn a_file_part_without_a_filename_is_stored_under_a_placeholder() {
+    let app = support::app().await;
+    let res = app
+        .post_multipart(
+            "/",
+            &[("content", None, b"x"), ("file", None, b"abc"), ("file", None, b""), ("file", Some("empty.txt"), b"")],
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    let location = res.headers()[header::LOCATION].to_str().unwrap().to_owned();
+    let id = words::parse(location.trim_start_matches('/')).unwrap();
+    let p = paste::meta(&app.st, id, bitvault::domain::now()).await.unwrap();
+    let stored: Vec<_> = p.files.iter().map(|f| (f.name.as_str(), f.size, f.mime.as_str())).collect();
+    assert_eq!(stored, vec![("file-1", 3, "application/octet-stream"), ("empty.txt", 0, "text/plain")]);
+}

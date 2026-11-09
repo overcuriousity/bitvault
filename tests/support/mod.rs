@@ -74,31 +74,46 @@ impl App {
 
     /// Each part is `(name, filename, bytes)`; a part without a filename is a plain field.
     pub async fn post_multipart(&self, uri: &str, parts: &[(&str, Option<&str>, &[u8])]) -> Response<Body> {
-        let mut body = Vec::new();
-        for (name, filename, bytes) in parts {
-            body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
-            match filename {
-                Some(f) => body.extend_from_slice(
-                    format!(
-                        "Content-Disposition: form-data; name=\"{name}\"; filename=\"{f}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
-                    )
-                    .as_bytes(),
-                ),
-                None => body.extend_from_slice(
-                    format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
-                ),
-            }
-            body.extend_from_slice(bytes);
-            body.extend_from_slice(b"\r\n");
-        }
-        body.extend_from_slice(format!("--{BOUNDARY}--\r\n").as_bytes());
+        self.post_multipart_body(uri, Body::from(multipart_body(parts))).await
+    }
+
+    /// Posts an already-encoded multipart body (see [`multipart_body`]).
+    pub async fn post_multipart_body(&self, uri: &str, body: Body) -> Response<Body> {
         let r = self
             .req("POST", uri)
             .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={BOUNDARY}"))
-            .body(Body::from(body))
+            .body(body)
             .unwrap();
         self.send(r).await
     }
+}
+
+/// Encodes parts as `(name, filename, bytes)`, closing delimiter included.
+pub fn multipart_body(parts: &[(&str, Option<&str>, &[u8])]) -> Vec<u8> {
+    let mut body = multipart_parts(parts);
+    body.extend_from_slice(format!("--{BOUNDARY}--\r\n").as_bytes());
+    body
+}
+
+/// Encodes parts without the closing delimiter, for bodies that continue.
+pub fn multipart_parts(parts: &[(&str, Option<&str>, &[u8])]) -> Vec<u8> {
+    let mut body = Vec::new();
+    for (name, filename, bytes) in parts {
+        body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
+        match filename {
+            Some(f) => body.extend_from_slice(
+                format!(
+                    "Content-Disposition: form-data; name=\"{name}\"; filename=\"{f}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+                )
+                .as_bytes(),
+            ),
+            None => body
+                .extend_from_slice(format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes()),
+        }
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(b"\r\n");
+    }
+    body
 }
 
 pub async fn body_text(res: Response<Body>) -> String {

@@ -3,17 +3,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use askama::Template;
 use axum::Router;
-use axum::extract::multipart::{Field, MultipartError, MultipartRejection};
-use axum::extract::{Multipart, State};
-use axum::http::StatusCode;
+use axum::extract::{Request, State};
+use axum::http::header;
 use axum::response::{Html, Redirect};
 use axum::routing::{get, post};
-use futures_util::TryStreamExt;
+use futures_util::{StreamExt, TryStreamExt, stream};
+use multer::{Field, Multipart};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
+use super::multipart::{Guarded, too_large};
 use super::page;
-use crate::domain::crypto::SALT_LEN;
+use crate::domain::crypto::{self, SALT_LEN};
 use crate::domain::expiry::Expiry;
 use crate::domain::files::Staging;
 use crate::domain::paste::{self, NewPaste, SecretParts};
@@ -25,9 +26,10 @@ use crate::state::AppState;
 const MIB: u64 = 1 << 20;
 /// Each text field of the create form.
 const TEXT_LIMIT: usize = 1 << 20;
-// A secret paste's content container holds up to TEXT_LIMIT of text plus the file-name list,
-// a header and one tag per 64 KiB chunk.
-const CONTAINER_LIMIT: usize = TEXT_LIMIT + (64 << 10);
+// A secret paste's content container holds JSON of up to TEXT_LIMIT of text, which escaping can
+// grow sixfold (a control character becomes \u00XX), plus 64 KiB of file names and the container
+// overhead.
+const CONTAINER_LIMIT: usize = crypto::browser_container_max_len(6 * TEXT_LIMIT as u64 + (64 << 10)) as usize;
 
 #[derive(Template)]
 #[template(path = "home.html")]
@@ -88,15 +90,11 @@ fn invalid(msg: &str) -> Error {
     Error::Invalid(msg.to_owned())
 }
 
-fn multipart_error(e: &MultipartError) -> Error {
-    if e.status() == StatusCode::PAYLOAD_TOO_LARGE {
-        Error::TooLarge
-    } else {
-        invalid("The form could not be read. Reload the page and try again.")
-    }
+fn multipart_error(e: &multer::Error) -> Error {
+    if too_large(e) { Error::TooLarge } else { invalid("The form could not be read. Reload the page and try again.") }
 }
 
-async fn read_field(mut field: Field<'_>, limit: usize) -> Result<Vec<u8>, Error> {
+async fn read_field(mut field: Field<'static>, limit: usize) -> Result<Vec<u8>, Error> {
     let mut out = Vec::new();
     while let Some(chunk) = field.chunk().await.map_err(|e| multipart_error(&e))? {
         if out.len() + chunk.len() > limit {
@@ -139,11 +137,15 @@ fn parse_syntax(value: &str) -> Result<Option<String>, Error> {
 }
 
 impl Form {
-    fn set(&mut self, name: &str, value: Vec<u8>, staged: bool) -> Result<(), Error> {
+    fn set(&mut self, name: &str, value: Vec<u8>, staged: bool, offered: &[String]) -> Result<(), Error> {
         match name {
             "content" => self.content = text(value)?,
             "privacy" => {
                 let privacy = parse_privacy(&text(value)?)?;
+                // Checked here as well as on create, so files never stream in for a refused level.
+                if !offered.iter().any(|l| l == privacy.as_str()) {
+                    return Err(invalid("That privacy level is not offered here. Choose another one."));
+                }
                 // Files are stored the way the level needs while they stream, so the level
                 // cannot change once one has arrived.
                 if staged && self.privacy != Some(privacy) {
@@ -166,7 +168,10 @@ impl Form {
             "syntax" => self.syntax = parse_syntax(&text(value)?)?,
             "editable" => self.editable = matches!(text(value)?.trim(), "on" | "true" | "1"),
             "password" => self.password = Some(text(value)?).filter(|p| !p.is_empty()),
-            "content_container" => self.content_container = Some(value),
+            "content_container" => {
+                crypto::check_browser_container(&value)?;
+                self.content_container = Some(value);
+            }
             "verifier_salt" => self.verifier_salt = Some(hex_array(&value)?),
             "verifier" => self.verifier = Some(hex_array(&value)?),
             _ => {}
@@ -205,14 +210,19 @@ impl Form {
 
 /// `POST /`: reads the multipart form in order, streaming each file into a staging directory
 /// (encrypted for private pastes) and keeping only the small fields in memory.
-async fn create(
-    State(st): State<AppState>,
-    multipart: Result<Multipart, MultipartRejection>,
-) -> Result<Redirect, Error> {
-    let mut multipart = multipart.map_err(|_| invalid("Send the form as multipart/form-data."))?;
+async fn create(State(st): State<AppState>, req: Request) -> Result<Redirect, Error> {
+    let boundary = req
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|ct| multer::parse_boundary(ct).ok())
+        .ok_or_else(|| invalid("Send the form as multipart/form-data."))?;
+    let body = Guarded::new(req.into_body().into_data_stream(), &boundary);
+    let mut multipart = Multipart::new(body, boundary);
     let app = &st.cfg.app;
     let budget = app.max_file_mb.saturating_mul(MIB);
-    let secret_limit = app.max_secret_file_mb.saturating_mul(MIB);
+    // The browser limits plaintext; the server sees the container, which is slightly larger.
+    let secret_limit = crypto::browser_container_max_len(app.max_secret_file_mb.saturating_mul(MIB));
     let mut gate = Gate { expected: app.uploader_password.as_deref(), passed: false };
     let mut form = Form::default();
     let mut staging: Option<Staging> = None;
@@ -224,7 +234,7 @@ async fn create(
             if name == "uploader_password" {
                 gate.check(&value)?;
             } else {
-                form.set(&name, value, staging.is_some())?;
+                form.set(&name, value, staging.is_some(), &app.privacy_levels)?;
             }
             continue;
         }
@@ -234,11 +244,21 @@ async fn create(
             None => *form.privacy.insert(default_privacy(&st)?),
         };
         let filename = field.file_name().unwrap_or_default().to_owned();
-        let claimed_mime = field.content_type().unwrap_or_default().to_owned();
-        // Browsers send an unnamed, empty part when no file was chosen.
-        if filename.is_empty() && privacy != Privacy::Secret {
-            continue;
-        }
+        let claimed_mime = field.content_type().map(ToString::to_string).unwrap_or_default();
+        // Browsers send an empty, unnamed part when no file was chosen, so a part is only
+        // staged once it has a first byte.
+        let mut field = field;
+        let first = loop {
+            match field.chunk().await.map_err(|e| multipart_error(&e))? {
+                Some(chunk) if chunk.is_empty() => {}
+                other => break other,
+            }
+        };
+        let first = match first {
+            Some(chunk) => chunk,
+            None if filename.is_empty() && privacy != Privacy::Secret => continue,
+            None => bytes::Bytes::new(),
+        };
         let staged = match &mut staging {
             Some(s) => s,
             None if privacy == Privacy::Private => staging.insert(Staging::new_private(&st.files_dir)?),
@@ -247,8 +267,8 @@ async fn create(
         let remaining = budget.saturating_sub(staged.total_size());
         // The body limit surfaces as a stream error; remember it so it is reported as too large.
         let over = AtomicBool::new(false);
-        let body = Box::pin(field.inspect_err(|e| {
-            if e.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        let body = Box::pin(stream::iter([Ok(first)]).chain(field).inspect_err(|e| {
+            if too_large(e) {
                 over.store(true, Ordering::Relaxed);
             }
         }));

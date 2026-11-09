@@ -1,5 +1,6 @@
 pub mod errors;
 pub mod home;
+pub mod multipart;
 pub mod shell;
 
 use askama::Template;

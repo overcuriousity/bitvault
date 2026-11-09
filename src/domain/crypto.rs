@@ -599,6 +599,14 @@ fn browser_iterations_allowed(iterations: Option<u32>) -> bool {
     iterations.is_some_and(|i| (PBKDF2_ITERATIONS..=PBKDF2_MAX_ITERATIONS).contains(&i))
 }
 
+/// The longest browser (alg 2, kdf 2) container for `plain_len` bytes of plaintext: header,
+/// plaintext and one tag per 64 KiB chunk, plus one for a possible empty final chunk.
+pub const fn browser_container_max_len(plain_len: u64) -> u64 {
+    let header = (FIXED_LEN + 4 + SALT_LEN + AES_GCM_PREFIX_LEN) as u64;
+    let tags = (plain_len.div_ceil(CHUNK_LEN as u64) + 1).saturating_mul(TAG_LEN as u64);
+    header.saturating_add(plain_len).saturating_add(tags)
+}
+
 /// Accepts only full-strength browser containers: alg 2, kdf 2, 600 000 to 6 000 000 iterations,
 /// a non-empty body.
 pub fn check_browser_container(container: &[u8]) -> Result<(), Error> {
