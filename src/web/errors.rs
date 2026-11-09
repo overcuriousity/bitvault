@@ -36,6 +36,7 @@ fn heading(status: StatusCode) -> &'static str {
 pub async fn render(State(st): State<AppState>, req: Request, next: Next) -> Response {
     let api = req.uri().path().starts_with("/api/");
     let htmx = req.headers().contains_key("hx-request");
+    let admin = req.extensions().get::<super::admin::MaybeAdmin>().is_some_and(|a| a.0);
     let res = next.run(req).await;
     let Some(notice) = res.extensions().get::<ErrorNotice>().cloned() else {
         return res;
@@ -53,7 +54,7 @@ pub async fn render(State(st): State<AppState>, req: Request, next: Next) -> Res
     let page = ErrorPage { heading: heading(notice.status), message: &notice.message }
         .render()
         .map_err(Error::internal)
-        .and_then(|body| page(&st, false, "", heading(notice.status), body));
+        .and_then(|body| page(&st, admin, "", heading(notice.status), body));
     match page {
         Ok(html) => (notice.status, html).into_response(),
         Err(_) => res,

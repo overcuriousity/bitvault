@@ -459,6 +459,30 @@ pub async fn meta(st: &AppState, id: PasteId, now: i64) -> Result<Paste, Error> 
     with_files(st, row.try_into()?).await
 }
 
+/// Like [`meta`], but also finds a paste that burned less than [`BURNED_TTL_SECS`] ago, so the
+/// burning read's grant can still fetch its files. Only for callers holding a valid grant for `id`.
+pub async fn meta_for_grant(st: &AppState, id: PasteId, now: i64) -> Result<Paste, Error> {
+    let db = db_id(id);
+    let burned_after = now.saturating_sub(BURNED_TTL_SECS);
+    let row = sqlx::query_as!(
+        Row,
+        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", content AS "content!", syntax AS "syntax?",
+                  editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
+                  verifier_hash AS "verifier_hash?", burn_after_reads AS "burn_after_reads!",
+                  read_count AS "read_count!", last_read_at AS "last_read_at?", burned_at AS "burned_at?",
+                  created_at AS "created_at!", expires_at AS "expires_at?"
+           FROM pastes
+           WHERE id = ? AND (burned_at IS NULL OR burned_at > ?) AND (expires_at IS NULL OR expires_at > ?)"#,
+        db,
+        burned_after,
+        now,
+    )
+    .fetch_optional(&st.pool)
+    .await?
+    .ok_or(Error::NotFound)?;
+    with_files(st, row.try_into()?).await
+}
+
 async fn with_files(st: &AppState, mut p: Paste) -> Result<Paste, Error> {
     p.files = files::list(st, p.id).await?;
     Ok(p)

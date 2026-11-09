@@ -15,8 +15,14 @@ pub const BOUNDARY: &str = "bitvault-test-boundary";
 pub struct App {
     pub router: Router,
     pub st: AppState,
+    /// Sent as `Cookie` on every request once set, e.g. by [`App::sign_in_admin`].
+    pub cookie: Option<String>,
     _dir: tempfile::TempDir,
 }
+
+/// The admin password of [`ADMIN_CONFIG`].
+pub const ADMIN_PASSWORD: &str = "admin-pw-123";
+pub const ADMIN_CONFIG: &str = "[app]\nadmin_password = \"admin-pw-123\"\n";
 
 pub async fn app() -> App {
     app_with("").await
@@ -42,7 +48,7 @@ async fn app_from(cfg: Config, dir: tempfile::TempDir, extra: Router<AppState>) 
     let pool = bitvault::db::open(&cfg.data_dir()).await.unwrap();
     let (router, st) = bitvault::app::build_with(cfg, pool, extra).await.unwrap();
     let router = router.layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 5000))));
-    App { router, st, _dir: dir }
+    App { router, st, cookie: None, _dir: dir }
 }
 
 impl App {
@@ -55,7 +61,18 @@ impl App {
         if method != "GET" {
             b = b.header(header::ORIGIN, "http://localhost:8080");
         }
+        if let Some(cookie) = &self.cookie {
+            b = b.header(header::COOKIE, cookie);
+        }
         b
+    }
+
+    /// Signs in with [`ADMIN_PASSWORD`] and keeps the session cookie for later requests.
+    pub async fn sign_in_admin(&mut self) {
+        let res = self.post_form("/admin/sign-in", &format!("password={ADMIN_PASSWORD}")).await;
+        assert_eq!(res.status(), axum::http::StatusCode::SEE_OTHER, "admin sign-in failed");
+        let set = res.headers()[header::SET_COOKIE].to_str().unwrap();
+        self.cookie = Some(set.split(';').next().unwrap().to_owned());
     }
 
     pub async fn get(&self, uri: &str) -> Response<Body> {

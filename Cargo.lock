@@ -429,6 +429,7 @@ dependencies = [
  "syntect",
  "tempfile",
  "thiserror",
+ "time",
  "tokio",
  "tokio-util",
  "tower",

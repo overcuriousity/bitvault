@@ -1,0 +1,8 @@
+{% import "components/delete.html" as delete_form %}
+{% import "components/notice.html" as notice %}
+<div class="oc-columns">
+<div class="oc-page-head"><h1>Delete {{ words }}</h1></div>
+{% call notice::notice("danger", notice) %}{% endcall %}
+{% call delete_form::form(delete, trash) %}{% endcall %}
+<p><a href="/{{ words }}">Back to the paste</a></p>
+</div>

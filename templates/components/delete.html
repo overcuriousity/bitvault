@@ -1,0 +1,18 @@
+{# d is a web::paste::DeleteView; icon is trusted markup. No confirmation: delete is immediate.
+   A secret paste's password input has no name: secret.js derives the verifier from it. #}
+{% macro form(d, icon) %}
+<form class="bv-delete" method="post" action="{{ d.action }}"{% if d.secret() %} data-verifier-salt="{{ d.salt }}"{% endif %}>
+  {%- if d.password %}
+  <div class="oc-field">
+    <label for="delete-password">Password to delete</label>
+    <input class="oc-input" id="delete-password" name="password" type="password" autocomplete="current-password">
+  </div>
+  {%- else if d.secret() %}
+  <div class="oc-field">
+    <label for="delete-password">Password to delete</label>
+    <input class="oc-input" id="delete-password" type="password" autocomplete="current-password">
+  </div>
+  {%- endif %}
+  <button type="submit" class="oc-btn oc-btn--icon" aria-label="Delete paste" data-oc-tip="Delete paste">{{ icon|safe }}</button>
+</form>
+{% endmacro %}

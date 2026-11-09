@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use bitvault::domain::paste;
 use bitvault::{app, config, db};
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
@@ -39,10 +40,27 @@ async fn run(cli: Cli) -> Result<(), bitvault::error::Error> {
     tracing::info!("Listening on {}", st.dep.origin);
     let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]);
     spawn_watchdog();
+    spawn_purge(st.clone());
     axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>())
         .with_graceful_shutdown(shutdown())
         .await
         .map_err(bitvault::error::Error::internal)
+}
+
+/// Removes expired pastes and pastes burned more than ten minutes ago, with their files.
+fn spawn_purge(st: bitvault::state::AppState) {
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(std::time::Duration::from_secs(60));
+        every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            every.tick().await;
+            match paste::purge(&st, bitvault::domain::now()).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(removed = n, "purged expired and burned pastes"),
+                Err(e) => tracing::error!(error = %e, "the purge failed; it runs again in a minute"),
+            }
+        }
+    });
 }
 
 fn spawn_watchdog() {

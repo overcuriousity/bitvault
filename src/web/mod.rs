@@ -1,13 +1,31 @@
+pub mod admin;
+pub mod docs;
 pub mod errors;
+pub mod files;
+pub mod guide;
 pub mod home;
+pub mod list;
 pub mod multipart;
+pub mod paste;
+pub mod pwa;
 pub mod shell;
 
 use askama::Template;
 use axum::response::Html;
 
+use crate::domain::Privacy;
 use crate::error::Error;
 use crate::state::AppState;
+
+/// Asset URLs a page adds to the shell's own.
+#[derive(Debug, Default)]
+pub struct Extras {
+    pub css: Vec<String>,
+    /// ES modules.
+    pub js: Vec<String>,
+    /// Classic deferred scripts, run before the modules.
+    pub scripts: Vec<String>,
+}
 
 /// Wraps `body` (already-escaped HTML) in the page shell.
 pub fn page(
@@ -17,16 +35,35 @@ pub fn page(
     title: &str,
     body: String,
 ) -> Result<Html<String>, Error> {
+    page_with(st, admin, current, title, body, Extras::default())
+}
+
+/// [`page`] with extra stylesheets and scripts.
+pub fn page_with(
+    st: &AppState,
+    admin: bool,
+    current: &'static str,
+    title: &str,
+    body: String,
+    extras: Extras,
+) -> Result<Html<String>, Error> {
     let layout = shell::Layout {
         title: title.to_owned(),
         current,
         body,
         admin,
-        extra_css: Vec::new(),
-        extra_js: Vec::new(),
+        sign_in: st.admin.is_some(),
+        extra_css: extras.css,
+        extra_js: extras.js,
+        extra_scripts: extras.scripts,
         cfg: st.cfg.clone(),
     };
     layout.render().map(Html).map_err(Error::internal)
+}
+
+/// Renders a template, mapping a render failure to an internal error.
+pub fn render(t: &impl Template) -> Result<String, Error> {
+    t.render().map_err(Error::internal)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -60,4 +97,69 @@ pub fn icon(name: &str, size: IconSize) -> String {
 /// that quote the user's input readable in the source as well as on screen.
 pub fn escape_text(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+/// `?deleted=word-word-word`, set by the delete redirect.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct DeletedQuery {
+    pub deleted: Option<String>,
+}
+
+impl DeletedQuery {
+    /// "Deleted 'x'", only for a well-formed paste address, so the page cannot be made to say anything else.
+    pub fn notice(&self) -> Option<String> {
+        let id = crate::domain::words::parse(self.deleted.as_deref()?).ok()?;
+        Some(format!("Deleted '{}'", id.words()))
+    }
+}
+
+pub fn privacy_label(p: Privacy) -> &'static str {
+    match p {
+        Privacy::Public => "Public",
+        Privacy::Unlisted => "Unlisted",
+        Privacy::Readonly => "Read-only",
+        Privacy::Private => "Private",
+        Privacy::Secret => "Secret",
+    }
+}
+
+pub fn privacy_icon(p: Privacy) -> &'static str {
+    match p {
+        Privacy::Public => "eye",
+        Privacy::Unlisted => "link",
+        Privacy::Readonly => "file",
+        Privacy::Private => "key-round",
+        Privacy::Secret => "eye-off",
+    }
+}
+
+/// A Unix time as "2026-11-09 14:03 UTC".
+pub fn date(ts: i64) -> String {
+    let format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute] UTC");
+    time::OffsetDateTime::from_unix_timestamp(ts).ok().and_then(|t| t.format(format).ok()).unwrap_or_default()
+}
+
+/// A byte count in binary units, e.g. "1.5 MiB".
+pub fn size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["KiB", "MiB", "GiB", "TiB", "PiB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64 / 1024.0;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
+}
+
+/// The copy and check icons a copy button flips between.
+pub fn copy_icons() -> String {
+    format!("{}{}", icon("copy", IconSize::Row), icon("check", IconSize::Row))
+}
+
+/// Paste words from a path segment; anything else is simply not found.
+pub fn paste_id(words: &str) -> Result<crate::domain::words::PasteId, Error> {
+    crate::domain::words::parse(words).map_err(|_| Error::NotFound)
 }

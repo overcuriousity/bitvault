@@ -1,0 +1,50 @@
+{% import "components/empty.html" as empty %}
+{% import "components/notice.html" as notice %}
+<div class="oc-page-head"><h1>Admin</h1></div>
+{% if let Some(message) = deleted %}{% call notice::notice("success", message) %}{% endcall %}{% endif %}
+<dl class="oc-facts bv-totals">
+  <dt>Pastes</dt><dd><span class="oc-value">{{ count }}</span></dd>
+  <dt>Text and links</dt><dd><span class="oc-value">{{ content_size }}</span></dd>
+  <dt>Files</dt><dd><span class="oc-value">{{ file_size }}</span></dd>
+</dl>
+{% if rows.is_empty() %}
+{% call empty::empty("There are no pastes yet. New pastes appear here as people create them.") %}{% endcall %}
+{% else %}
+<div class="oc-table-wrap bv-admin-table">
+<table class="oc-table">
+  <thead>
+    <tr>
+      <th scope="col">Address</th>
+      <th scope="col">Privacy</th>
+      <th scope="col">Kind</th>
+      <th scope="col" class="oc-num">Size</th>
+      <th scope="col" class="oc-num">Files</th>
+      <th scope="col">Created</th>
+      <th scope="col">Expires</th>
+      <th scope="col" class="oc-num">Reads</th>
+      <th scope="col" class="oc-col-actions"><span class="oc-sr-only">Actions</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    {%- for row in rows %}
+    <tr>
+      <td><a href="/{{ row.words }}">{{ row.words }}</a></td>
+      <td>{{ row.privacy }}</td>
+      <td>{{ row.kind }}</td>
+      <td class="oc-num">{{ row.size }}</td>
+      <td class="oc-num">{{ row.files }}</td>
+      <td>{{ row.created }}</td>
+      <td>{{ row.expires }}</td>
+      <td class="oc-num">{{ row.reads }}</td>
+      <td class="oc-col-actions">
+        <form class="bv-inline" method="post" action="/{{ row.words }}/delete">
+          <input type="hidden" name="next" value="admin">
+          <button type="submit" class="oc-btn oc-btn--icon oc-btn--row" aria-label="Delete {{ row.words }}" data-oc-tip="Delete {{ row.words }}">{{ trash|safe }}</button>
+        </form>
+      </td>
+    </tr>
+    {%- endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}

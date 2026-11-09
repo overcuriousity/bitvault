@@ -33,6 +33,7 @@ Copied unmodified from overcuriousity/overcuriousity-dev-manifest, tag v2026.11.
 | icons/file.svg | bitvault addition from Lucide (lucide-icons/lucide, icons/file.svg), ISC |
 | icons/info.svg | crates/oc-kit/assets/icons/info.svg |
 | icons/key-round.svg | crates/oc-kit/assets/icons/key-round.svg |
+| icons/languages.svg | bitvault addition from Lucide (lucide-icons/lucide, icons/languages.svg), ISC |
 | icons/link.svg | crates/oc-kit/assets/icons/link.svg |
 | icons/list.svg | crates/oc-kit/assets/icons/list.svg |
 | icons/log-out.svg | crates/oc-kit/assets/icons/log-out.svg |

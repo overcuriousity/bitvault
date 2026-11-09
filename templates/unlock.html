@@ -1,0 +1,16 @@
+{% import "components/button.html" as button %}
+{% import "components/field.html" as field %}
+{% import "components/notice.html" as notice %}
+<div class="oc-columns">
+<div class="oc-page-head"><h1 class="bv-words">{{ words }}</h1></div>
+<p class="bv-lead">This paste is private. Enter its password to open it.</p>
+{%- if let Some(message) = notice %}
+{% call notice::notice("danger", message) %}{% endcall %}
+{%- endif %}
+<form class="oc-form" method="post" action="/{{ words }}/unlock">
+  {% call field::password("unlock-password", "password", "Password", "current-password") %}{% endcall %}
+  <div class="oc-form__actions">
+    {% call button::submit("primary", "Open paste") %}{% endcall %}
+  </div>
+</form>
+</div>

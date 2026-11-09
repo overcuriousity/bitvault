@@ -20,12 +20,17 @@ pub struct Layout {
     pub current: &'static str,
     pub body: String,
     pub admin: bool,
+    /// An admin is configured, so the top bar offers "Sign in".
+    pub sign_in: bool,
     pub extra_css: Vec<String>,
+    /// ES modules.
     pub extra_js: Vec<String>,
+    /// Classic scripts, deferred, run in order before the modules (e.g. a UMD bundle).
+    pub extra_scripts: Vec<String>,
     pub cfg: Arc<Config>,
 }
 
-const KIT_CSS: [&str; 7] = [
+pub const KIT_CSS: [&str; 7] = [
     "vendor/oc/css/00-tokens.css",
     "vendor/oc/css/10-base.css",
     "vendor/oc/css/20-layout.css",
@@ -35,8 +40,9 @@ const KIT_CSS: [&str; 7] = [
     "vendor/oc/css/profile-everyday.css",
 ];
 
-const MODULES: [&str; 7] = [
+pub const MODULES: [&str; 8] = [
     "js/prefs.js",
+    "js/pwa.js",
     "vendor/oc/js/copy.js",
     "vendor/oc/js/notices.js",
     "vendor/oc/js/menu.js",

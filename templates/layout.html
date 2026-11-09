@@ -5,12 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{ title }} · {{ cfg.app.title }}</title>
 <meta name="color-scheme" content="light dark">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="{{ self.asset("icon.svg") }}" type="image/svg+xml">
 <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"selfRequestsOnly":true,"attributesToSettle":["class","width","height"],"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
 <script src="{{ self.asset("vendor/oc/js/theme.js") }}"></script>
 {%- for css in self.stylesheets() %}
 <link rel="stylesheet" href="{{ css }}">
 {%- endfor %}
 <script src="{{ self.asset("vendor/oc/htmx/htmx.min.js") }}" defer></script>
+{%- for js in extra_scripts %}
+<script src="{{ js }}" defer></script>
+{%- endfor %}
 {%- for js in self.modules() %}
 <script type="module" src="{{ js }}"></script>
 {%- endfor %}
@@ -28,7 +33,7 @@
   <div class="oc-topbar__end">
     <button type="button" class="oc-btn oc-btn--icon" data-oc-pref="density" data-oc-value="default" aria-pressed="false" aria-label="Use compact text size" data-oc-tip="Use compact text size">{{ self.icon("a-large-small")|safe }}</button>
     <button type="button" class="oc-btn oc-btn--icon oc-theme-toggle" data-oc-pref="theme" data-oc-value="system" aria-label="Switch to light theme" data-oc-tip="Switch to light theme">{{ self.icon("monitor")|safe }}{{ self.icon("sun")|safe }}{{ self.icon("moon")|safe }}</button>
-    {%- if cfg.app.admin_password.is_some() %}
+    {%- if sign_in %}
     {%- if admin %}
     <form class="bv-sign-in" method="post" action="/admin/sign-out"><button type="submit" class="oc-btn oc-btn--icon" aria-label="Sign out" data-oc-tip="Sign out">{{ self.icon("log-out")|safe }}</button></form>
     {%- else %}

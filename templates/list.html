@@ -1,0 +1,23 @@
+<div class="oc-columns">
+<div class="oc-page-head"><h1>Public pastes</h1></div>
+{%- if items.is_empty() %}
+<div class="oc-empty"><p>There are no public pastes yet. <a href="/">Create a public paste</a> to list it here.</p></div>
+{%- else %}
+<ul class="oc-list">
+  {%- for item in items %}
+  <li class="oc-list__item">
+    <div class="oc-list__main">
+      <a class="oc-list__title oc-link--data" href="/{{ item.words }}">{{ item.words }}</a>
+      <span class="oc-list__meta">{{ item.meta }}</span>
+    </div>
+  </li>
+  {%- endfor %}
+</ul>
+{%- endif %}
+{%- if newer.is_some() || older.is_some() %}
+<nav class="bv-pager" aria-label="Pages">
+  {%- if let Some(n) = newer %}<a href="/list?page={{ n }}" rel="prev">Newer pastes</a>{% endif %}
+  {%- if let Some(n) = older %}<a href="/list?page={{ n }}" rel="next">Older pastes</a>{% endif %}
+</nav>
+{%- endif %}
+</div>

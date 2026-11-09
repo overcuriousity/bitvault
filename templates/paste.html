@@ -1,0 +1,93 @@
+{% import "components/button.html" as button %}
+{% import "components/copy.html" as copy %}
+{% import "components/delete.html" as delete_form %}
+{% import "components/dialog.html" as dialog %}
+{% import "components/field.html" as field %}
+{% import "components/icon_button.html" as icon_button %}
+{% import "components/notice.html" as notice %}
+<article class="paste-view"{% if secret %} data-secret{% endif %}>
+<header class="bv-paste-head">
+  <h1 class="bv-words">
+    {%- for word in word_list %}
+    <span class="bv-word">{{ word }}{% call copy::copy(word, word, self.copy_icons()) %}{% endcall %}</span>
+    {%- endfor %}
+  </h1>
+  <p class="bv-address"><span class="oc-mono">{{ full_url }}</span>{% call copy::copy("address", full_url, self.copy_icons()) %}{% endcall %}</p>
+  {%- if let Some(short) = short_url %}
+  <p class="bv-address"><span class="oc-mono">{{ short }}</span>{% call copy::copy("short address", short, self.copy_icons()) %}{% endcall %}</p>
+  {%- endif %}
+</header>
+{%- if burned %}
+{% call notice::notice("warning", "That was the last read, so this paste is gone. Its files stay available on this page for ten minutes.") %}{% endcall %}
+{%- endif %}
+<dl class="oc-facts bv-meta">
+  <dt>Privacy</dt><dd><span class="oc-status">{{ self.row_icon(privacy_icon)|safe }}{{ privacy_label }}</span></dd>
+  {%- for (term, value) in facts %}
+  <dt>{{ term }}</dt><dd><span class="oc-value">{{ value }}</span></dd>
+  {%- endfor %}
+</dl>
+{%- if !burned %}
+<div class="bv-actions" role="toolbar" aria-label="Paste actions">
+  {%- if !secret %}
+  {% call icon_button::link(self.icon("file"), "Open raw text", raw_href) %}{% endcall %}
+  {%- endif %}
+  {%- if qr.is_some() %}
+  <button type="button" class="oc-btn oc-btn--icon" aria-label="Show QR code" data-oc-tip="Show QR code" data-oc-dialog-open="qr-dialog">{{ self.icon("qr-code")|safe }}</button>
+  {%- endif %}
+  {%- if let Some(href) = translate %}
+  {% call icon_button::link(self.icon("languages"), "Translate", href) %}{% endcall %}
+  {%- endif %}
+  {%- if let Some(href) = edit_href %}
+  {% call icon_button::link(self.icon("pencil"), "Edit paste", href) %}{% endcall %}
+  {%- endif %}
+  {%- if !delete.password && !delete.secret() %}
+  {% call delete_form::form(delete, self.icon("trash-2")) %}{% endcall %}
+  {%- endif %}
+</div>
+{%- if delete.password || delete.secret() %}
+{% call delete_form::form(delete, self.icon("trash-2")) %}{% endcall %}
+{%- endif %}
+{%- endif %}
+{%- if secret %}
+<form class="oc-form bv-secret-open" id="secret-open">
+  {% call field::secret("secret-password", "Password", "current-password") %}{% endcall %}
+  <div class="oc-form__actions">
+    {% call button::submit("primary", "Open paste") %}{% endcall %}
+  </div>
+</form>
+<noscript>{% call notice::notice("info", "This paste is decrypted in the browser. Turn on JavaScript to open it.") %}{% endcall %}</noscript>
+<pre class="paste-text" hidden></pre>
+{%- else %}
+{%- if let Some(html) = content %}
+<pre class="paste-text{% if highlighted %} bv-code{% endif %}"><code>{{ html|safe }}</code></pre>
+{%- endif %}
+{%- endif %}
+{%- if !files.is_empty() %}
+<section class="bv-files" aria-labelledby="files-heading">
+  <div class="bv-files__head">
+    <h2 id="files-heading">Files</h2>
+    {%- if let Some(href) = zip_href %}
+    {% call icon_button::link(self.icon("download"), "Download all as zip", href) %}{% endcall %}
+    {%- endif %}
+  </div>
+  <dl class="oc-facts">
+    {%- for f in files %}
+    <dt class="bv-file-name" data-position="{{ f.position }}">{{ f.name }}</dt>
+    <dd>
+      {%- if !f.size.is_empty() %}<span class="oc-value">{{ f.size }}</span>{% endif %}
+      <a class="oc-btn oc-btn--icon oc-btn--row" href="{{ f.href }}" download data-position="{{ f.position }}" aria-label="Download {{ f.name }}" data-oc-tip="Download {{ f.name }}">{{ self.row_icon("download")|safe }}</a>
+      {%- call copy::copy("link", f.url, self.copy_icons()) %}{% endcall %}
+    </dd>
+    {%- endfor %}
+  </dl>
+  {%- for f in files %}
+  {%- if f.preview %}
+  <figure class="bv-preview"><img src="{{ f.href }}" alt="{{ f.name }}" loading="lazy"><figcaption>{{ f.name }}</figcaption></figure>
+  {%- endif %}
+  {%- endfor %}
+</section>
+{%- endif %}
+{%- if let Some(svg) = qr %}
+{% call dialog::dialog("qr-dialog", "QR code", svg) %}{% endcall %}
+{%- endif %}
+</article>

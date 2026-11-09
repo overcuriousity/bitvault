@@ -4,9 +4,11 @@ use std::time::Duration;
 use axum::Router;
 use axum::middleware::from_fn_with_state;
 use sqlx::SqlitePool;
+use zeroize::Zeroizing;
 
 use crate::config::Config;
 use crate::deployment::Deployment;
+use crate::domain::admin::AdminAuth;
 use crate::domain::files;
 use crate::domain::grant::GrantKey;
 use crate::error::Error;
@@ -21,8 +23,17 @@ pub async fn build(cfg: Config, pool: SqlitePool) -> Result<(Router, AppState), 
 
 /// Builds the router and state; `extra` holds routes a caller (or test) adds next to the app's own.
 /// File directories without a paste are removed first, before anything is served.
-pub async fn build_with(cfg: Config, pool: SqlitePool, extra: Router<AppState>) -> Result<(Router, AppState), Error> {
+/// The admin password is hashed here and its plaintext dropped from the config.
+pub async fn build_with(
+    mut cfg: Config,
+    pool: SqlitePool,
+    extra: Router<AppState>,
+) -> Result<(Router, AppState), Error> {
     cfg.validate()?;
+    let admin = match cfg.app.admin_password.take().map(Zeroizing::new) {
+        Some(pw) => Some(Arc::new(AdminAuth::from_password(&pw).await?)),
+        None => None,
+    };
     let dep = Deployment::from_config(&cfg)?;
     let files_dir = cfg.data_dir().join("files");
     std::fs::create_dir_all(&files_dir)?;
@@ -33,6 +44,7 @@ pub async fn build_with(cfg: Config, pool: SqlitePool, extra: Router<AppState>) 
         files_dir,
         failures: Arc::new(RateLimiter::new(10, 5)),
         grant_key: Arc::new(GrantKey::random()),
+        admin,
     };
     files::remove_orphans(&st).await?;
     // Uploads get their own group so only they may be large and slow. The limits wrap the routes
@@ -40,6 +52,7 @@ pub async fn build_with(cfg: Config, pool: SqlitePool, extra: Router<AppState>) 
     let uploads = Router::new()
         .merge(web::home::upload_routes())
         .layer(from_fn_with_state(st.clone(), web::errors::render))
+        .layer(from_fn_with_state(st.clone(), web::admin::session))
         .with_state(st.clone());
     let uploads = security::limited(
         uploads,
@@ -48,9 +61,17 @@ pub async fn build_with(cfg: Config, pool: SqlitePool, extra: Router<AppState>) 
     );
     let rest = Router::new()
         .merge(web::home::routes())
+        .merge(web::paste::routes())
+        .merge(web::files::routes())
+        .merge(web::list::routes())
+        .merge(web::guide::routes())
+        .merge(web::docs::routes())
+        .merge(web::pwa::routes())
+        .merge(web::admin::routes(&st))
         .merge(extra)
         .fallback(web::errors::not_found)
         .layer(from_fn_with_state(st.clone(), web::errors::render))
+        .layer(from_fn_with_state(st.clone(), web::admin::session))
         .with_state(st.clone());
     let rest = security::limited(rest, 1 << 20, Duration::from_secs(30));
     let router =

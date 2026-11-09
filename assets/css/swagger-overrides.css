@@ -1,0 +1,85 @@
+/* Maps Swagger UI's most visible colours and fonts to the design tokens, so the API page follows
+   the theme. Anything not listed keeps Swagger's own look. */
+.bv-docs .swagger-ui,
+.bv-docs .swagger-ui .info .title,
+.bv-docs .swagger-ui .info p,
+.bv-docs .swagger-ui .info li,
+.bv-docs .swagger-ui .opblock-tag,
+.bv-docs .swagger-ui .opblock .opblock-summary-description,
+.bv-docs .swagger-ui .opblock .opblock-summary-path,
+.bv-docs .swagger-ui .opblock .opblock-section-header h4,
+.bv-docs .swagger-ui .parameter__name,
+.bv-docs .swagger-ui .parameter__type,
+.bv-docs .swagger-ui .response-col_status,
+.bv-docs .swagger-ui .response-col_description,
+.bv-docs .swagger-ui .responses-inner h4,
+.bv-docs .swagger-ui .responses-inner h5,
+.bv-docs .swagger-ui table thead tr th,
+.bv-docs .swagger-ui table thead tr td,
+.bv-docs .swagger-ui .tab li,
+.bv-docs .swagger-ui .model,
+.bv-docs .swagger-ui .model-title,
+.bv-docs .swagger-ui section.models h4 {
+  color: var(--color-fg-primary);
+  font-family: var(--font-ui);
+}
+
+.bv-docs .swagger-ui .opblock .opblock-section-header,
+.bv-docs .swagger-ui .scheme-container,
+.bv-docs .swagger-ui section.models,
+.bv-docs .swagger-ui section.models .model-container {
+  background: var(--color-bg-surface);
+  border-color: var(--color-border);
+  box-shadow: none;
+}
+
+.bv-docs .swagger-ui .opblock {
+  border-color: var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: none;
+}
+
+.bv-docs .swagger-ui .opblock-tag,
+.bv-docs .swagger-ui table thead tr th,
+.bv-docs .swagger-ui table thead tr td {
+  border-color: var(--color-border-strong);
+}
+
+.bv-docs .swagger-ui input[type="text"],
+.bv-docs .swagger-ui textarea,
+.bv-docs .swagger-ui select {
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border-control);
+  color: var(--color-fg-primary);
+}
+
+.bv-docs .swagger-ui .btn {
+  border-color: var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-fg-primary);
+  box-shadow: none;
+}
+
+.bv-docs .swagger-ui .btn.execute {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-fg);
+}
+
+.bv-docs .swagger-ui a,
+.bv-docs .swagger-ui .info a {
+  color: var(--color-accent);
+}
+
+.bv-docs .swagger-ui code,
+.bv-docs .swagger-ui pre,
+.bv-docs .swagger-ui .microlight,
+.bv-docs .swagger-ui .highlight-code > .microlight {
+  font-family: var(--font-mono);
+}
+
+.bv-docs .swagger-ui .opblock-body pre.microlight {
+  background: var(--color-bg-surface);
+  color: var(--color-fg-primary);
+  border-radius: var(--radius-sm);
+}

@@ -1,0 +1,22 @@
+{% import "components/button.html" as button %}
+{% import "components/field.html" as field %}
+{% import "components/notice.html" as notice %}
+{% import "components/select.html" as select %}
+<div class="oc-page-head"><h1>Edit {{ words }}</h1></div>
+{%- if let Some(message) = notice %}
+{% call notice::notice("danger", message) %}{% endcall %}
+{%- endif %}
+<form class="oc-form bv-edit" method="post" action="/{{ words }}/edit">
+  <div class="oc-field">
+    <label for="content">Content</label>
+    <textarea class="oc-input bv-mono" id="content" name="content" rows="16" spellcheck="false" autocomplete="off">{{ content }}</textarea>
+  </div>
+  {% call select::select("syntax", "syntax", "Syntax", syntax_options) %}{% endcall %}
+  {%- if password %}
+  {% call field::password("edit-password", "password", "Password", "current-password") %}{% endcall %}
+  {%- endif %}
+  <div class="oc-form__actions">
+    {% call button::submit("primary", "Save changes") %}{% endcall %}
+    <a href="/{{ words }}">Cancel</a>
+  </div>
+</form>

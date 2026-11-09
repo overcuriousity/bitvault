@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use askama::Template;
 use axum::Form as UrlForm;
 use axum::Router;
-use axum::extract::{Request, State};
+use axum::extract::{Query, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -14,8 +14,9 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
+use super::admin::MaybeAdmin;
 use super::multipart::{Guarded, too_large};
-use super::page;
+use super::{DeletedQuery, page};
 use crate::domain::crypto::{self, SALT_LEN};
 use crate::domain::expiry::{self, Expiry};
 use crate::domain::files::Staging;
@@ -42,16 +43,11 @@ struct Home {
     default_burn: u32,
     editable: bool,
     uploader_password: bool,
+    deleted: Option<String>,
 }
 
 fn privacy_label(level: &str) -> &'static str {
-    match level {
-        "public" => "Public",
-        "unlisted" => "Unlisted",
-        "readonly" => "Read-only",
-        "private" => "Private",
-        _ => "Secret",
-    }
+    Privacy::parse(level).map_or("Secret", super::privacy_label)
 }
 
 fn sentence_case(s: &str) -> String {
@@ -73,7 +69,11 @@ pub fn upload_routes() -> Router<AppState> {
     Router::new().route("/", post(create).layer(ratelimit::layer(Arc::new(RateLimiter::new(30, 10)))))
 }
 
-async fn index(State(st): State<AppState>) -> Result<Html<String>, Error> {
+async fn index(
+    State(st): State<AppState>,
+    MaybeAdmin(admin): MaybeAdmin,
+    Query(q): Query<DeletedQuery>,
+) -> Result<Html<String>, Error> {
     let app = &st.cfg.app;
     let mut syntax_options = vec![("plain".to_owned(), "Plain".to_owned(), true)];
     if app.highlight {
@@ -94,9 +94,10 @@ async fn index(State(st): State<AppState>) -> Result<Html<String>, Error> {
         default_burn: app.default_burn_after,
         editable: app.editable,
         uploader_password: app.uploader_password.is_some(),
+        deleted: q.notice().map(|n| super::escape_text(&n)),
     };
     let body = home.render().map_err(Error::internal)?;
-    page(&st, false, "new", "New paste", body)
+    page(&st, admin, "new", "New paste", body)
 }
 
 /// `POST /open`: finds a paste by its words. htmx follows `HX-Redirect`; without it, a plain redirect.
@@ -194,7 +195,7 @@ fn default_privacy(st: &AppState) -> Result<Privacy, Error> {
     Privacy::parse(&st.cfg.app.default_privacy).ok_or_else(|| Error::internal("default_privacy is not a privacy level"))
 }
 
-fn parse_syntax(value: &str) -> Result<Option<String>, Error> {
+pub(crate) fn parse_syntax(value: &str) -> Result<Option<String>, Error> {
     let value = value.trim();
     if value.is_empty() || value == "plain" {
         return Ok(None);

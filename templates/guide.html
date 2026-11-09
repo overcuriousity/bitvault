@@ -1,0 +1,69 @@
+<article class="prose">
+<h1>Guide</h1>
+<p>{{ cfg_title }} keeps text, links and files under an address of three words, such as apple-banana-cherry. Share the words, the full address or its QR code, and choose how private the paste is and how long it lasts.</p>
+
+<h2>Create a paste</h2>
+<p>Write or paste your text, add files if you want, choose a privacy level and an expiry, then select Create paste. You are taken to the new paste, whose three words are its address.</p>
+<p>A paste can be text, files or both. Files can add up to {{ max_file_mb }} MB per paste{% if self.offers("secret") %}, and each file of a secret paste can be at most {{ max_secret_file_mb }} MB{% endif %}.</p>
+{%- if self.offers("public") || self.offers("unlisted") %}
+<p>When a public or unlisted paste is a single web address and nothing else, it becomes a short link: opening the paste takes you straight to that address.</p>
+{%- endif %}
+{%- if uploader_password %}
+<p>This server asks for an uploader password before it accepts a new paste. Ask its administrator for it.</p>
+{%- endif %}
+
+<h2>Open a paste</h2>
+<p>Open the address in your browser, or type the three words into Open a paste on the start page. Spaces, hyphens and capital letters do not matter, so "Apple Banana Cherry" works too.</p>
+
+<h2>Privacy levels</h2>
+{%- if self.offers("public") %}
+<h3>Public</h3>
+<p>Anyone with the address can see the paste{% if editable %}, change it if editing is allowed{% endif %} and delete it.{% if listing %} Public pastes also appear in the list of public pastes.{% endif %}</p>
+{%- endif %}
+{%- if self.offers("unlisted") %}
+<h3>Unlisted</h3>
+<p>The paste is never listed, so only people who know its address can find it. They can see{% if editable %}, change{% endif %} and delete it.</p>
+{%- endif %}
+{%- if self.offers("readonly") %}
+<h3>Read-only</h3>
+<p>Anyone with the address can see the paste, but {% if editable %}changing or {% endif %}deleting it needs its password.</p>
+{%- endif %}
+{%- if self.offers("private") %}
+<h3>Private</h3>
+<p>The text and every file are encrypted on the server, with a key that only the password unlocks. Opening, {% if editable %}changing {% endif %}and deleting the paste all need the password. File names are not shown until the paste is open.</p>
+<p>After you open a private paste, its download links work for ten minutes. Open it again for new links.</p>
+{%- endif %}
+{%- if self.offers("secret") %}
+<h3>Secret</h3>
+<p>Your browser encrypts the text, the file names and the files before anything is sent, and the password never leaves your device. Opening and deleting happen in your browser as well, so secret pastes need JavaScript, and they cannot be changed.</p>
+<p>Nobody can recover a forgotten password, not even the administrator.</p>
+{%- endif %}
+
+<h2>Expiry and burning</h2>
+<p>Every paste is deleted when its expiry time has passed.{% if let Some(max) = max_expiry %} The longest expiry here is {{ max }}.{% endif %}</p>
+<p>Burn after reads deletes a paste once it has been read that many times; 0 turns it off. Viewing the paste, fetching its raw text and reading it through the API each count as a read. Downloading files does not. After the last read, the page that showed it keeps its file downloads working for ten minutes.</p>
+
+{%- if highlight %}
+<h2>Syntax highlighting</h2>
+<p>Choose a language under Syntax to colour code by its structure. The server does the highlighting, so it works without JavaScript. Very large pastes are shown without colours.</p>
+{%- endif %}
+
+<h2>Share</h2>
+<p>Each of the three words and the full address has a copy button.{% if qr %} The QR code button shows the address for a phone camera.{% endif %} Raw text opens the paste as plain text.</p>
+
+{%- if editable %}
+<h2>Change a paste</h2>
+<p>Select Allow editing when you create a paste to let it be changed later. Read-only and private pastes still need their password to change.</p>
+{%- endif %}
+
+<h2>Delete a paste</h2>
+<p>Delete takes effect at once and cannot be undone. Read-only and private pastes need their password, and secret pastes are deleted with the password in your browser.</p>
+
+{%- if admin %}
+<h2>Administrator</h2>
+<p>The administrator can sign in to see every paste's address and details and to delete any paste. The administrator cannot read private or secret pastes.</p>
+{%- endif %}
+
+<h2>API</h2>
+<p>Everything here also works through the REST API at /api/v1, which needs no key. The <a href="/docs">API page</a> describes every call and lets you try them.</p>
+</article>
