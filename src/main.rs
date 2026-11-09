@@ -6,6 +6,10 @@ use bitvault::{app, config, db};
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
+/// How long in-flight requests may finish after a stop signal; below `TimeoutStopSec` in
+/// `deploy/bitvault.service`.
+const DRAIN: std::time::Duration = std::time::Duration::from_secs(25);
+
 #[derive(Parser)]
 #[command(name = "bitvault", version, about = "A self-hosted pastebin with three-word addresses")]
 struct Cli {
@@ -42,10 +46,25 @@ async fn run(cli: Cli) -> Result<(), bitvault::error::Error> {
     let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]);
     spawn_watchdog();
     spawn_purge(st.clone());
-    axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>())
-        .with_graceful_shutdown(shutdown())
-        .await
-        .map_err(bitvault::error::Error::internal)
+    let (stopping, mut stopped) = tokio::sync::watch::channel(false);
+    let server = axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>())
+        .with_graceful_shutdown(async move {
+            shutdown().await;
+            let _ = stopping.send(true);
+        });
+    // On a stop signal the server stops accepting and drains; requests still running after
+    // DRAIN (an upload can run for an hour) are cut off, inside the unit's TimeoutStopSec.
+    let deadline = async move {
+        let _ = stopped.wait_for(|s| *s).await;
+        tokio::time::sleep(DRAIN).await;
+    };
+    tokio::select! {
+        served = std::future::IntoFuture::into_future(server) => served.map_err(bitvault::error::Error::internal),
+        () = deadline => {
+            tracing::warn!(seconds = DRAIN.as_secs(), "requests were still running after the drain time; stopping anyway");
+            Ok(())
+        }
+    }
 }
 
 /// Removes expired pastes and pastes burned more than ten minutes ago, with their files.

@@ -12,6 +12,8 @@ ExecStart=/usr/local/bin/@APP@ --config /etc/@APP@/config.toml
 # LoadCredential=admin-password:/etc/@APP@/admin-password
 # Environment=BITVAULT__APP__ADMIN_PASSWORD_FILE=%d/admin-password
 Restart=on-failure
+# The app drains in-flight requests for up to 25 s after SIGTERM, then exits.
+TimeoutStopSec=30
 DynamicUser=yes
 StateDirectory=@APP@
 ConfigurationDirectory=@APP@

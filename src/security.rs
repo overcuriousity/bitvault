@@ -13,6 +13,7 @@ use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
 use tower_http::compression::CompressionLayer;
+use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::timeout::TimeoutLayer;
@@ -137,6 +138,15 @@ async fn origin_check(State(ctx): State<Arc<Ctx>>, req: Request, next: Next) -> 
     }
 }
 
+/// Files, zips and images are already compressed or opaque (secret files are ciphertext), so
+/// compressing them only costs CPU; everything else above the default minimum size is compressed.
+fn compressible() -> impl Predicate {
+    DefaultPredicate::new()
+        .and(NotForContentType::IMAGES)
+        .and(NotForContentType::const_new("application/octet-stream"))
+        .and(NotForContentType::const_new("application/zip"))
+}
+
 /// The trace span of a request: method and path only. The query is left out because download
 /// grants travel in it (`?g=`), and grants must never reach a log.
 fn request_span(req: &Request) -> tracing::Span {
@@ -147,7 +157,7 @@ fn request_span(req: &Request) -> tracing::Span {
 pub fn secure(router: Router, dep: Arc<Deployment>, proxies: Vec<IpNet>) -> Router {
     let ctx = Arc::new(Ctx { dep, proxies });
     router
-        .layer(CompressionLayer::new())
+        .layer(CompressionLayer::new().compress_when(compressible()))
         .layer(from_fn_with_state(ctx.clone(), origin_check))
         .layer(from_fn_with_state(ctx.clone(), host_check))
         .layer(from_fn_with_state(ctx, headers))

@@ -689,3 +689,26 @@ async fn lists_carry_each_pastes_files_and_content_size_without_the_content() {
     assert_eq!(names(&all[0]), ["c.txt"]);
     assert_eq!(all[2].files.iter().map(|f| f.size).sum::<u64>(), 8);
 }
+
+#[tokio::test]
+async fn downloads_and_zips_are_never_compressed_but_pages_are() {
+    let app = support::app().await;
+    let mut staging = Staging::new(&app.st.files_dir).unwrap();
+    staging.add("data.bin", "", body(&bytes(64 << 10, 3)), LIMIT).await.unwrap();
+    staging.add("photo.png", "image/png", body(&bytes(64 << 10, 4)), LIMIT).await.unwrap();
+    let w = paste::create(&app.st, new(&"page text ".repeat(500), Privacy::Public), Some(staging), NOW)
+        .await
+        .unwrap()
+        .words();
+    let fetch = |uri: String| {
+        let r = app.req("GET", &uri).header(header::ACCEPT_ENCODING, "gzip, br").body(axum::body::Body::empty());
+        app.send(r.unwrap())
+    };
+    for uri in [format!("/{w}/file/1"), format!("/{w}/file/2"), format!("/{w}/zip")] {
+        let res = fetch(uri.clone()).await;
+        assert_eq!(res.status(), StatusCode::OK, "{uri}");
+        assert!(res.headers().get(header::CONTENT_ENCODING).is_none(), "{uri} was compressed");
+    }
+    let page = fetch(format!("/{w}")).await;
+    assert!(page.headers().get(header::CONTENT_ENCODING).is_some(), "the paste page should be compressed");
+}
