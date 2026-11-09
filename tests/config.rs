@@ -124,3 +124,9 @@ async fn assets_are_served_immutable_under_a_hashed_url() {
     let stale = url.replacen(url.split('/').nth(2).unwrap(), "00000000", 1);
     assert_eq!(a.get(&stale).await.status(), StatusCode::NOT_FOUND);
 }
+
+#[test]
+fn an_absurd_upload_limit_is_rejected() {
+    assert!(invalid("[app]\nmax_file_mb = 2000000").contains("max_file_mb"));
+    assert!(invalid("[app]\nmax_secret_file_mb = 2000000").contains("max_secret_file_mb"));
+}

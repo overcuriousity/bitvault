@@ -33,7 +33,7 @@ pub fn build_with(cfg: Config, pool: SqlitePool, extra: Router<AppState>) -> Res
     // Uploads get their own group (filled in by the paste routes) so only they may be large and slow.
     let uploads = security::limited(
         Router::new(),
-        usize::try_from((st.cfg.app.max_file_mb + 1) << 20).unwrap_or(usize::MAX),
+        usize::try_from(st.cfg.app.max_file_mb.saturating_add(1).saturating_mul(1 << 20)).unwrap_or(usize::MAX),
         Duration::from_secs(3600),
     );
     let rest = Router::new()

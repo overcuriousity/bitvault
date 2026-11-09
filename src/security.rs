@@ -61,15 +61,23 @@ fn resolve(parts: &Parts, proxies: &[IpNet]) -> Option<IpAddr> {
     if !trusted(proxies, &peer) {
         return Some(peer);
     }
-    let forwarded = parts
+    // Walk from the right: the first hop that is not a trusted proxy is the client. An entry that
+    // does not parse cannot be vouched for, and anything left of it is attacker-controlled.
+    let hops = parts
         .headers
         .get_all("x-forwarded-for")
         .iter()
         .filter_map(|v| v.to_str().ok())
         .flat_map(|v| v.split(','))
-        .filter_map(|s| s.trim().parse::<IpAddr>().ok())
         .collect::<Vec<_>>();
-    Some(forwarded.into_iter().rev().find(|ip| !trusted(proxies, ip)).unwrap_or(peer))
+    for hop in hops.into_iter().rev() {
+        match hop.trim().parse::<IpAddr>() {
+            Ok(ip) if trusted(proxies, &ip) => {}
+            Ok(ip) => return Some(ip),
+            Err(_) => break,
+        }
+    }
+    Some(peer)
 }
 
 async fn headers(State(ctx): State<Arc<Ctx>>, req: Request, next: Next) -> Response {
@@ -90,10 +98,11 @@ async fn headers(State(ctx): State<Arc<Ctx>>, req: Request, next: Next) -> Respo
 
 async fn host_check(State(ctx): State<Arc<Ctx>>, req: Request, next: Next) -> Response {
     let (mut parts, body) = req.into_parts();
-    let from_proxy = peer(&parts).is_some_and(|ip| trusted(&ctx.proxies, &ip));
-    let forwarded = from_proxy.then(|| parts.headers.get("x-forwarded-host").and_then(|v| v.to_str().ok())).flatten();
-    let host = forwarded
-        .or_else(|| parts.headers.get(header::HOST).and_then(|v| v.to_str().ok()))
+    // Only `Host` counts: a proxy-supplied X-Forwarded-Host could be forged by the client.
+    let host = parts
+        .headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
         .or_else(|| parts.uri.authority().map(|a| a.as_str()));
     if !host.is_some_and(|h| ctx.dep.host_allowed(h)) {
         return (StatusCode::MISDIRECTED_REQUEST, "This server does not answer for that host name.").into_response();

@@ -155,8 +155,8 @@ async fn the_rate_limit_layer_answers_429_after_the_burst() {
     assert_eq!(body_text(res).await, "Too many requests. Wait a minute and try again.");
 }
 
-#[tokio::test]
-async fn the_failure_limiter_ignores_successes_and_separates_addresses() {
+#[test]
+fn the_failure_limiter_ignores_successes_and_separates_addresses() {
     let limiter = RateLimiter::new(10, 5);
     let a: IpAddr = "192.0.2.1".parse().unwrap();
     let b: IpAddr = "192.0.2.2".parse().unwrap();
@@ -170,8 +170,8 @@ async fn the_failure_limiter_ignores_successes_and_separates_addresses() {
     assert!(limiter.check(b).is_ok());
 }
 
-#[tokio::test]
-async fn take_consumes_a_token_and_refuses_when_empty() {
+#[test]
+fn take_consumes_a_token_and_refuses_when_empty() {
     let limiter = RateLimiter::new(60, 2);
     let ip: IpAddr = "192.0.2.1".parse().unwrap();
     assert!(limiter.take(ip).is_ok());
@@ -193,4 +193,19 @@ async fn limited_wraps_a_group_in_a_body_limit() {
     .await
     .unwrap();
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn a_forwarded_host_cannot_stand_in_for_the_host_header() {
+    let app = app_with_test_routes("").await;
+    let r = plain(app.req("GET", "/test/ip").header("x-forwarded-host", "localhost:8080"));
+    let res = app.send(with_host(r, "evil.example")).await;
+    assert_eq!(res.status(), StatusCode::MISDIRECTED_REQUEST);
+}
+
+#[tokio::test]
+async fn an_unparseable_forwarded_hop_falls_back_to_the_peer() {
+    let app = app_with_test_routes("trusted_proxies = [\"127.0.0.1/32\"]").await;
+    let r = plain(app.req("GET", "/test/ip").header("x-forwarded-for", "198.51.100.1, 203.0.113.9:4000"));
+    assert_eq!(body_text(app.send(r).await).await, "127.0.0.1");
 }

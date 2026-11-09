@@ -162,6 +162,10 @@ impl Config {
         if a.max_file_mb == 0 || a.max_secret_file_mb == 0 {
             return Err(Error::Invalid("max_file_mb and max_secret_file_mb must be at least 1.".into()));
         }
+        const MAX_MB: u64 = 1_048_576;
+        if a.max_file_mb > MAX_MB || a.max_secret_file_mb > MAX_MB {
+            return Err(Error::Invalid("max_file_mb and max_secret_file_mb must be at most 1048576.".into()));
+        }
         Deployment::from_config(self).map(|_| ())
     }
 

@@ -13,8 +13,12 @@ use crate::security::ClientIp;
 
 const IDLE: Duration = Duration::from_secs(600);
 const PRUNE_ABOVE: usize = 1024;
+const PRUNE_EVERY: Duration = Duration::from_secs(60);
 
-type Buckets = HashMap<IpAddr, (f64, Instant)>;
+struct Buckets {
+    map: HashMap<IpAddr, (f64, Instant)>,
+    last_prune: Instant,
+}
 
 /// A per-address token bucket: `per_minute` tokens refill continuously, up to `burst`.
 pub struct RateLimiter {
@@ -25,7 +29,11 @@ pub struct RateLimiter {
 
 impl RateLimiter {
     pub fn new(per_minute: u32, burst: u32) -> Self {
-        Self { per_second: f64::from(per_minute) / 60.0, burst: f64::from(burst), buckets: Mutex::default() }
+        Self {
+            per_second: f64::from(per_minute) / 60.0,
+            burst: f64::from(burst),
+            buckets: Mutex::new(Buckets { map: HashMap::new(), last_prune: Instant::now() }),
+        }
     }
 
     /// A poisoned lock only means another request panicked; the counters are still usable.
@@ -36,11 +44,12 @@ impl RateLimiter {
     /// Refills the address's bucket and runs `f` on its token count.
     fn with_tokens<T>(&self, ip: IpAddr, f: impl FnOnce(&mut f64) -> T) -> T {
         let now = Instant::now();
-        let mut map = self.lock();
-        if map.len() > PRUNE_ABOVE {
-            map.retain(|_, (_, seen)| now.duration_since(*seen) <= IDLE);
+        let mut b = self.lock();
+        if b.map.len() > PRUNE_ABOVE && now.duration_since(b.last_prune) >= PRUNE_EVERY {
+            b.map.retain(|_, (_, seen)| now.duration_since(*seen) <= IDLE);
+            b.last_prune = now;
         }
-        let (tokens, seen) = map.entry(ip).or_insert((self.burst, now));
+        let (tokens, seen) = b.map.entry(ip).or_insert((self.burst, now));
         *tokens = (*tokens + now.duration_since(*seen).as_secs_f64() * self.per_second).min(self.burst);
         *seen = now;
         f(tokens)
