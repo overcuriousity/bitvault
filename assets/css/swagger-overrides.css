@@ -83,3 +83,84 @@
   color: var(--color-fg-primary);
   border-radius: var(--radius-sm);
 }
+
+/* Inline code in the description text (headers, error codes). */
+.bv-docs .swagger-ui .markdown code,
+.bv-docs .swagger-ui .renderedMarkdown code {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-fg-primary);
+}
+
+/* Schema list (JSON Schema 2020-12 components): names, attributes and the Expand all buttons. */
+.bv-docs .swagger-ui .json-schema-2020-12,
+.bv-docs .swagger-ui .json-schema-2020-12-head,
+.bv-docs .swagger-ui .json-schema-2020-12-body {
+  background: transparent;
+  color: var(--color-fg-primary);
+}
+
+.bv-docs .swagger-ui .json-schema-2020-12__title,
+.bv-docs .swagger-ui .json-schema-2020-12-accordion,
+.bv-docs .swagger-ui .json-schema-2020-12-keyword__name,
+.bv-docs .swagger-ui .json-schema-2020-12-keyword__value {
+  background: transparent;
+  color: var(--color-fg-primary);
+  font-family: var(--font-ui);
+}
+
+.bv-docs .swagger-ui [class*="json-schema-2020-12__attribute"],
+.bv-docs .swagger-ui [class*="json-schema-2020-12-keyword"] {
+  color: var(--color-fg-secondary);
+}
+
+.bv-docs .swagger-ui .json-schema-2020-12-accordion__icon svg,
+.bv-docs .swagger-ui .opblock-control-arrow svg,
+.bv-docs .swagger-ui .expand-operation svg,
+.bv-docs .swagger-ui .models-control svg {
+  fill: var(--color-fg-secondary);
+}
+
+.bv-docs .swagger-ui .json-schema-2020-12-expand-deep-button,
+.bv-docs .swagger-ui .model-box-control,
+.bv-docs .swagger-ui .expand-methods,
+.bv-docs .swagger-ui button.btn {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-fg-primary);
+}
+
+.bv-docs .swagger-ui .json-schema-2020-12-expand-deep-button:hover,
+.bv-docs .swagger-ui button.btn:hover {
+  background: var(--color-bg-hover);
+}
+
+.bv-docs .swagger-ui .model-box,
+.bv-docs .swagger-ui .prop-type,
+.bv-docs .swagger-ui .prop-format {
+  background: transparent;
+  color: var(--color-fg-secondary);
+}
+
+.bv-docs .swagger-ui :focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+@media (pointer: coarse) {
+  .bv-docs .swagger-ui .btn,
+  .bv-docs .swagger-ui button,
+  .bv-docs .swagger-ui .opblock-summary-control,
+  .bv-docs .swagger-ui .json-schema-2020-12-accordion,
+  .bv-docs .swagger-ui .json-schema-2020-12-expand-deep-button,
+  .bv-docs .swagger-ui select {
+    min-height: var(--target-touch);
+  }
+  .bv-docs .swagger-ui .opblock-control-arrow,
+  .bv-docs .swagger-ui .expand-operation,
+  .bv-docs .swagger-ui .models-control {
+    min-width: var(--target-touch);
+  }
+}

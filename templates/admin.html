@@ -1,5 +1,6 @@
 {% import "components/empty.html" as empty %}
 {% import "components/notice.html" as notice %}
+<div class="bv-admin">
 <div class="oc-page-head"><h1>Admin</h1></div>
 {% if let Some(message) = deleted %}{% call notice::notice("success", message) %}{% endcall %}{% endif %}
 <dl class="oc-facts bv-totals">
@@ -16,12 +17,12 @@
     <tr>
       <th scope="col">Address</th>
       <th scope="col">Privacy</th>
-      <th scope="col">Kind</th>
-      <th scope="col" class="oc-num">Size</th>
-      <th scope="col" class="oc-num">Files</th>
-      <th scope="col">Created</th>
+      <th scope="col" class="bv-narrow-hide">Kind</th>
+      <th scope="col" class="oc-num bv-narrow-hide">Size</th>
+      <th scope="col" class="oc-num bv-narrow-hide">Files</th>
+      <th scope="col" class="bv-narrow-hide">Created</th>
       <th scope="col">Expires</th>
-      <th scope="col" class="oc-num">Reads</th>
+      <th scope="col" class="oc-num bv-narrow-hide">Reads</th>
       <th scope="col" class="oc-col-actions"><span class="oc-sr-only">Actions</span></th>
     </tr>
   </thead>
@@ -30,12 +31,12 @@
     <tr>
       <td><a href="/{{ row.words }}">{{ row.words }}</a></td>
       <td>{{ row.privacy }}</td>
-      <td>{{ row.kind }}</td>
-      <td class="oc-num">{{ row.size }}</td>
-      <td class="oc-num">{{ row.files }}</td>
-      <td>{{ row.created }}</td>
-      <td>{{ row.expires }}</td>
-      <td class="oc-num">{{ row.reads }}</td>
+      <td class="bv-narrow-hide">{{ row.kind }}</td>
+      <td class="oc-num bv-narrow-hide">{{ row.size }}</td>
+      <td class="oc-num bv-narrow-hide">{{ row.files }}</td>
+      <td class="bv-narrow-hide">{{ row.created }}</td>
+      <td class="bv-wrap">{{ row.expires }}</td>
+      <td class="oc-num bv-narrow-hide">{{ row.reads }}</td>
       <td class="oc-col-actions">
         <form class="bv-inline" method="post" action="/{{ row.words }}/delete">
           <input type="hidden" name="next" value="admin">
@@ -48,3 +49,4 @@
 </table>
 </div>
 {% endif %}
+</div>

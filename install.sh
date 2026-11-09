@@ -9,17 +9,24 @@ usage() {
 
 archive=""
 system=0
-prefix="${HOME:-}/.local"
+prefix=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --archive) [ $# -ge 2 ] || usage; archive=$2; shift 2 ;;
-    --system) system=1; prefix=/usr/local; shift ;;
+    --system) system=1; shift ;;
     --prefix) [ $# -ge 2 ] || usage; prefix=$2; shift 2 ;;
     -h|--help) usage ;;
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
 done
 [ -n "$archive" ] || usage
+if [ "$system" -eq 1 ]; then
+  [ -z "$prefix" ] || { echo "--prefix cannot be combined with --system, which always installs to /usr/local." >&2; exit 2; }
+  prefix=/usr/local
+elif [ -z "$prefix" ]; then
+  [ -n "${HOME:-}" ] || { echo "HOME is not set; pass --prefix DIR to say where to install." >&2; exit 2; }
+  prefix="$HOME/.local"
+fi
 [ -f "$archive" ] || { echo "Archive not found: $archive" >&2; exit 1; }
 
 if [ "$system" -eq 1 ] && [ "$(id -u)" -ne 0 ]; then
