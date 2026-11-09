@@ -80,8 +80,10 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
       - run: rustup target add ${{ matrix.target }}
-      - run: cargo install --locked cargo-zigbuild
+      - run: cargo install --locked --version 0.24.1 cargo-zigbuild
       - run: cargo zigbuild --release --locked --target ${{ matrix.target }} --bin "$BIN"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
