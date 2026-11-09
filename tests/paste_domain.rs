@@ -171,6 +171,88 @@ async fn wrong_passwords_are_rate_limited_but_right_ones_are_not() {
 }
 
 #[tokio::test]
+async fn right_passwords_used_again_and_again_are_never_limited() {
+    let app = support::app_with("[app]\neditable = true\n").await;
+    let private = create(&app.st, NewPaste { editable: true, ..with_password("p", Privacy::Private, "pw") }).await;
+    let readonly = create(&app.st, NewPaste { editable: true, ..with_password("r", Privacy::Readonly, "pw") }).await;
+    for _ in 0..8 {
+        read(&app.st, private, Access::Password("pw".into())).await.unwrap();
+        paste::edit(&app.st, readonly, Access::Password("pw".into()), IP, "r2".into(), None, NOW).await.unwrap();
+    }
+    paste::delete(&app.st, private, DeleteAuth::Password("pw".into()), IP, NOW).await.unwrap();
+}
+
+#[tokio::test]
+async fn wrong_edit_passwords_are_rate_limited() {
+    let app = support::app_with("[app]\neditable = true\n").await;
+    for privacy in [Privacy::Readonly, Privacy::Private] {
+        let id = create(&app.st, NewPaste { editable: true, ..with_password("v1", privacy, "pw") }).await;
+        let ip = if privacy == Privacy::Readonly { IP } else { OTHER_IP };
+        for _ in 0..5 {
+            let res = paste::edit(&app.st, id, Access::Password("wrong".into()), ip, "v2".into(), None, NOW).await;
+            assert!(matches!(res, Err(Error::Forbidden)), "{res:?}");
+        }
+        let res = paste::edit(&app.st, id, Access::Password("pw".into()), ip, "v2".into(), None, NOW).await;
+        assert!(matches!(res, Err(Error::TooManyAttempts)), "{privacy:?}: {res:?}");
+    }
+}
+
+#[tokio::test]
+async fn wrong_delete_passwords_are_rate_limited() {
+    let app = support::app().await;
+    for (privacy, ip) in [(Privacy::Readonly, IP), (Privacy::Private, OTHER_IP)] {
+        let id = create(&app.st, with_password("v1", privacy, "pw")).await;
+        for _ in 0..5 {
+            let res = paste::delete(&app.st, id, DeleteAuth::Password("wrong".into()), ip, NOW).await;
+            assert!(matches!(res, Err(Error::Forbidden)), "{res:?}");
+        }
+        let res = paste::delete(&app.st, id, DeleteAuth::Password("pw".into()), ip, NOW).await;
+        assert!(matches!(res, Err(Error::TooManyAttempts)), "{privacy:?}: {res:?}");
+        paste::meta(&app.st, id, NOW).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn wrong_secret_verifiers_are_rate_limited() {
+    let app = support::app().await;
+    let id = create(&app.st, secret_paste(PBKDF2_ITERATIONS)).await;
+    let right = crypto::browser_verifier(SECRET_PASSWORD, &VERIFIER_SALT);
+    for _ in 0..5 {
+        let res = paste::delete(&app.st, id, DeleteAuth::Verifier([1; 32]), IP, NOW).await;
+        assert!(matches!(res, Err(Error::Forbidden)), "{res:?}");
+    }
+    let res = paste::delete(&app.st, id, DeleteAuth::Verifier(right), IP, NOW).await;
+    assert!(matches!(res, Err(Error::TooManyAttempts)), "{res:?}");
+    paste::delete(&app.st, id, DeleteAuth::Verifier(right), OTHER_IP, NOW).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn parallel_wrong_passwords_cannot_outrun_the_limit() {
+    let app = support::app().await;
+    let id = create(&app.st, with_password("guarded", Privacy::Private, "right")).await;
+    let start = Arc::new(tokio::sync::Barrier::new(25));
+    let tasks: Vec<_> = (0..25)
+        .map(|_| {
+            let st = app.st.clone();
+            let start = start.clone();
+            tokio::spawn(async move {
+                start.wait().await;
+                paste::read(&st, id, Access::Password("wrong".into()), IP, NOW).await
+            })
+        })
+        .collect();
+    let mut checked = 0;
+    for t in tasks {
+        match t.await.unwrap() {
+            Err(Error::WrongPassword) => checked += 1,
+            Err(Error::TooManyAttempts) => {}
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    assert!(checked <= 5, "{checked} guesses were checked");
+}
+
+#[tokio::test]
 async fn a_readonly_paste_is_readable_by_anyone_but_deletable_only_with_its_password() {
     let app = support::app().await;
     let id = create(&app.st, with_password("read me", Privacy::Readonly, "pw")).await;

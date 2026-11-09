@@ -156,18 +156,52 @@ async fn the_rate_limit_layer_answers_429_after_the_burst() {
 }
 
 #[test]
-fn the_failure_limiter_ignores_successes_and_separates_addresses() {
+fn refunded_tokens_cost_nothing_and_addresses_are_separate() {
     let limiter = RateLimiter::new(10, 5);
     let a: IpAddr = "192.0.2.1".parse().unwrap();
     let b: IpAddr = "192.0.2.2".parse().unwrap();
     for _ in 0..20 {
-        limiter.check(a).unwrap();
+        limiter.take(a).unwrap();
+        limiter.refund(a);
     }
     for _ in 0..5 {
-        limiter.fail(a);
+        limiter.take(a).unwrap();
     }
-    assert!(limiter.check(a).is_err());
-    assert!(limiter.check(b).is_ok());
+    assert!(limiter.take(a).is_err());
+    assert!(limiter.take(b).is_ok());
+}
+
+#[test]
+fn a_refund_never_raises_a_bucket_above_its_burst() {
+    let limiter = RateLimiter::new(10, 2);
+    let ip: IpAddr = "192.0.2.1".parse().unwrap();
+    for _ in 0..10 {
+        limiter.refund(ip);
+    }
+    assert!(limiter.take(ip).is_ok());
+    assert!(limiter.take(ip).is_ok());
+    assert!(limiter.take(ip).is_err());
+}
+
+#[test]
+fn ipv6_clients_share_a_bucket_per_64_and_ipv4_stays_per_address() {
+    let limiter = RateLimiter::new(10, 2);
+    let first: IpAddr = "2001:db8:1:2::1".parse().unwrap();
+    let same_64: IpAddr = "2001:db8:1:2:ffff:ffff:ffff:ffff".parse().unwrap();
+    let next_64: IpAddr = "2001:db8:1:3::1".parse().unwrap();
+    limiter.take(first).unwrap();
+    limiter.take(same_64).unwrap();
+    assert!(limiter.take(first).is_err());
+    assert!(limiter.take(next_64).is_ok());
+
+    let v4: IpAddr = "192.0.2.1".parse().unwrap();
+    let mapped: IpAddr = "::ffff:192.0.2.1".parse().unwrap();
+    let neighbour: IpAddr = "192.0.2.2".parse().unwrap();
+    limiter.take(v4).unwrap();
+    limiter.take(mapped).unwrap();
+    assert!(limiter.take(v4).is_err(), "a mapped IPv4 address counts as that address");
+    assert!(limiter.take(neighbour).is_ok());
+    assert_eq!(ratelimit::bucket_key(mapped), v4);
 }
 
 #[test]

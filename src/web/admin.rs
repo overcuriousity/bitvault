@@ -118,9 +118,12 @@ async fn sign_in(
     Form(form): Form<SignInForm>,
 ) -> Result<Response, Error> {
     let Some(auth) = st.admin.clone() else { return Err(Error::NotFound) };
-    st.failures.check(ip)?;
+    // Taken before the slow check so parallel guesses cannot outrun the limit; a right password
+    // gets its token back.
+    st.failures.take(ip)?;
     match auth.sign_in(&form.password, domain::now()).await {
         Some(token) => {
+            st.failures.refund(ip);
             // A session cookie: the server ends the session after 12 idle hours.
             let mut res = Redirect::to("/admin").into_response();
             res.headers_mut().insert(header::SET_COOKIE, cookie(&token, None)?);
@@ -129,7 +132,6 @@ async fn sign_in(
             Ok(res)
         }
         None => {
-            st.failures.fail(ip);
             let notice = "That password is not right. Check it and try again.".to_owned();
             sign_in_page(&st, Some(notice), StatusCode::FORBIDDEN)
         }

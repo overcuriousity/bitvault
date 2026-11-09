@@ -518,3 +518,37 @@ async fn editing_without_a_password_asks_for_one() {
         assert!(!html.contains("That password does not open this paste."));
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_burst_of_parallel_wrong_passwords_gets_at_most_five_answers() {
+    let app = std::sync::Arc::new(app().await);
+    let w = create(&app, with_password("guarded", Privacy::Private, "right")).await;
+    let start = std::sync::Arc::new(tokio::sync::Barrier::new(25));
+    let tasks: Vec<_> = (0..25)
+        .map(|_| {
+            let (app, start, uri) = (app.clone(), start.clone(), format!("/{w}/raw"));
+            tokio::spawn(async move {
+                start.wait().await;
+                get_with(&app, &uri, "x-paste-password", "wrong").await.status()
+            })
+        })
+        .collect();
+    let mut answered = 0;
+    for t in tasks {
+        match t.await.unwrap() {
+            StatusCode::TOO_MANY_REQUESTS => {}
+            StatusCode::FORBIDDEN => answered += 1,
+            other => panic!("unexpected status {other}"),
+        }
+    }
+    assert!(answered <= 5, "{answered} of 25 parallel guesses were checked");
+}
+
+#[tokio::test]
+async fn the_right_password_on_raw_is_never_limited() {
+    let app = app().await;
+    let w = create(&app, with_password("mine", Privacy::Private, "right")).await;
+    for _ in 0..12 {
+        assert_eq!(get_with(&app, &format!("/{w}/raw"), "x-paste-password", "right").await.status(), StatusCode::OK);
+    }
+}

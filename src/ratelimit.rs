@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -20,7 +20,9 @@ struct Buckets {
     last_prune: Instant,
 }
 
-/// A per-address token bucket: `per_minute` tokens refill continuously, up to `burst`.
+/// A per-address token bucket: `per_minute` tokens refill continuously, up to `burst`. IPv6
+/// clients are keyed by their /64, the smallest block one subscriber usually holds; IPv4 (also
+/// when mapped into IPv6) by the address itself.
 pub struct RateLimiter {
     per_second: f64,
     burst: f64,
@@ -43,6 +45,7 @@ impl RateLimiter {
 
     /// Refills the address's bucket and runs `f` on its token count.
     fn with_tokens<T>(&self, ip: IpAddr, f: impl FnOnce(&mut f64) -> T) -> T {
+        let ip = bucket_key(ip);
         let now = Instant::now();
         let mut b = self.lock();
         if b.map.len() > PRUNE_ABOVE && now.duration_since(b.last_prune) >= PRUNE_EVERY {
@@ -55,12 +58,9 @@ impl RateLimiter {
         f(tokens)
     }
 
-    /// Refuses when the bucket is empty, without consuming a token.
-    pub fn check(&self, ip: IpAddr) -> Result<(), Error> {
-        self.with_tokens(ip, |t| if *t >= 1.0 { Ok(()) } else { Err(Error::TooManyAttempts) })
-    }
-
-    /// Consumes one token, or refuses when the bucket is empty.
+    /// Consumes one token, or refuses when the bucket is empty. Failed-attempt callers take a
+    /// token before checking a password, so parallel guesses cannot outrun the limit, and
+    /// [`refund`](Self::refund) it when the password was right.
     pub fn take(&self, ip: IpAddr) -> Result<(), Error> {
         self.with_tokens(ip, |t| {
             if *t >= 1.0 {
@@ -72,9 +72,21 @@ impl RateLimiter {
         })
     }
 
-    /// Records a failed attempt: consumes one token even when none is left.
-    pub fn fail(&self, ip: IpAddr) {
-        self.with_tokens(ip, |t| *t = (*t - 1.0).max(0.0));
+    /// Gives back a token taken by [`take`](Self::take), never above the burst.
+    pub fn refund(&self, ip: IpAddr) {
+        let burst = self.burst;
+        self.with_tokens(ip, |t| *t = (*t + 1.0).min(burst));
+    }
+}
+
+/// The bucket an address counts against: an IPv6 address's /64, any other address itself.
+pub fn bucket_key(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => IpAddr::V4(v4),
+            None => IpAddr::V6(Ipv6Addr::from_bits(v6.to_bits() & !u128::from(u64::MAX))),
+        },
+        v4 @ IpAddr::V4(_) => v4,
     }
 }
 

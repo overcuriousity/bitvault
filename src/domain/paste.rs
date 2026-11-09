@@ -516,29 +516,36 @@ async fn count_read(st: &AppState, id: PasteId, now: i64) -> Result<Option<Paste
     }
 }
 
-/// Recovers a private paste's data key, counting a wrong password as a failed attempt.
-async fn unlock(st: &AppState, p: &Paste, password: &str, ip: IpAddr) -> Result<Dek, Error> {
-    st.failures.check(ip)?;
-    let wrapped = p.wrapped_key.as_deref().ok_or_else(|| Error::internal("a private paste has no wrapped key"))?;
-    match crypto::unwrap_dek(password, wrapped).await {
-        Err(Error::WrongPassword) => {
-            st.failures.fail(ip);
-            Err(Error::WrongPassword)
-        }
-        other => other,
+/// Runs a password or verifier check under the failed-attempt limiter. A token is taken before
+/// the (slow) check, so parallel guesses cannot outrun the limit, and given back unless the
+/// proof was wrong, so right passwords cost nothing.
+async fn limited<T>(st: &AppState, ip: IpAddr, check: impl Future<Output = Result<T, Error>>) -> Result<T, Error> {
+    st.failures.take(ip)?;
+    let out = check.await;
+    if !matches!(out, Err(Error::WrongPassword | Error::Forbidden)) {
+        st.failures.refund(ip);
     }
+    out
 }
 
-/// Checks a read-only paste's password, counting a wrong one as a failed attempt.
+/// Recovers a private paste's data key; a wrong password counts as a failed attempt.
+async fn unlock(st: &AppState, p: &Paste, password: &str, ip: IpAddr) -> Result<Dek, Error> {
+    let wrapped = p.wrapped_key.as_deref().ok_or_else(|| Error::internal("a private paste has no wrapped key"))?;
+    limited(st, ip, crypto::unwrap_dek(password, wrapped)).await
+}
+
+/// Checks a read-only paste's password; a wrong one counts as a failed attempt.
 async fn check_readonly(st: &AppState, p: &Paste, password: &str, ip: IpAddr) -> Result<(), Error> {
-    st.failures.check(ip)?;
     let phc = p.password_hash.as_deref().ok_or_else(|| Error::internal("a read-only paste has no password hash"))?;
-    if crypto::verify_password(password, phc).await {
-        Ok(())
-    } else {
-        st.failures.fail(ip);
-        Err(Error::Forbidden)
-    }
+    limited(st, ip, async { if crypto::verify_password(password, phc).await { Ok(()) } else { Err(Error::Forbidden) } })
+        .await
+}
+
+/// Checks a secret paste's delete verifier; a wrong one counts as a failed attempt.
+async fn check_verifier(st: &AppState, p: &Paste, given: &[u8; 32], ip: IpAddr) -> Result<(), Error> {
+    let stored = p.verifier_hash.as_deref().and_then(|h| h.get(SALT_LEN..)).unwrap_or_default();
+    limited(st, ip, async { if crypto::verifier_matches(stored, given) { Ok(()) } else { Err(Error::Forbidden) } })
+        .await
 }
 
 fn utf8(bytes: Vec<u8>) -> Result<String, Error> {
@@ -678,14 +685,7 @@ pub async fn delete(st: &AppState, id: PasteId, auth: DeleteAuth, ip: IpAddr, no
             Err(Error::WrongPassword) => return Err(Error::Forbidden),
             other => other.map(|_| ())?,
         },
-        (Privacy::Secret, DeleteAuth::Verifier(v)) => {
-            st.failures.check(ip)?;
-            let stored = p.verifier_hash.as_deref().and_then(|h| h.get(SALT_LEN..)).unwrap_or_default();
-            if !crypto::verifier_matches(stored, &v) {
-                st.failures.fail(ip);
-                return Err(Error::Forbidden);
-            }
-        }
+        (Privacy::Secret, DeleteAuth::Verifier(v)) => check_verifier(st, &p, &v, ip).await?,
         _ => return Err(Error::Forbidden),
     }
     let db = db_id(id);
