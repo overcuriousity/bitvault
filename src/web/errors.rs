@@ -45,7 +45,7 @@ pub async fn render(State(st): State<AppState>, req: Request, next: Next) -> Res
     }
     if htmx {
         // htmx swaps 422 bodies into the page, so it gets the notice alone, never a document.
-        return match (NoticeFragment { message: &notice.message }).render() {
+        return match (NoticeFragment { message: &super::escape_text(&notice.message) }).render() {
             Ok(html) => (notice.status, axum::response::Html(html)).into_response(),
             Err(_) => res,
         };

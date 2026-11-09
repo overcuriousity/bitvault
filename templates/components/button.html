@@ -1,0 +1,3 @@
+{# kind: "primary", "default" or "danger"; icon is trusted markup or empty. #}
+{% macro submit(kind, label) %}<button type="submit" class="oc-btn oc-btn--{{ kind }}">{{ label }}</button>{% endmacro %}
+{% macro action(kind, label) %}<button type="button" class="oc-btn oc-btn--{{ kind }}">{{ label }}</button>{% endmacro %}

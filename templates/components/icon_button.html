@@ -1,0 +1,3 @@
+{# icon is trusted icon markup from web::icon. #}
+{% macro button(icon, label) %}<button type="button" class="oc-btn oc-btn--icon" aria-label="{{ label }}" data-oc-tip="{{ label }}">{{ icon|safe }}</button>{% endmacro %}
+{% macro link(icon, label, href) %}<a class="oc-btn oc-btn--icon" href="{{ href }}" aria-label="{{ label }}" data-oc-tip="{{ label }}">{{ icon|safe }}</a>{% endmacro %}

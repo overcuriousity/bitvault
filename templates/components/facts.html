@@ -1,0 +1,8 @@
+{# rows: (term, value) pairs. #}
+{% macro facts(rows) %}
+<dl class="oc-facts">
+  {%- for (term, value) in rows %}
+  <dt>{{ term }}</dt><dd><span class="oc-value">{{ value }}</span></dd>
+  {%- endfor %}
+</dl>
+{% endmacro %}

@@ -1,2 +1,15 @@
 .bv-sign-in { margin: 0; }
 .bv-lead { max-width: 68ch; color: var(--color-fg-secondary); }
+
+.bv-mono { font-family: var(--font-mono); }
+.bv-check { display: flex; align-items: center; gap: var(--space-2); }
+.bv-open { margin-top: var(--space-6); max-width: 36rem; }
+.bv-open h2 { margin-bottom: var(--space-3); }
+.paste-view { width: 100%; max-width: none; }
+
+/* With scripts off, create.js never sets data-privacy, so every field shows. */
+.bv-create[data-privacy="public"] .bv-password,
+.bv-create[data-privacy="unlisted"] .bv-password,
+.bv-create[data-privacy="readonly"] .bv-password[data-for="secret"],
+.bv-create[data-privacy="private"] .bv-password[data-for="secret"],
+.bv-create[data-privacy="secret"] .bv-password[data-for="readonly private"] { display: none; }

@@ -1,0 +1,11 @@
+{# options: (value, label, selected) triples. The label is linked by `for`, which the listbox module upgrades. #}
+{% macro select(id, name, label, options) %}
+<div class="oc-field">
+  <label for="{{ id }}">{{ label }}</label>
+  <select id="{{ id }}" name="{{ name }}" data-oc-menu>
+    {%- for (value, text, chosen) in options %}
+    <option value="{{ value }}"{% if chosen %} selected{% endif %}>{{ text }}</option>
+    {%- endfor %}
+  </select>
+</div>
+{% endmacro %}

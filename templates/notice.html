@@ -1,1 +1,2 @@
-<div class="oc-notice oc-notice--danger" role="status"><span class="oc-notice__text">{{ message }}</span></div>
+{% import "components/notice.html" as notice %}
+{% call notice::notice_escaped("danger", message) %}{% endcall %}

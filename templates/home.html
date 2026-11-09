@@ -1,2 +1,46 @@
+{% import "components/button.html" as button %}
+{% import "components/field.html" as field %}
+{% import "components/select.html" as select %}
 <div class="oc-page-head"><h1>New paste</h1></div>
 <p class="bv-lead">Share text, links and files with a three-word address.</p>
+
+<form class="oc-form bv-create" id="create-form" method="post" action="/" enctype="multipart/form-data">
+  <div class="oc-field">
+    <label for="content">Content</label>
+    <textarea class="oc-input bv-mono" id="content" name="content" rows="10" spellcheck="false" autocomplete="off"></textarea>
+  </div>
+  {% call select::select("privacy", "privacy", "Privacy", privacy_options) %}{% endcall %}
+  <div class="bv-password" data-for="readonly private">
+    {% call field::password("password", "password", "Password", "new-password") %}{% endcall %}
+  </div>
+  <div class="bv-password" data-for="secret">
+    {% call field::secret("secret-password", "Password", "new-password") %}{% endcall %}
+  </div>
+  {% call select::select("expiry", "expiry", "Expires after", expiry_options) %}{% endcall %}
+  {% call field::number("burn", "burn_after_reads", "Burn after reads (0 is off)", default_burn) %}{% endcall %}
+  {% call select::select("syntax", "syntax", "Syntax", syntax_options) %}{% endcall %}
+  {% if editable %}
+  <label class="bv-check"><input type="checkbox" name="editable" value="on"> Allow editing</label>
+  {% endif %}
+  {% if uploader_password %}
+  {% call field::password("uploader-password", "uploader_password", "Uploader password", "current-password") %}{% endcall %}
+  {% endif %}
+  <div class="oc-field bv-files">
+    <label for="files">Files</label>
+    <input class="oc-input" id="files" name="file" type="file" multiple>
+  </div>
+  <div class="oc-form__actions">
+    {% call button::submit("primary", "Create paste") %}{% endcall %}
+  </div>
+</form>
+
+<section class="bv-open" aria-labelledby="open-heading">
+  <h2 id="open-heading">Open a paste</h2>
+  <form class="oc-form" method="post" action="/open" hx-post="/open" hx-target="#open-result" hx-swap="innerHTML">
+    {% call field::text("words", "words", "Three words", "off") %}{% endcall %}
+    <div class="oc-form__actions">
+      {% call button::submit("default", "Open paste") %}{% endcall %}
+    </div>
+  </form>
+  <div id="open-result" aria-live="polite"></div>
+</section>

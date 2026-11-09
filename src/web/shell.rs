@@ -71,16 +71,8 @@ impl Layout {
         items
     }
 
-    /// The lucide icon inlined so it takes the surrounding text colour.
     fn icon(&self, name: &str) -> String {
-        let Some(file) = Assets::get(&format!("vendor/oc/icons/{name}.svg")) else {
-            return String::new();
-        };
-        String::from_utf8_lossy(&file.data).trim_end().replacen(
-            "class=\"oc-icon\"",
-            &format!("class=\"oc-icon\" data-icon=\"{name}\""),
-            1,
-        )
+        super::icon(name, super::IconSize::Tool)
     }
 
     fn logo(&self) -> String {

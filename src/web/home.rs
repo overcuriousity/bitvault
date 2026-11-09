@@ -2,23 +2,25 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use askama::Template;
+use axum::Form as UrlForm;
 use axum::Router;
 use axum::extract::{Request, State};
-use axum::http::header;
-use axum::response::{Html, Redirect};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use futures_util::{StreamExt, TryStreamExt, stream};
 use multer::{Field, Multipart};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 use super::multipart::{Guarded, too_large};
 use super::page;
 use crate::domain::crypto::{self, SALT_LEN};
-use crate::domain::expiry::Expiry;
+use crate::domain::expiry::{self, Expiry};
 use crate::domain::files::Staging;
 use crate::domain::paste::{self, NewPaste, SecretParts};
-use crate::domain::{self, Privacy, highlight};
+use crate::domain::{self, Privacy, highlight, words};
 use crate::error::Error;
 use crate::ratelimit::{self, RateLimiter};
 use crate::state::AppState;
@@ -33,10 +35,37 @@ const CONTAINER_LIMIT: usize = crypto::browser_container_max_len(6 * TEXT_LIMIT 
 
 #[derive(Template)]
 #[template(path = "home.html")]
-struct Home;
+struct Home {
+    privacy_options: Vec<(String, &'static str, bool)>,
+    expiry_options: Vec<(&'static str, String, bool)>,
+    syntax_options: Vec<(String, String, bool)>,
+    default_burn: u32,
+    editable: bool,
+    uploader_password: bool,
+}
+
+fn privacy_label(level: &str) -> &'static str {
+    match level {
+        "public" => "Public",
+        "unlisted" => "Unlisted",
+        "readonly" => "Read-only",
+        "private" => "Private",
+        _ => "Secret",
+    }
+}
+
+fn sentence_case(s: &str) -> String {
+    let mut chars = s.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
+#[derive(Deserialize)]
+struct OpenForm {
+    words: String,
+}
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/", get(index))
+    Router::new().route("/", get(index)).route("/open", post(open))
 }
 
 /// `POST /`, for the upload group: large bodies, a long timeout and the create rate limit.
@@ -45,8 +74,49 @@ pub fn upload_routes() -> Router<AppState> {
 }
 
 async fn index(State(st): State<AppState>) -> Result<Html<String>, Error> {
-    let body = Home.render().map_err(Error::internal)?;
+    let app = &st.cfg.app;
+    let mut syntax_options = vec![("plain".to_owned(), "Plain".to_owned(), true)];
+    if app.highlight {
+        syntax_options.extend(highlight::languages().iter().map(|(t, n)| (t.clone(), n.clone(), false)));
+    }
+    let home = Home {
+        privacy_options: app
+            .privacy_levels
+            .iter()
+            .map(|l| (l.clone(), privacy_label(l), *l == app.default_privacy))
+            .collect(),
+        expiry_options: Expiry::ALL
+            .into_iter()
+            .filter(|e| expiry::allowed(app, *e))
+            .map(|e| (e.as_str(), sentence_case(e.label()), e.as_str() == app.default_expiry))
+            .collect(),
+        syntax_options,
+        default_burn: app.default_burn_after,
+        editable: app.editable,
+        uploader_password: app.uploader_password.is_some(),
+    };
+    let body = home.render().map_err(Error::internal)?;
     page(&st, false, "new", "New paste", body)
+}
+
+/// `POST /open`: finds a paste by its words. htmx follows `HX-Redirect`; without it, a plain redirect.
+async fn open(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    UrlForm(form): UrlForm<OpenForm>,
+) -> Result<Response, Error> {
+    let id = words::parse(&form.words)?;
+    match paste::meta(&st, id, domain::now()).await {
+        Ok(_) => {}
+        Err(Error::NotFound) => return Err(invalid("No paste has these words. Check them and try again.")),
+        Err(e) => return Err(e),
+    }
+    let target = format!("/{}", id.words());
+    if headers.contains_key("hx-request") {
+        Ok((StatusCode::OK, [("hx-redirect", target)]).into_response())
+    } else {
+        Ok(Redirect::to(&target).into_response())
+    }
 }
 
 /// The uploader password, when one is configured, must arrive before any file.
