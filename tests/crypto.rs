@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use bitvault::domain::crypto::{
-    self, CHUNK_LEN, Dek, KdfParams, PBKDF2_ITERATIONS, TAG_LEN, check_browser_container, open, open_alg2,
-    parse_header, seal, seal_alg2_for_tests,
+    self, CHUNK_LEN, Dek, KdfParams, PBKDF2_ITERATIONS, PBKDF2_MAX_ITERATIONS, TAG_LEN, check_browser_container, open,
+    open_alg2, parse_header, seal, seal_alg2_for_tests,
 };
 use bitvault::error::Error;
 use chacha20poly1305::aead::{Aead, Payload};
@@ -31,7 +31,7 @@ fn sealed_text_opens_with_the_same_key() {
 #[test]
 fn a_different_key_does_not_open_a_container() {
     let sealed = seal(&Dek::random(), b"hello");
-    assert!(open(&Dek::random(), &sealed).is_err());
+    assert!(matches!(open(&Dek::random(), &sealed), Err(Error::Internal(_))));
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn changing_a_chunk_byte_fails() {
     let sealed = seal(&key, &pattern(200 * 1024));
     let mut bad = sealed.clone();
     bad[KEY_HEADER_LEN + CT_CHUNK + 100] ^= 0x80;
-    assert!(open(&key, &bad).is_err());
+    assert!(matches!(open(&key, &bad), Err(Error::Internal(_))));
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn reordered_chunks_fail() {
     let (c1, c2, rest) = (&body[..CT_CHUNK], &body[CT_CHUNK..2 * CT_CHUNK], &body[2 * CT_CHUNK..]);
     let swapped = [&sealed[..KEY_HEADER_LEN], c2, c1, rest].concat();
     assert_eq!(swapped.len(), sealed.len());
-    assert!(open(&key, &swapped).is_err());
+    assert!(matches!(open(&key, &swapped), Err(Error::Internal(_))));
 }
 
 #[test]
@@ -155,9 +155,9 @@ fn a_truncated_stream_fails() {
     let key = Dek::random();
     let sealed = seal(&key, &pattern(200 * 1024));
     let last_start = KEY_HEADER_LEN + 3 * CT_CHUNK;
-    assert!(open(&key, &sealed[..last_start]).is_err());
+    assert!(matches!(open(&key, &sealed[..last_start]), Err(Error::Internal(_))));
     let exact = seal(&key, &pattern(2 * CHUNK_LEN));
-    assert!(open(&key, &exact[..KEY_HEADER_LEN + CT_CHUNK]).is_err());
+    assert!(matches!(open(&key, &exact[..KEY_HEADER_LEN + CT_CHUNK]), Err(Error::Internal(_))));
 }
 
 #[test]
@@ -165,10 +165,10 @@ fn an_extended_stream_fails() {
     let key = Dek::random();
     let sealed = seal(&key, &pattern(200 * 1024));
     let last = sealed[KEY_HEADER_LEN + 3 * CT_CHUNK..].to_vec();
-    assert!(open(&key, &[sealed.clone(), last].concat()).is_err());
+    assert!(matches!(open(&key, &[sealed.clone(), last].concat()), Err(Error::Internal(_))));
     let exact = seal(&key, &pattern(CHUNK_LEN));
     let copy = exact[KEY_HEADER_LEN..].to_vec();
-    assert!(open(&key, &[exact, copy].concat()).is_err());
+    assert!(matches!(open(&key, &[exact, copy].concat()), Err(Error::Internal(_))));
 }
 
 #[tokio::test]
@@ -206,9 +206,9 @@ async fn streaming_open_detects_truncation_and_extension() {
     let key = Dek::random();
     let sealed = seal(&key, &pattern(2 * CHUNK_LEN));
     let truncated = &sealed[..KEY_HEADER_LEN + CT_CHUNK];
-    assert!(crypto::open_stream(&key, truncated, tokio::io::sink()).await.is_err());
+    assert!(matches!(crypto::open_stream(&key, truncated, tokio::io::sink()).await, Err(Error::Internal(_))));
     let extended = [sealed.clone(), sealed[KEY_HEADER_LEN + CT_CHUNK..].to_vec()].concat();
-    assert!(crypto::open_stream(&key, &extended[..], tokio::io::sink()).await.is_err());
+    assert!(matches!(crypto::open_stream(&key, &extended[..], tokio::io::sink()).await, Err(Error::Internal(_))));
     assert!(matches!(crypto::open_stream(&key, &sealed[..3], tokio::io::sink()).await, Err(Error::UnsupportedFormat)));
 }
 
@@ -275,6 +275,61 @@ async fn readonly_password_hashes_verify() {
     assert!(!crypto::verify_password("open sesame", "not a phc string").await);
 }
 
+#[tokio::test]
+async fn password_hashes_above_the_cost_caps_are_refused_before_deriving() {
+    // Genuine hashes of "pw" whose costs exceed the caps (memory > 256 MiB, or more than 10 passes).
+    let salt = "c2FsdHNhbHRzYWx0c2FsdA";
+    let digest = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    for params in ["m=262145,t=1,p=1", "m=65536,t=11,p=1", "m=65536,t=3,p=256", "m=4294967295,t=1,p=1"] {
+        let phc = format!("$argon2id$v=19${params}${salt}${digest}");
+        let started = std::time::Instant::now();
+        assert!(!crypto::verify_password("pw", &phc).await, "{params}");
+        assert!(started.elapsed() < std::time::Duration::from_millis(50), "{params} was derived");
+    }
+    let at_cap = format!("$argon2id$v=19$m=8,t=10,p=1${salt}${digest}");
+    assert!(!crypto::verify_password("pw", &at_cap).await);
+}
+
+#[tokio::test]
+async fn header_costs_above_the_caps_are_unsupported() {
+    let header = |m: u32, t: u32| {
+        let mut h = b"BVC\x01\x01\x01".to_vec();
+        h.extend_from_slice(&m.to_be_bytes());
+        h.extend_from_slice(&t.to_be_bytes());
+        h.push(1);
+        h.extend_from_slice(&[0; 16 + 19 + 48]);
+        h
+    };
+    assert_eq!(parse_header(&header(262_144, 10)).unwrap().argon, Some(KdfParams { m_kib: 262_144, t: 10, p: 1 }));
+    for (m, t) in [(262_145, 1), (65_536, 11), (65_536, 0)] {
+        assert!(matches!(parse_header(&header(m, t)), Err(Error::UnsupportedFormat)), "m={m} t={t}");
+        assert!(matches!(crypto::unwrap_dek("pw", &header(m, t)).await, Err(Error::UnsupportedFormat)));
+    }
+    let too_costly = KdfParams { m_kib: 262_145, t: 1, p: 1 };
+    assert!(crypto::wrap_dek("pw", &Dek::random(), too_costly).await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn argon2_derivations_never_exceed_the_concurrency_limit() {
+    let permits = crypto::argon_permits();
+    assert!((1..=4).contains(&permits));
+    let slow = KdfParams { m_kib: 16_384, t: 2, p: 1 };
+    let dek = Dek::random();
+    let wrapped = crypto::wrap_dek("pw", &dek, slow).await.unwrap();
+    let tasks: Vec<_> = (0..4 * permits + 4)
+        .map(|_| {
+            let wrapped = wrapped.clone();
+            tokio::spawn(async move { crypto::unwrap_dek("pw", &wrapped).await.unwrap() })
+        })
+        .collect();
+    for t in tasks {
+        assert_eq!(t.await.unwrap(), dek);
+    }
+    let peak = crypto::argon_peak_in_flight();
+    assert!(peak <= permits, "{peak} derivations ran at once with {permits} permits");
+    assert_eq!(peak, permits, "the parallel calls should have filled every permit");
+}
+
 #[test]
 fn verifier_comparison_is_exact() {
     let v = [7u8; 32];
@@ -300,6 +355,29 @@ fn weak_browser_containers_are_refused() {
 }
 
 #[test]
+fn browser_iteration_counts_are_capped_at_ten_times_the_minimum() {
+    assert_eq!(PBKDF2_MAX_ITERATIONS, 6_000_000);
+    // Deriving at these counts takes seconds, so a cheap container gets its iteration field
+    // rewritten; neither check derives a key before refusing.
+    let cheap = seal_alg2_for_tests("pw", &[4u8; 16], 1, b"x");
+    let with_iterations = |i: u32| {
+        let mut c = cheap.clone();
+        c[6..10].copy_from_slice(&i.to_be_bytes());
+        c
+    };
+    check_browser_container(&with_iterations(PBKDF2_ITERATIONS)).unwrap();
+    check_browser_container(&with_iterations(PBKDF2_MAX_ITERATIONS)).unwrap();
+    for i in [PBKDF2_ITERATIONS - 1, PBKDF2_MAX_ITERATIONS + 1, u32::MAX] {
+        assert!(matches!(check_browser_container(&with_iterations(i)), Err(Error::UnsupportedFormat)), "{i}");
+    }
+    let started = std::time::Instant::now();
+    for i in [PBKDF2_MAX_ITERATIONS + 1, u32::MAX] {
+        assert!(matches!(open_alg2("pw", &with_iterations(i)), Err(Error::UnsupportedFormat)), "{i}");
+    }
+    assert!(started.elapsed() < std::time::Duration::from_millis(100), "the decoder derived a key");
+}
+
+#[test]
 fn a_full_strength_browser_container_is_accepted_and_opens_with_its_password() {
     let salt = [9u8; 16];
     let plain = pattern(CHUNK_LEN + 10);
@@ -319,9 +397,9 @@ fn browser_containers_detect_reordering_and_truncation() {
     let c = seal_alg2_for_tests("pw", &salt, 1000, &pattern(2 * CHUNK_LEN));
     // Header bytes: magic 3, version, alg and kdf 1 each, iterations 4, salt 16, nonce prefix 7.
     let header = 33;
-    assert!(open_alg2("pw", &c[..header + CT_CHUNK]).is_err());
+    assert!(matches!(open_alg2("pw", &c[..header + CT_CHUNK]), Err(Error::WrongPassword)));
     let swapped = [&c[..header], &c[header + CT_CHUNK..], &c[header..header + CT_CHUNK]].concat();
-    assert!(open_alg2("pw", &swapped).is_err());
+    assert!(matches!(open_alg2("pw", &swapped), Err(Error::WrongPassword)));
     assert_eq!(open_alg2("pw", &c).unwrap(), pattern(2 * CHUNK_LEN));
 }
 

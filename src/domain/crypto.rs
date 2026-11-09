@@ -23,6 +23,7 @@
 //! AES-256-GCM key and the last 32 the verifier HMAC key (WebCrypto `deriveBits(512)`).
 
 use std::fmt;
+use std::sync::{Arc, LazyLock};
 
 use argon2::password_hash::phc::PasswordHash;
 use argon2::{ARGON2ID_IDENT, Algorithm, Argon2, Params, PasswordHasher, PasswordVerifier, Version};
@@ -33,6 +34,7 @@ use rand::rngs::SysRng;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::sync::Semaphore;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::error::Error;
@@ -51,6 +53,8 @@ pub const SALT_LEN: usize = 16;
 pub const KEY_LEN: usize = 32;
 /// The minimum PBKDF2 cost the server accepts for a browser (Secret) container.
 pub const PBKDF2_ITERATIONS: u32 = 600_000;
+/// The maximum, so a crafted container cannot make every reader spin for minutes.
+pub const PBKDF2_MAX_ITERATIONS: u32 = 6_000_000;
 /// The message the browser MACs with its verifier key to prove it knows a Secret paste's password.
 pub const VERIFIER_CONTEXT: &[u8] = b"bitvault-delete";
 
@@ -58,9 +62,57 @@ const FIXED_LEN: usize = 6;
 const CT_CHUNK_LEN: usize = CHUNK_LEN + TAG_LEN;
 const XCHACHA_PREFIX_LEN: usize = 19;
 const AES_GCM_PREFIX_LEN: usize = 7;
-// Upper bounds on argon2id costs read from a header, so a corrupt row cannot demand gigabytes.
-const MAX_ARGON_M_KIB: u32 = 1 << 20;
-const MAX_ARGON_T: u32 = 32;
+// Upper bounds on argon2id costs read from a header or PHC string, so a corrupt row cannot
+// demand gigabytes or minutes.
+const MAX_ARGON_M_KIB: u32 = 262_144;
+const MAX_ARGON_T: u32 = 10;
+
+/// Each argon2 derivation holds up to 64 MiB on the blocking pool, so only a few may run at once
+/// however many requests arrive; the rest wait for a permit.
+static ARGON_SLOTS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(argon_slot_count())));
+
+fn argon_slot_count() -> usize {
+    std::thread::available_parallelism().map_or(1, usize::from).clamp(1, 4)
+}
+
+#[cfg(feature = "test-hooks")]
+static ARGON_IN_FLIGHT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "test-hooks")]
+static ARGON_PEAK: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many argon2 derivations may run at once. Test-only.
+#[cfg(feature = "test-hooks")]
+pub fn argon_permits() -> usize {
+    argon_slot_count()
+}
+
+/// The most argon2 derivations seen running at the same moment in this process. Test-only.
+#[cfg(feature = "test-hooks")]
+pub fn argon_peak_in_flight() -> usize {
+    ARGON_PEAK.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Runs argon2 work on the blocking pool once a permit is free. The permit moves into the
+/// closure, so it is released only when the derivation finishes, even if the caller gave up.
+async fn run_argon<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T, Error> {
+    let permit = Arc::clone(&ARGON_SLOTS).acquire_owned().await.map_err(Error::internal)?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        #[cfg(feature = "test-hooks")]
+        {
+            use std::sync::atomic::Ordering::SeqCst;
+            let now = ARGON_IN_FLIGHT.fetch_add(1, SeqCst) + 1;
+            ARGON_PEAK.fetch_max(now, SeqCst);
+            let out = work();
+            ARGON_IN_FLIGHT.fetch_sub(1, SeqCst);
+            out
+        }
+        #[cfg(not(feature = "test-hooks"))]
+        work()
+    })
+    .await
+    .map_err(Error::internal)
+}
 
 /// Bytes from the operating system's random number generator.
 ///
@@ -477,13 +529,12 @@ async fn derive_argon2id(
 ) -> Result<Zeroizing<[u8; KEY_LEN]>, Error> {
     let argon = argon2id(params)?;
     let password = Zeroizing::new(password.as_bytes().to_vec());
-    tokio::task::spawn_blocking(move || {
+    run_argon(move || {
         let mut key = Zeroizing::new([0u8; KEY_LEN]);
         argon.hash_password_into(&password, &salt, key.as_mut_slice()).map_err(Error::internal)?;
         Ok(key)
     })
-    .await
-    .map_err(Error::internal)?
+    .await?
 }
 
 /// Encrypts `dek` under a key derived from `password` (an alg 1, kdf 1 container).
@@ -516,23 +567,22 @@ pub async fn hash_password(password: &str) -> Result<String, Error> {
     let argon = argon2id(KdfParams::DEFAULT)?;
     let password = Zeroizing::new(password.as_bytes().to_vec());
     let salt = random_bytes::<SALT_LEN>();
-    tokio::task::spawn_blocking(move || {
-        argon.hash_password_with_salt(&password, &salt).map(|h| h.to_string()).map_err(Error::internal)
-    })
-    .await
-    .map_err(Error::internal)?
+    run_argon(move || argon.hash_password_with_salt(&password, &salt).map(|h| h.to_string()).map_err(Error::internal))
+        .await?
 }
 
-/// Whether `password` matches an argon2id PHC string; anything unparseable is a mismatch.
+/// Whether `password` matches an argon2id PHC string. Anything unparseable, or with costs above
+/// the header caps, is a mismatch and is refused before any derivation.
 pub async fn verify_password(password: &str, phc: &str) -> bool {
+    let Ok(hash) = PasswordHash::new(phc) else { return false };
+    let Ok(params) = Params::try_from(&hash) else { return false };
+    let within_caps = u8::try_from(params.p_cost())
+        .is_ok_and(|p| KdfParams { m_kib: params.m_cost(), t: params.t_cost(), p }.is_supported());
+    if hash.algorithm != ARGON2ID_IDENT || !within_caps {
+        return false;
+    }
     let password = Zeroizing::new(password.as_bytes().to_vec());
-    let phc = phc.to_owned();
-    tokio::task::spawn_blocking(move || {
-        let Ok(hash) = PasswordHash::new(&phc) else { return false };
-        hash.algorithm == ARGON2ID_IDENT && Argon2::default().verify_password(&password, &hash).is_ok()
-    })
-    .await
-    .unwrap_or(false)
+    run_argon(move || Argon2::default().verify_password(&password, &hash).is_ok()).await.unwrap_or(false)
 }
 
 /// What the server stores for a Secret paste's delete verifier.
@@ -545,12 +595,17 @@ pub fn verifier_matches(stored_hash: &[u8], given: &[u8; 32]) -> bool {
     stored_hash.ct_eq(&verifier_hash(given)).into()
 }
 
-/// Accepts only full-strength browser containers: alg 2, kdf 2, ≥ 600 000 iterations, a non-empty body.
+fn browser_iterations_allowed(iterations: Option<u32>) -> bool {
+    iterations.is_some_and(|i| (PBKDF2_ITERATIONS..=PBKDF2_MAX_ITERATIONS).contains(&i))
+}
+
+/// Accepts only full-strength browser containers: alg 2, kdf 2, 600 000 to 6 000 000 iterations,
+/// a non-empty body.
 pub fn check_browser_container(container: &[u8]) -> Result<(), Error> {
     let p = parse(container)?;
     let strong = p.header.alg == ALG_AES256_GCM
         && p.header.kdf == KDF_PBKDF2_SHA256
-        && p.header.iterations.is_some_and(|i| i >= PBKDF2_ITERATIONS)
+        && browser_iterations_allowed(p.header.iterations)
         && p.body.len() >= TAG_LEN;
     if strong { Ok(()) } else { Err(Error::UnsupportedFormat) }
 }
@@ -574,7 +629,8 @@ pub fn open_alg2(password: &str, container: &[u8]) -> Result<Vec<u8>, Error> {
     let (Some(iterations), Some(salt)) = (p.header.iterations, p.salt) else {
         return Err(Error::UnsupportedFormat);
     };
-    if p.header.alg != ALG_AES256_GCM || p.body.is_empty() {
+    // Only the upper cap applies here: tests decode deliberately weak containers too.
+    if p.header.alg != ALG_AES256_GCM || p.body.is_empty() || iterations > PBKDF2_MAX_ITERATIONS {
         return Err(Error::UnsupportedFormat);
     }
     let okm = pbkdf2_keys(password, &salt, iterations);
