@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" data-theme="system" data-prefs="local">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{ title }} · {{ cfg.app.title }}</title>
+<meta name="color-scheme" content="light dark">
+<meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"selfRequestsOnly":true,"attributesToSettle":["class","width","height"],"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+<script src="{{ self.asset("vendor/oc/js/theme.js") }}"></script>
+{%- for css in self.stylesheets() %}
+<link rel="stylesheet" href="{{ css }}">
+{%- endfor %}
+<script src="{{ self.asset("vendor/oc/htmx/htmx.min.js") }}" defer></script>
+{%- for js in self.modules() %}
+<script type="module" src="{{ js }}"></script>
+{%- endfor %}
+</head>
+<body class="oc-app oc-app--everyday">
+<a class="oc-sr-only" href="#main">Skip to content</a>
+<div class="oc-shell oc-shell--everyday" id="oc-shell">
+<header class="oc-topbar">
+  <a class="oc-topbar__logo" href="/" aria-label="{{ cfg.app.title }} home">{{ self.logo()|safe }}<span>{{ cfg.app.title }}</span></a>
+  <nav class="oc-topnav" aria-label="Main">
+    {%- for item in self.nav() %}
+    <a href="{{ item.href }}"{% if item.current %} aria-current="page"{% endif %}>{{ self.icon(item.icon)|safe }}<span>{{ item.label }}</span></a>
+    {%- endfor %}
+  </nav>
+  <div class="oc-topbar__end">
+    <button type="button" class="oc-btn oc-btn--icon" data-oc-pref="density" data-oc-value="default" aria-pressed="false" aria-label="Use compact text size" data-oc-tip="Use compact text size">{{ self.icon("a-large-small")|safe }}</button>
+    <button type="button" class="oc-btn oc-btn--icon oc-theme-toggle" data-oc-pref="theme" data-oc-value="system" aria-label="Switch to light theme" data-oc-tip="Switch to light theme">{{ self.icon("monitor")|safe }}{{ self.icon("sun")|safe }}{{ self.icon("moon")|safe }}</button>
+    {%- if cfg.app.admin_password.is_some() %}
+    {%- if admin %}
+    <form class="bv-sign-in" method="post" action="/admin/sign-out"><button type="submit" class="oc-btn oc-btn--icon" aria-label="Sign out" data-oc-tip="Sign out">{{ self.icon("log-out")|safe }}</button></form>
+    {%- else %}
+    <a class="oc-btn" href="/admin/sign-in">Sign in</a>
+    {%- endif %}
+    {%- endif %}
+  </div>
+</header>
+<main class="oc-main" id="main">{{ body|safe }}</main>
+<nav class="oc-tabbar" aria-label="Primary">
+  {%- for item in self.nav() %}
+  <a href="{{ item.href }}"{% if item.current %} aria-current="page"{% endif %}>{{ self.icon(item.icon)|safe }}<span>{{ item.label }}</span></a>
+  {%- endfor %}
+</nav>
+</div>
+<div class="oc-notices" id="oc-notices" aria-live="polite"></div>
+<div class="oc-sr-only" id="oc-live" aria-live="polite"></div>
+</body>
+</html>

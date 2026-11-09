@@ -1,0 +1,10 @@
+@media (pointer: coarse) {
+  body { overscroll-behavior-y: contain; }
+  .oc-btn { min-height: var(--target-touch); }
+  .oc-btn--icon, .oc-btn--row { min-width: var(--target-touch); min-height: var(--target-touch); }
+  .oc-row-actions { gap: var(--space-2); }
+  .oc-row-actions [data-oc-reveal] { visibility: visible; }
+  .oc-input { font-size: 16px; min-height: var(--target-touch); }
+  .oc-topbar { padding-left: max(var(--space-3), env(safe-area-inset-left)); padding-right: max(var(--space-3), env(safe-area-inset-right)); }
+  .oc-menu [role="option"], .oc-menu [role="menuitem"] { min-height: var(--target-touch); }
+}

@@ -1,0 +1,171 @@
+/* The single source of truth for every colour, size and duration. manifest/10-visual.md quotes these values. */
+:root {
+  color-scheme: light;
+  --color-bg-base: #f8f6f1;
+  --color-bg-surface: #f2f0ea;
+  --color-bg-elevated: #ffffff;
+  --color-bg-hover: #ece9e2;
+  --color-bg-active: #e2ded3;
+  --color-fg-primary: #2d2d2d;
+  --color-fg-secondary: #5a5a5a;
+  --color-fg-muted: #6c6c65;
+  --color-border: #ddd8cc;
+  --color-border-strong: #c9c3b4;
+  --color-border-subtle: #eae7de;
+  --color-border-control: #8a8478;
+  --color-accent: #386889;
+  --color-accent-fg: #ffffff;
+  --color-danger: #b3382c;
+  --color-warning: #845b16;
+  --color-success: #2b7048;
+  --alpha-dim: 10%;
+  --alpha-muted: 25%;
+  --chart-cat-1: #2a78d6;
+  --chart-cat-2: #1baf7a;
+  --chart-cat-3: #eda100;
+  --chart-cat-4: #008300;
+  --chart-cat-5: #4a3aa7;
+  --chart-cat-6: #e34948;
+  --chart-cat-7: #e87ba4;
+  --chart-cat-8: #eb6834;
+  --chart-seq-1: #cde2fb;
+  --chart-seq-2: #6da7ec;
+  --chart-seq-3: #256abf;
+  --chart-seq-4: #0d366b;
+  --chart-div-neg: #1f5fa8;
+  --chart-div-mid: #f2f0ec;
+  --chart-div-pos: #c1521d;
+  --theme-color: #f8f6f1;
+
+  --color-accent-dim: color-mix(in srgb, var(--color-accent) var(--alpha-dim), transparent);
+  --color-accent-muted: color-mix(in srgb, var(--color-accent) var(--alpha-muted), transparent);
+  --color-danger-dim: color-mix(in srgb, var(--color-danger) var(--alpha-dim), transparent);
+  --color-warning-dim: color-mix(in srgb, var(--color-warning) var(--alpha-dim), transparent);
+  --color-success-dim: color-mix(in srgb, var(--color-success) var(--alpha-dim), transparent);
+  --color-link-underline: color-mix(in srgb, currentColor 35%, transparent);
+  --color-scrim: color-mix(in srgb, var(--color-fg-primary) 30%, transparent);
+
+  --font-ui: "Atkinson Hyperlegible Next", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --text-page: 1.375rem;
+  --text-section: 1.125rem;
+  --text-prose: 1rem;
+  --text-ui: 0.875rem;
+  --text-dense: 0.8125rem;
+  --text-micro: max(0.75rem, 12px);
+  --text-mono: 0.8125rem;
+  --measure: 68ch;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+
+  --radius-sm: 3px;
+  --radius-md: 6px;
+
+  --motion-fast: 120ms;
+  --motion-panel: 170ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  --icon-stroke: 1.4px;
+  --icon-row: 14px;
+  --icon-tool: 16px;
+  --icon-tab: 20px;
+  --target-row: 24px;
+  --target-tool: 32px;
+  --target-touch: 44px;
+
+  --z-sticky: 10;
+  --z-rail: 20;
+  --z-popover: 30;
+  --z-sheet: 40;
+  --z-dialog: 50;
+  --z-notice: 60;
+
+  --shadow-float: 0 4px 16px color-mix(in srgb, var(--color-fg-primary) 14%, transparent);
+  --focus-ring: 1.5px solid var(--color-accent);
+  --focus-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-bg-base: #0e1015;
+    --color-bg-surface: #14171d;
+    --color-bg-elevated: #1b1e26;
+    --color-bg-hover: #262a34;
+    --color-bg-active: #2d3140;
+    --color-fg-primary: #e2e4ec;
+    --color-fg-secondary: #9599b0;
+    --color-fg-muted: #8185a3;
+    --color-border: #232636;
+    --color-border-strong: #2e3244;
+    --color-border-subtle: #191c26;
+    --color-border-control: #6a6f87;
+    --color-accent: #5aa8b0;
+    --color-accent-fg: #0e1015;
+    --color-danger: #e77676;
+    --color-warning: #e8a839;
+    --color-success: #4caf7d;
+    --alpha-dim: 15%;
+    --alpha-muted: 35%;
+    --chart-cat-1: #3987e5;
+    --chart-cat-2: #199e70;
+    --chart-cat-3: #c98500;
+    --chart-cat-4: #008300;
+    --chart-cat-5: #9085e9;
+    --chart-cat-6: #e66767;
+    --chart-cat-7: #d55181;
+    --chart-cat-8: #d95926;
+    --chart-seq-1: #184f95;
+    --chart-seq-2: #256abf;
+    --chart-seq-3: #5598e7;
+    --chart-seq-4: #cde2fb;
+    --chart-div-neg: #5598e7;
+    --chart-div-mid: #3a3a38;
+    --chart-div-pos: #e8834a;
+    --theme-color: #0e1015;
+  }
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --color-bg-base: #0e1015;
+    --color-bg-surface: #14171d;
+    --color-bg-elevated: #1b1e26;
+    --color-bg-hover: #262a34;
+    --color-bg-active: #2d3140;
+    --color-fg-primary: #e2e4ec;
+    --color-fg-secondary: #9599b0;
+    --color-fg-muted: #8185a3;
+    --color-border: #232636;
+    --color-border-strong: #2e3244;
+    --color-border-subtle: #191c26;
+    --color-border-control: #6a6f87;
+    --color-accent: #5aa8b0;
+    --color-accent-fg: #0e1015;
+    --color-danger: #e77676;
+    --color-warning: #e8a839;
+    --color-success: #4caf7d;
+    --alpha-dim: 15%;
+    --alpha-muted: 35%;
+    --chart-cat-1: #3987e5;
+    --chart-cat-2: #199e70;
+    --chart-cat-3: #c98500;
+    --chart-cat-4: #008300;
+    --chart-cat-5: #9085e9;
+    --chart-cat-6: #e66767;
+    --chart-cat-7: #d55181;
+    --chart-cat-8: #d95926;
+    --chart-seq-1: #184f95;
+    --chart-seq-2: #256abf;
+    --chart-seq-3: #5598e7;
+    --chart-seq-4: #cde2fb;
+    --chart-div-neg: #5598e7;
+    --chart-div-mid: #3a3a38;
+    --chart-div-pos: #e8834a;
+    --theme-color: #0e1015;
+}
