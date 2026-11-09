@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 
 use crate::config::Config;
 use crate::deployment::Deployment;
+use crate::domain::grant::GrantKey;
 use crate::error::Error;
 use crate::ratelimit::RateLimiter;
 use crate::security;
@@ -29,6 +30,7 @@ pub fn build_with(cfg: Config, pool: SqlitePool, extra: Router<AppState>) -> Res
         dep: Arc::new(dep),
         files_dir,
         failures: Arc::new(RateLimiter::new(10, 5)),
+        grant_key: Arc::new(GrantKey::random()),
     };
     // Uploads get their own group (filled in by the paste routes) so only they may be large and slow.
     let uploads = security::limited(

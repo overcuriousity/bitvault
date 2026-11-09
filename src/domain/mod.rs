@@ -1,3 +1,5 @@
+pub mod crypto;
+pub mod grant;
 pub mod words;
 
 /// Who can find and open a paste.

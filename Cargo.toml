@@ -13,18 +13,25 @@ categories = ["web-programming"]
 publish = false
 
 [dependencies]
+aes-gcm = { version = "0.11", optional = true, features = ["zeroize"] }
+argon2 = { version = "0.6", features = ["zeroize"] }
 askama = "0.16"
 axum = { version = "0.8", features = ["multipart"] }
+base64 = "0.22"
+chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 clap = { version = "4", features = ["derive"] }
 figment = { version = "0.10", features = ["toml", "env"] }
 hex = "0.4"
+hmac = { version = "0.13", features = ["zeroize"] }
 ipnet = { version = "2", features = ["serde"] }
 mime_guess = "2"
+pbkdf2 = { version = "0.13", optional = true, default-features = false, features = ["hmac"] }
 rand = "0.10.3"
 rust-embed = { version = "8", features = ["debug-embed", "include-exclude"] }
 sd-notify = "0.4"
 serde = { version = "1", features = ["derive"] }
-sha2 = "0.10"
+sha2 = "0.11"
+subtle = "2.6"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
@@ -32,10 +39,17 @@ tower-http = { version = "0.6", features = ["limit", "timeout", "compression-gzi
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = { version = "2", features = ["serde"] }
+zeroize = { version = "1.8", features = ["derive"] }
+
+[features]
+# Test-only decoders for the browser format (alg 2); never enabled in release builds.
+test-hooks = ["dep:pbkdf2", "dep:aes-gcm"]
 
 [dev-dependencies]
+bitvault = { path = ".", features = ["test-hooks"] }
 figment = { version = "0.10", features = ["toml", "env", "test"] }
 http-body-util = "0.1"
+serde_json = "1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 
@@ -45,6 +59,19 @@ unsafe_code = "forbid"
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
+
+# Key derivation at the production parameters is unusably slow unoptimised, so the crypto crates
+# are built optimised even in dev and test builds.
+[profile.dev.package]
+aes = { opt-level = 3 }
+argon2 = { opt-level = 3 }
+blake2 = { opt-level = 3 }
+chacha20 = { opt-level = 3 }
+ghash = { opt-level = 3 }
+hmac = { opt-level = 3 }
+pbkdf2 = { opt-level = 3 }
+poly1305 = { opt-level = 3 }
+sha2 = { opt-level = 3 }
 
 [profile.release]
 lto = "thin"
