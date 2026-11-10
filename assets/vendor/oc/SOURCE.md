@@ -21,6 +21,7 @@ Copied unmodified from overcuriousity/overcuriousity-dev-manifest, tag v2026.11.
 | htmx/htmx.min.js | crates/oc-kit/assets/vendor/htmx.min.js |
 | icons/LICENSE-lucide.txt | crates/oc-kit/assets/icons/LICENSE-lucide.txt |
 | icons/a-large-small.svg | crates/oc-kit/assets/icons/a-large-small.svg |
+| icons/book-open.svg | crates/oc-kit/assets/icons/book-open.svg |
 | icons/check.svg | crates/oc-kit/assets/icons/check.svg |
 | icons/chevron-down.svg | crates/oc-kit/assets/icons/chevron-down.svg |
 | icons/chevron-right.svg | crates/oc-kit/assets/icons/chevron-right.svg |

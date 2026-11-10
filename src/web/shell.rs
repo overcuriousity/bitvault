@@ -73,7 +73,7 @@ impl Layout {
             items.push(item("/list", "List", "list", "list"));
         }
         items.push(item("/guide", "Guide", "circle-question-mark", "guide"));
-        items.push(NavItem { wide_only: true, ..item("/docs", "API", "file", "docs") });
+        items.push(NavItem { wide_only: true, ..item("/docs", "API", "book-open", "docs") });
         if self.admin {
             items.push(item("/admin", "Admin", "settings", "admin"));
         }

@@ -39,8 +39,10 @@
 <p>Nobody can recover a forgotten password, not even the administrator.</p>
 {%- endif %}
 
+{%- if self.offers("readonly") || self.offers("private") || self.offers("secret") %}
 <h2 id="password">Password</h2>
 <p>Read-only, private and secret pastes are protected by a password. Nobody can recover a forgotten one.</p>
+{%- endif %}
 
 <h2 id="expiry">Expiry</h2>
 <p>Every paste is deleted when its expiry time has passed.{% if let Some(max) = max_expiry %} The longest expiry here is {{ max }}.{% endif %} Longer expiries are only there if the administrator turned them on.</p>
@@ -54,7 +56,7 @@
 {%- endif %}
 
 <h2 id="files">Files</h2>
-<p>Files can be added to any paste and downloaded one by one or as a zip. Interrupted downloads resume.</p>
+<p>Files can be added to any paste and downloaded one by one or as a zip. Interrupted downloads of single files resume, except in private pastes; zip downloads do not.</p>
 
 <h2>Share</h2>
 <p>Each of the three words and the full address has a copy button.{% if qr %} The QR code button shows the address for a phone camera.{% endif %} Raw text opens the paste as plain text.</p>
