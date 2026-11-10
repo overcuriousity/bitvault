@@ -101,7 +101,10 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-target { display: flex; flex-direction: column; gap: var(--space-2); }
 .bv-target .bv-address { color: var(--color-fg-primary); }
 .bv-meta { max-width: 36rem; }
-.bv-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+.bv-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.bv-actions .oc-btn { gap: var(--space-1); }
+.bv-actions .oc-btn[data-copied] { color: var(--color-success); }
+.bv-address-text { overflow-wrap: anywhere; }
 .bv-delete { display: flex; align-items: flex-end; gap: var(--space-2); margin: 0; }
 .bv-delete .oc-field { flex: 0 1 18rem; }
 .bv-inline { display: inline; margin: 0; }
@@ -117,6 +120,19 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   overflow-x: auto;
+  counter-reset: line;
+}
+/* Numbers come from a counter, so they are never part of the text a reader selects or copies. */
+.paste-text .line { display: block; position: relative; padding-inline-start: 4.5ch; counter-increment: line; }
+.paste-text .line::before {
+  content: counter(line);
+  position: absolute;
+  inset-inline-start: 0;
+  width: 3.5ch;
+  text-align: right;
+  color: var(--color-fg-muted);
+  user-select: none;
+  -webkit-user-select: none;
 }
 .bv-files { display: flex; flex-direction: column; gap: var(--space-3); }
 .bv-files__head { display: flex; align-items: center; gap: var(--space-2); }
@@ -141,3 +157,16 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .prose h2 { font-size: var(--text-section); margin: var(--space-6) 0 var(--space-2); }
 .prose h3 { font-size: var(--text-prose); margin: var(--space-4) 0 var(--space-1); }
 .prose p + p { margin-top: 1em; }
+
+/* The QR code is dark modules on a light ground in every theme, as scanners expect. The tokens
+   have no colour that is light in both themes, so in the dark theme the ground is the light
+   text colour and the modules are the page background. */
+.qr { display: block; width: 100%; max-width: 16rem; height: auto; margin: 0 auto; }
+.qr-bg { fill: var(--color-bg-elevated); }
+.qr-fg { fill: var(--color-fg-primary); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .qr-bg { fill: var(--color-fg-primary); }
+  :root:not([data-theme="light"]) .qr-fg { fill: var(--color-bg-base); }
+}
+:root[data-theme="dark"] .qr-bg { fill: var(--color-fg-primary); }
+:root[data-theme="dark"] .qr-fg { fill: var(--color-bg-base); }

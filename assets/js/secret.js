@@ -1,6 +1,7 @@
 // The secret paste page: fetches the content container once, opens it with the password typed
 // here, and decrypts files on download. The password never leaves this page.
 import { CHUNK_LEN, HEADER_LEN, fromHex, open, toHex, verifier } from "./crypto.js";
+import { fillLines } from "./lines.js";
 import { serverMessage, showNotice } from "./notice.js";
 
 const PREVIEW_LIMIT = 10 * 1024 * 1024;
@@ -79,6 +80,19 @@ function save(bytes, name) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), REVOKE_AFTER_MS);
+}
+
+// The server renders no Copy text button for a secret paste, as it has no text; once opened,
+// the button is added to the toolbar, shaped like its neighbour.
+function addCopyText(view) {
+  const toolbar = view.querySelector(".bv-actions");
+  const model = toolbar?.querySelector("[data-oc-copy]");
+  if (!toolbar || !model || toolbar.querySelector("[data-bv-copy-target]")) return;
+  const button = model.cloneNode(true);
+  button.removeAttribute("data-oc-copy");
+  button.dataset.bvCopyTarget = "paste-text";
+  button.lastChild.textContent = "Copy text";
+  toolbar.append(button);
 }
 
 function setBusy(form, busy) {
@@ -181,8 +195,9 @@ function bind(view) {
       const { text, files } = parseEnvelope(await open(password, state.container));
       state.password = password;
       state.names = files;
-      target.textContent = text;
+      fillLines(target, text);
       target.hidden = false;
+      addCopyText(view);
       form.hidden = true;
       if (state.grant) {
         showNotice(

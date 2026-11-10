@@ -6,7 +6,9 @@ use crate::error::Error;
 
 const QUIET_ZONE: usize = 4;
 
-/// An inline-ready SVG of the QR code; it takes its colour from the surrounding text colour.
+/// An inline-ready SVG of the QR code with its own background (`qr-bg`) behind dark modules
+/// (`qr-fg`); the stylesheet fills both, in the same light and dark pair in every theme so that
+/// scanners always see dark on light.
 pub fn svg(url: &str) -> Result<String, Error> {
     let code =
         QrCode::new(url.as_bytes()).map_err(|_| Error::Invalid("That address is too long for a QR code.".into()))?;
@@ -20,6 +22,6 @@ pub fn svg(url: &str) -> Result<String, Error> {
         }
     }
     Ok(format!(
-        "<svg class=\"qr\" viewBox=\"0 0 {size} {size}\" role=\"img\" aria-label=\"QR code\" shape-rendering=\"crispEdges\"><path fill=\"currentColor\" d=\"{d}\"/></svg>"
+        "<svg class=\"qr\" viewBox=\"0 0 {size} {size}\" role=\"img\" aria-label=\"QR code\" shape-rendering=\"crispEdges\"><rect class=\"qr-bg\" width=\"{size}\" height=\"{size}\"/><path class=\"qr-fg\" d=\"{d}\"/></svg>"
     ))
 }

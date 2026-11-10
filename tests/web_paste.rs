@@ -919,3 +919,124 @@ async fn an_automatic_syntax_is_detected_from_the_first_line_when_shown() {
     let w = create(&off, new(script, Privacy::Public)).await;
     assert!(!body_text(off.get(&format!("/{w}")).await).await.contains("hl-"));
 }
+
+fn position(html: &str, needle: &str) -> usize {
+    html.find(needle).unwrap_or_else(|| panic!("{needle} is missing from the page"))
+}
+
+#[tokio::test]
+async fn the_paste_page_puts_the_content_first_and_delete_last() {
+    let app = app_with("[app]\nread_stats = true\n").await;
+    let w = create_with_file(&app, new("some words", Privacy::Public), "a.txt", b"data").await;
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    let order = [
+        "class=\"bv-words\"",
+        "role=\"toolbar\"",
+        "id=\"paste-text\"",
+        "id=\"files-heading\"",
+        "<dt>Expires</dt>",
+        "class=\"bv-delete\"",
+    ];
+    let at: Vec<usize> = order.iter().map(|n| position(&html, n)).collect();
+    assert!(at.windows(2).all(|w| w[0] < w[1]), "{order:?} found at {at:?}");
+    assert!(!html[position(&html, "role=\"toolbar\"")..].contains("<form class=\"bv-delete\"") || at[5] > at[4]);
+}
+
+#[tokio::test]
+async fn the_toolbar_has_copy_link_share_qr_raw_and_copy_text() {
+    let app = app().await;
+    let w = create(&app, new("hello", Privacy::Public)).await;
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    let toolbar = &html[position(&html, "role=\"toolbar\"")..position(&html, "id=\"paste-text\"")];
+    assert!(toolbar.contains(&format!("data-oc-copy=\"http://localhost:8080/{w}\"")) && toolbar.contains("Copy link"));
+    assert!(
+        toolbar.contains(&format!("data-bv-share=\"http://localhost:8080/{w}\" hidden")),
+        "hidden until JS reveals it"
+    );
+    assert!(toolbar.contains("QR code") && toolbar.contains(&format!("href=\"/{w}/raw\"")));
+    assert!(toolbar.contains("data-bv-copy-target=\"paste-text\""));
+    assert!(
+        !toolbar.contains("data-oc-copy=\"hello\""),
+        "the text is copied from the page, not repeated in an attribute"
+    );
+}
+
+#[tokio::test]
+async fn copy_text_is_absent_for_secret_url_and_file_only_pastes() {
+    let app = app().await;
+    let secret = create(&app, secret(0)).await;
+    assert!(!body_text(app.get(&format!("/{secret}")).await).await.contains("data-bv-copy-target"));
+    let url = create(&app, new("https://example.com/x", Privacy::Public)).await;
+    assert!(!body_text(app.get(&format!("/{url}?view")).await).await.contains("data-bv-copy-target"));
+    let files = create_with_file(&app, new("", Privacy::Public), "a.bin", b"x").await;
+    let html = body_text(app.get(&format!("/{files}")).await).await;
+    assert!(!html.contains("data-bv-copy-target") && !html.contains("id=\"paste-text\""), "{html}");
+}
+
+#[tokio::test]
+async fn lines_are_wrapped_for_plain_and_highlighted_text() {
+    let app = app().await;
+    let plain = create(&app, new("one\n\ntwo <b>\n", Privacy::Public)).await;
+    let html = body_text(app.get(&format!("/{plain}")).await).await;
+    assert!(
+        html.contains("<code><span class=\"line\">one\n</span><span class=\"line\">\n</span><span class=\"line\">two &lt;b&gt;\n</span></code>"),
+        "{html}"
+    );
+    let code =
+        create(&app, NewPaste { syntax: Some("rs".into()), ..new("fn a() {\n    1\n}\n", Privacy::Public) }).await;
+    let html = body_text(app.get(&format!("/{code}")).await).await;
+    assert_eq!(html.matches("<span class=\"line\">").count(), 3, "{html}");
+}
+
+#[tokio::test]
+async fn expires_is_a_time_element_with_the_absolute_time_in_its_title() {
+    let app = app().await;
+    let w = create(&app, new("soon", Privacy::Public)).await;
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    assert!(html.contains("<time datetime=\"20") && html.contains(" UTC\" data-bv-relative=\"expires\">in "), "{html}");
+    let app = app_with("[app]\nmax_expiry = \"never\"\n").await;
+    let never = create(&app, NewPaste { expiry: Expiry::Never, ..new("forever", Privacy::Public) }).await;
+    let html = body_text(app.get(&format!("/{never}")).await).await;
+    assert!(html.contains("<dt>Expires</dt><dd><span class=\"oc-value\">Never</span>"), "{html}");
+}
+
+#[tokio::test]
+async fn read_stats_show_the_count_and_the_last_read() {
+    let app = app_with("[app]\nread_stats = true\n").await;
+    let w = create(&app, new("stats", Privacy::Public)).await;
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    assert!(html.contains("1, last <time datetime=\""), "{html}");
+    assert!(html.contains("data-bv-relative=\"ago\">just now</time>"), "{html}");
+}
+
+#[tokio::test]
+async fn the_qr_code_has_a_light_ground_and_dark_modules() {
+    let app = app().await;
+    let w = create(&app, new("qr", Privacy::Public)).await;
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    assert!(html.contains("<rect class=\"qr-bg\"") && html.contains("<path class=\"qr-fg\""));
+    let css = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/css/app.css")).unwrap();
+    assert!(css.contains(".qr-bg { fill: var(--color-bg-elevated); }"));
+}
+
+#[tokio::test]
+async fn the_edit_form_focuses_the_text_and_after_a_password_error_the_password() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let w = create(&app, NewPaste { editable: true, ..with_password("before", Privacy::Readonly, "pw") }).await;
+    let html = body_text(app.get(&format!("/{w}/edit")).await).await;
+    assert!(html.contains("autocomplete=\"off\" autofocus>"), "{html}");
+    assert_eq!(html.matches("autofocus").count(), 1);
+    let html = body_text(app.post_form(&format!("/{w}/edit"), "content=after&syntax=plain&password=wrong").await).await;
+    assert!(html.contains("autocomplete=\"current-password\" autofocus>"), "{html}");
+    assert_eq!(html.matches("autofocus").count(), 1);
+}
+
+#[test]
+fn relative_times_use_calm_units() {
+    use bitvault::web::relative;
+    assert_eq!(relative(0, 3 * 3600 + 2 * 60 + 30), "in 3 h 2 min");
+    assert_eq!(relative(0, 40), "in less than a minute");
+    assert_eq!(relative(1000, 1000 - 300), "5 min ago");
+    assert_eq!(relative(0, 2 * 86_400 + 4 * 3600), "in 2 d 4 h");
+    assert_eq!(relative(0, 400 * 86_400), "in 1 y 35 d");
+}

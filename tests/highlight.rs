@@ -42,11 +42,11 @@ fn the_language_list_is_sorted_and_includes_rust() {
 }
 
 #[test]
-fn qr_svg_uses_current_color_and_no_literal_colour() {
+fn qr_svg_is_styled_by_classes_and_has_no_literal_colour() {
     let svg = qr::svg("https://example.org/amber-otter-lamp").unwrap();
     assert!(svg.starts_with("<svg class=\"qr\""), "{svg}");
-    assert!(svg.contains("currentColor"));
-    assert!(!svg.contains("<?xml") && !svg.contains("width="));
+    assert!(svg.contains("class=\"qr-bg\"") && svg.contains("class=\"qr-fg\""));
+    assert!(!svg.contains("<?xml") && !svg.split_once('>').unwrap().0.contains("width="));
     assert!(!svg.contains("rgb("));
     let bytes = svg.as_bytes();
     for (i, b) in bytes.iter().enumerate() {
@@ -95,4 +95,30 @@ fn automatic_detection_leaves_prose_plain() {
 fn the_plain_token_never_highlights() {
     assert!(highlight::render("#!/bin/bash\necho hi\n", highlight::PLAIN).is_none());
     assert!(!highlight::languages().iter().any(|(t, n)| t == highlight::PLAIN || n == "Plain Text"));
+}
+
+#[test]
+fn lines_are_wrapped_and_spans_reopened_across_line_breaks() {
+    let wrapped = highlight::wrap_lines("a <span class=\"x\">b\nc</span> d\n\ne");
+    assert_eq!(
+        wrapped,
+        "<span class=\"line\">a <span class=\"x\">b\n</span></span><span class=\"line\"><span class=\"x\">c</span> d\n</span><span class=\"line\">\n</span><span class=\"line\">e</span>"
+    );
+    assert_eq!(highlight::wrap_lines(""), "");
+    assert_eq!(highlight::wrap_lines("a\n"), "<span class=\"line\">a\n</span>");
+}
+
+#[test]
+fn highlighted_output_has_one_line_span_per_line() {
+    let html = highlight::render("/* a\n b */\nfn x() {}\n", "rs").unwrap();
+    assert_eq!(html.matches("<span class=\"line\">").count(), 3, "{html}");
+    assert_eq!(html.matches("<span").count(), html.matches("</span>").count(), "{html}");
+}
+
+#[test]
+fn a_long_first_line_is_not_searched_for_a_language() {
+    let long = format!("#!/bin/bash {}\necho\n", "x".repeat(600));
+    assert!(highlight::resolve(&long, None).is_none());
+    assert!(highlight::resolve("#!/bin/bash\necho\n", None).is_some());
+    assert!(highlight::resolve("#!/bin/bash\n", Some(highlight::PLAIN)).is_none());
 }

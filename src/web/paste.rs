@@ -15,8 +15,8 @@ use tokio::sync::Semaphore;
 use super::admin::MaybeAdmin;
 use super::files::{GrantQuery, inline_image};
 use super::{
-    Extras, IconSize, copy_icons, date, escape_text, icon, page_with, paste_id, paste_urls, privacy_icon,
-    privacy_label, render, size,
+    Extras, IconSize, copy_icons, date, escape_text, icon, iso, page_with, paste_id, paste_urls, privacy_icon,
+    privacy_label, relative, render, size,
 };
 use crate::assets::Assets;
 use crate::domain::paste::{self, Access, Body, DeleteAuth, Opened, Paste};
@@ -87,6 +87,39 @@ struct FileView {
     preview: bool,
 }
 
+/// A moment shown as a `<time>` whose text `paste.js` keeps fresh.
+struct TimeView {
+    iso: String,
+    /// The absolute time, for the tooltip.
+    title: String,
+    text: String,
+    /// "expires" reads "Expired" once past; "ago" reads "5 min ago".
+    kind: &'static str,
+}
+
+/// One row of the facts list: some text, then optionally a time.
+struct Fact {
+    term: &'static str,
+    text: String,
+    time: Option<TimeView>,
+}
+
+impl Fact {
+    fn text(term: &'static str, text: String) -> Self {
+        Self { term, text, time: None }
+    }
+
+    fn time(term: &'static str, text: &str, ts: i64, now: i64, kind: &'static str) -> Self {
+        let words = match kind {
+            "expires" if ts <= now => "Expired".to_owned(),
+            // Another clock may run ahead; a past event is never shown as in the future.
+            "ago" => relative(now, ts.min(now - 1)),
+            _ => relative(now, ts),
+        };
+        Self { term, text: text.to_owned(), time: Some(TimeView { iso: iso(ts), title: date(ts), text: words, kind }) }
+    }
+}
+
 /// What a paste page shows as its content.
 enum Shown {
     /// Escaped or highlighted markup, and whether it is highlighted.
@@ -109,7 +142,7 @@ struct PasteView {
     short_url: Option<String>,
     privacy_label: &'static str,
     privacy_icon: &'static str,
-    facts: Vec<(&'static str, String)>,
+    facts: Vec<Fact>,
     burned: bool,
     secret: bool,
     sealed: bool,
@@ -121,6 +154,8 @@ struct PasteView {
     /// Escaped or highlighted markup; `None` for a secret paste, which `secret.js` fills.
     content: Option<String>,
     highlighted: bool,
+    /// Whether the page has text a Copy text button can copy.
+    copy_text: bool,
     /// A URL paste's target, shown with a link to it.
     target: Option<String>,
     files: Vec<FileView>,
@@ -155,6 +190,8 @@ struct EditPage {
     content: String,
     syntax_options: Vec<(String, String, bool)>,
     password: bool,
+    /// The notice is about the password, so that field takes the focus.
+    password_error: bool,
     notice: Option<String>,
 }
 
@@ -169,18 +206,19 @@ struct DeletePage {
 
 /// Highlighted markup when highlighting is on, the text is small enough and the syntax is known
 /// or, for an automatic one (`None`), detected from the first line; escaped plain text otherwise.
+/// Either way each line is wrapped in `<span class="line">`. The language is looked up first,
+/// so plain pastes never wait for a highlight slot.
 async fn content_html(st: &AppState, text: &str, syntax: Option<&str>) -> Result<(String, bool), Error> {
-    if st.cfg.app.highlight && text.len() <= HIGHLIGHT_LIMIT && syntax != Some(highlight::PLAIN) {
+    let found =
+        (st.cfg.app.highlight && text.len() <= HIGHLIGHT_LIMIT).then(|| highlight::resolve(text, syntax)).flatten();
+    if let Some(found) = found {
         // The permit moves into the closure, so it is held until the work ends even if the
         // request is dropped.
         let permit = Arc::clone(&HIGHLIGHT_SLOTS).acquire_owned().await.map_err(Error::internal)?;
-        let (owned, token) = (text.to_owned(), syntax.map(str::to_owned));
+        let owned = text.to_owned();
         let html = tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            match token {
-                Some(token) => highlight::render(&owned, &token),
-                None => highlight::render_auto(&owned),
-            }
+            highlight::render_with(&owned, found)
         })
         .await
         .map_err(Error::internal)?;
@@ -188,7 +226,7 @@ async fn content_html(st: &AppState, text: &str, syntax: Option<&str>) -> Result
             return Ok((html, true));
         }
     }
-    Ok((escape_text(text), false))
+    Ok((highlight::wrap_lines(&escape_text(text)), false))
 }
 
 fn reads(n: u32) -> String {
@@ -209,13 +247,20 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, shown: Shown, grant: Option
     let read_g = if p.privacy == Privacy::Private { files_g.clone() } else { String::new() };
     let (full, short_url) = paste_urls(st, &words);
     let raw_href = (!secret && !sealed).then(|| format!("/{words}/raw{read_g}"));
-    let mut facts = vec![("Created", date(p.created_at))];
-    facts.push(("Expires", p.expires_at.map_or_else(|| "Never".to_owned(), date)));
+    let now = domain::now();
+    let mut facts = vec![Fact::text("Created", date(p.created_at))];
+    facts.push(match p.expires_at {
+        Some(ts) => Fact::time("Expires", "", ts, now, "expires"),
+        None => Fact::text("Expires", "Never".to_owned()),
+    });
     if p.burn_after_reads > 0 {
-        facts.push(("Burns after", reads(p.burn_after_reads)));
+        facts.push(Fact::text("Burns after", reads(p.burn_after_reads)));
     }
     if app.read_stats {
-        facts.push(("Reads", p.read_count.to_string()));
+        facts.push(match p.last_read_at {
+            Some(ts) => Fact::time("Reads", &format!("{}, last ", p.read_count), ts, now, "ago"),
+            None => Fact::text("Reads", p.read_count.to_string()),
+        });
     }
     let translate = app.translate_url.as_deref().filter(|_| {
         matches!(p.privacy, Privacy::Public | Privacy::Unlisted | Privacy::Readonly)
@@ -237,6 +282,7 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, shown: Shown, grant: Option
         Shown::Url(target) => (None, false, Some(target)),
         Shown::Secret | Shown::Sealed => (None, false, None),
     };
+    let copy_text = !secret && !burned && content.as_ref().is_some_and(|c| !c.is_empty());
     let files = p
         .files
         .iter()
@@ -270,6 +316,7 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, shown: Shown, grant: Option
         delete: DeleteView::new(p, admin),
         content,
         highlighted,
+        copy_text,
         target,
         zip_href: (!secret && !files.is_empty()).then(|| format!("/{words}/zip{files_g}")),
         files,
@@ -279,7 +326,10 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, shown: Shown, grant: Option
 
 fn render_paste(st: &AppState, admin: bool, view: &PasteView, words: &str) -> Result<Response, Error> {
     let body = render(view)?;
-    let js = if view.secret { vec![Assets::url("js/secret.js")] } else { Vec::new() };
+    let mut js = vec![Assets::url("js/paste.js")];
+    if view.secret {
+        js.push(Assets::url("js/secret.js"));
+    }
     let extras = Extras { css: vec![Assets::url("css/syntax.css")], js, ..Extras::default() };
     Ok(no_store(page_with(st, admin, "", words, body, extras)?.into_response()))
 }
@@ -524,6 +574,8 @@ fn edit_page(
         content,
         syntax_options: super::home::syntax_options(&st.cfg.app, syntax),
         password: matches!(p.privacy, Privacy::Readonly | Privacy::Private),
+        password_error: p.privacy.needs_password()
+            && matches!(status, StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS),
         notice,
     };
     let body = render(&view)?;

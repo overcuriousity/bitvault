@@ -140,6 +140,42 @@ pub fn date(ts: i64) -> String {
     time::OffsetDateTime::from_unix_timestamp(ts).ok().and_then(|t| t.format(format).ok()).unwrap_or_default()
 }
 
+/// An RFC 3339 UTC timestamp for a `<time datetime>` attribute.
+pub fn iso(ts: i64) -> String {
+    time::OffsetDateTime::from_unix_timestamp(ts)
+        .ok()
+        .and_then(|t| t.format(&time::format_description::well_known::Rfc3339).ok())
+        .unwrap_or_default()
+}
+
+/// How far `ts` is from `now`, in calm units without seconds: "in 3 h 2 min", "5 min ago". The
+/// same rules are in `assets/js/paste.js`, which keeps the text fresh; keep the two in step.
+pub fn relative(now: i64, ts: i64) -> String {
+    let delta = ts - now;
+    let secs = delta.unsigned_abs();
+    if secs < 60 {
+        return if delta >= 0 { "in less than a minute".into() } else { "just now".into() };
+    }
+    let minutes = secs / 60;
+    let (hours, days) = (minutes / 60, minutes / 1440);
+    let amount = if minutes < 60 {
+        format!("{minutes} min")
+    } else if hours < 24 {
+        with_rest(hours, "h", minutes % 60, "min")
+    } else if days < 30 {
+        with_rest(days, "d", hours % 24, "h")
+    } else if days < 365 {
+        format!("{days} d")
+    } else {
+        with_rest(days / 365, "y", days % 365, "d")
+    };
+    if delta >= 0 { format!("in {amount}") } else { format!("{amount} ago") }
+}
+
+fn with_rest(big: u64, big_unit: &str, small: u64, small_unit: &str) -> String {
+    if small == 0 { format!("{big} {big_unit}") } else { format!("{big} {big_unit} {small} {small_unit}") }
+}
+
 /// A byte count in binary units, e.g. "1.5 MiB".
 pub fn size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["KiB", "MiB", "GiB", "TiB", "PiB"];

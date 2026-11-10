@@ -15,41 +15,30 @@
     <span class="bv-word">{{ word }}{% call copy::copy(word, word, self.copy_icons()) %}{% endcall %}</span>
     {%- endfor %}
   </h1>
-  <p class="bv-address"><span class="oc-mono">{{ full_url }}</span>{% call copy::copy("address", full_url, self.copy_icons()) %}{% endcall %}</p>
-  {%- if let Some(short) = short_url %}
-  <p class="bv-address"><span class="oc-mono">{{ short }}</span>{% call copy::copy("short address", short, self.copy_icons()) %}{% endcall %}</p>
-  {%- endif %}
 </header>
 {%- if burned %}
 {% call notice::notice("warning", "That was the last read, so this paste is gone. Its files stay available on this page for ten minutes.") %}{% endcall %}
 {%- endif %}
-<dl class="oc-facts bv-meta">
-  <dt>Privacy</dt><dd><span class="oc-status">{{ self.row_icon(privacy_icon)|safe }}{{ privacy_label }}</span></dd>
-  {%- for (term, value) in facts %}
-  <dt>{{ term }}</dt><dd><span class="oc-value">{{ value }}</span></dd>
-  {%- endfor %}
-</dl>
 {%- if !burned %}
 <div class="bv-actions" role="toolbar" aria-label="Paste actions">
-  {%- if let Some(href) = raw_href %}
-  {% call icon_button::link(self.icon("file"), "Open raw text", href) %}{% endcall %}
-  {%- endif %}
+  <button type="button" class="oc-btn" data-oc-copy="{{ full_url }}">{{ self.icon("link")|safe }}Copy link</button>
+  <button type="button" class="oc-btn" data-bv-share="{{ full_url }}" hidden>{{ self.icon("share-2")|safe }}Share</button>
   {%- if qr.is_some() %}
-  <button type="button" class="oc-btn oc-btn--icon" aria-label="Show QR code" data-oc-tip="Show QR code" data-oc-dialog-open="qr-dialog">{{ self.icon("qr-code")|safe }}</button>
+  <button type="button" class="oc-btn" data-oc-dialog-open="qr-dialog">{{ self.icon("qr-code")|safe }}QR code</button>
+  {%- endif %}
+  {%- if let Some(href) = raw_href %}
+  <a class="oc-btn" href="{{ href }}">{{ self.icon("file")|safe }}Raw</a>
+  {%- endif %}
+  {%- if copy_text %}
+  <button type="button" class="oc-btn" data-bv-copy-target="paste-text">{{ self.icon("copy")|safe }}Copy text</button>
   {%- endif %}
   {%- if let Some(href) = translate %}
-  {% call icon_button::link(self.icon("languages"), "Translate", href) %}{% endcall %}
+  <a class="oc-btn" href="{{ href }}">{{ self.icon("languages")|safe }}Translate</a>
   {%- endif %}
   {%- if let Some(href) = edit_href %}
-  {% call icon_button::link(self.icon("pencil"), "Edit paste", href) %}{% endcall %}
-  {%- endif %}
-  {%- if !delete.password && !delete.secret() %}
-  {% call delete_form::form(delete, self.icon("trash-2")) %}{% endcall %}
+  <a class="oc-btn" href="{{ href }}">{{ self.icon("pencil")|safe }}Edit</a>
   {%- endif %}
 </div>
-{%- if delete.password || delete.secret() %}
-{% call delete_form::form(delete, self.icon("trash-2")) %}{% endcall %}
-{%- endif %}
 {%- endif %}
 {%- if secret %}
 <div id="secret-notice" aria-live="polite"></div>
@@ -60,7 +49,7 @@
   </div>
 </form>
 <noscript>{% call notice::notice("info", "This paste is decrypted in the browser. Turn on JavaScript to open it.") %}{% endcall %}</noscript>
-<pre class="paste-text" hidden></pre>
+<pre class="paste-text" id="paste-text" hidden><code></code></pre>
 {%- else if sealed %}
 {% call notice::notice("info", "Encrypted. Open it with its password.") %}{% endcall %}
 {%- else if let Some(url) = target %}
@@ -69,7 +58,9 @@
   <p><a href="{{ url }}" rel="noreferrer noopener" data-bv-target>Go to URL</a></p>
 </section>
 {%- else if let Some(html) = content %}
-<pre class="paste-text{% if highlighted %} bv-code{% endif %}"><code>{{ html|safe }}</code></pre>
+{%- if !html.is_empty() %}
+<pre class="paste-text{% if highlighted %} bv-code{% endif %}" id="paste-text"><code>{{ html|safe }}</code></pre>
+{%- endif %}
 {%- endif %}
 {%- if !files.is_empty() %}
 <section class="bv-files" aria-labelledby="files-heading">
@@ -95,6 +86,19 @@
   {%- endif %}
   {%- endfor %}
 </section>
+{%- endif %}
+<dl class="oc-facts bv-meta">
+  <dt>Address</dt><dd><span class="oc-mono bv-address-text">{{ full_url }}</span>{% call copy::copy("address", full_url, self.copy_icons()) %}{% endcall %}</dd>
+  {%- if let Some(short) = short_url %}
+  <dt>Short address</dt><dd><span class="oc-mono bv-address-text">{{ short }}</span>{% call copy::copy("short address", short, self.copy_icons()) %}{% endcall %}</dd>
+  {%- endif %}
+  <dt>Privacy</dt><dd><span class="oc-status">{{ self.row_icon(privacy_icon)|safe }}{{ privacy_label }}</span></dd>
+  {%- for fact in facts %}
+  <dt>{{ fact.term }}</dt><dd><span class="oc-value">{{ fact.text }}{% if let Some(t) = fact.time %}<time datetime="{{ t.iso }}" title="{{ t.title }}" data-bv-relative="{{ t.kind }}">{{ t.text }}</time>{% endif %}</span></dd>
+  {%- endfor %}
+</dl>
+{%- if !burned %}
+{% call delete_form::form(delete, self.icon("trash-2")) %}{% endcall %}
 {%- endif %}
 {%- if let Some(svg) = qr %}
 {% call dialog::dialog("qr-dialog", "QR code", svg) %}{% endcall %}
