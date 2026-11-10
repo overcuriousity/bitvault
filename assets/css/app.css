@@ -1,3 +1,32 @@
+/* Deliberate deviation from the kit tokens (AGENTS.md exception 9): larger type, and controls
+   sized to match it. Later than 00-tokens.css, so these win; compact density still scales them. */
+:root {
+  --text-page: 1.625rem;
+  --text-section: 1.25rem;
+  --text-prose: 1.0625rem;
+  --text-ui: 1rem;
+  --text-dense: 0.9375rem;
+  --text-micro: max(0.8125rem, 13px);
+  --text-mono: 0.9375rem;
+  --target-tool: 2.25rem;
+  --icon-tool: 18px;
+  --icon-row: 16px;
+}
+
+/* One centred column for every page, with the top bar's logo and toggles aligned to its edges.
+   The admin and API pages carry tables and Swagger UI, so their column is wider. */
+.oc-shell--everyday { --bv-column: 50rem; }
+.oc-shell--everyday:has(.bv-admin, .bv-docs) { --bv-column: 72rem; }
+.oc-shell--everyday .oc-main {
+  width: 100%;
+  max-width: calc(var(--bv-column) + 2 * var(--space-4));
+  margin-inline: auto;
+}
+.oc-shell--everyday .oc-topbar { padding-inline: max(var(--space-3), calc((100% - var(--bv-column)) / 2)); }
+/* Inside the column, page blocks use its full width so their edges line up. */
+.oc-columns { max-width: none; }
+.bv-create, .bv-edit, .bv-open .oc-form { max-width: none; }
+
 .bv-sign-in { margin: 0; }
 html { background: var(--color-bg-base); }
 .bv-lead { max-width: 68ch; margin-bottom: var(--space-4); color: var(--color-fg-secondary); }
@@ -35,8 +64,7 @@ input[type="file"]::file-selector-button {
 }
 input[type="file"]:hover::file-selector-button { background: var(--color-bg-hover); }
 
-/* Admin: a capped region like the other everyday pages; the table drops low-value columns when narrow. */
-.bv-admin { max-width: 64rem; margin: 0 auto; }
+/* Admin: the table drops low-value columns when narrow. */
 .bv-admin-table { border: 1px solid var(--color-border); border-radius: var(--radius-md); }
 @container app (max-width: 48rem) {
   .bv-admin .bv-narrow-hide { display: none; }
@@ -59,12 +87,12 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 
 .bv-mono { font-family: var(--font-mono); }
 .bv-check { display: flex; align-items: center; gap: var(--space-2); }
-.bv-open { max-width: 36rem; margin-bottom: var(--space-6); }
+.bv-open { padding-top: var(--space-5); margin-bottom: var(--space-6); }
 .bv-open h2, .bv-new h2 { margin-bottom: var(--space-3); }
 .bv-new h2 + .bv-lead { margin-top: calc(-1 * var(--space-2)); }
 /* One row: the words field grows, the button sits at its end, and wraps below when narrow. */
 .bv-open .oc-form { flex-direction: row; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2); }
-.bv-open .oc-field { flex: 1 1 16rem; }
+.bv-open .oc-field { flex: 1 1 12rem; }
 
 /* A label with its "?" link to the guide. */
 .bv-label { display: flex; align-items: center; gap: var(--space-1); }
@@ -101,7 +129,6 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-address > .oc-mono { overflow-wrap: anywhere; }
 .bv-target { display: flex; flex-direction: column; gap: var(--space-2); }
 .bv-target .bv-address { color: var(--color-fg-primary); }
-.bv-meta { max-width: 36rem; }
 .bv-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .bv-actions .oc-btn { gap: var(--space-1); }
 .bv-actions .oc-btn[data-copied] { color: var(--color-success); }
@@ -155,7 +182,7 @@ html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
 .bv-totals { max-width: 24rem; margin-bottom: var(--space-4); }
 .bv-docs { padding-bottom: var(--space-6); }
 
-.prose { font-size: var(--text-prose); line-height: 1.6; max-width: var(--measure); margin: 0 auto; padding: var(--space-5) 0 var(--space-6); }
+.prose { font-size: var(--text-prose); line-height: 1.6; max-width: var(--measure); margin: 0; padding: var(--space-5) 0 var(--space-6); }
 .prose h1 { font-size: var(--text-page); margin-bottom: var(--space-4); }
 .prose h2 { font-size: var(--text-section); margin: var(--space-6) 0 var(--space-2); }
 .prose h3 { font-size: var(--text-prose); margin: var(--space-4) 0 var(--space-1); }
