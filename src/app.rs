@@ -43,6 +43,7 @@ pub async fn build_with(
         dep: Arc::new(dep),
         files_dir,
         failures: Arc::new(RateLimiter::new(10, 5)),
+        lookups: Arc::new(RateLimiter::new(20, 10)),
         grant_key: Arc::new(GrantKey::random()),
         admin,
     };
@@ -66,6 +67,7 @@ pub async fn build_with(
     let edits = Router::new()
         .merge(web::paste::edit_routes())
         .merge(api.edits)
+        .layer(from_fn_with_state(st.clone(), web::lookups::budget))
         .layer(from_fn_with_state(st.clone(), web::errors::render))
         .layer(from_fn_with_state(st.clone(), web::admin::session))
         .with_state(st.clone());
@@ -82,6 +84,7 @@ pub async fn build_with(
         .merge(api.rest)
         .merge(extra)
         .fallback(web::errors::not_found)
+        .layer(from_fn_with_state(st.clone(), web::lookups::budget))
         .layer(from_fn_with_state(st.clone(), web::errors::render))
         .layer(from_fn_with_state(st.clone(), web::admin::session))
         .with_state(st.clone());

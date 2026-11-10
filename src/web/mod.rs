@@ -5,6 +5,7 @@ pub mod files;
 pub mod guide;
 pub mod home;
 pub mod list;
+pub mod lookups;
 pub mod multipart;
 pub mod paste;
 pub mod pwa;

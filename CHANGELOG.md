@@ -21,6 +21,7 @@ This is a rewrite and a fresh start. There is no compatibility with 1.6.0: no da
 - Secret file encryption: files in a Secret paste are encrypted in the browser.
 - Three-word canonical URLs: every paste lives at `/{three-words}`.
 - A generated OpenAPI document at `/api/v1/openapi.json` with Swagger UI at `/docs`.
+- Per-address rate limits: creates, API calls, wrong passwords, and lookups of words that match no paste (so unlisted pastes cannot be enumerated).
 
 ### Removed
 

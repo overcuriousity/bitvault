@@ -47,7 +47,8 @@ const GRANT_EXPIRED: &str = "The download grant has expired or is no longer vali
         description = "Create, read, edit and delete pastes. There is no API key: every route is open \
 and limited per client address. Creating allows 30 requests a minute with a burst of 10; every other \
 route allows 120 a minute with a burst of 30. Wrong passwords and verifiers count separately, 10 a \
-minute with a burst of 5.
+minute with a burst of 5. Lookups of words that match no paste (404) count separately too, 20 a \
+minute with a burst of 10; once they run out, every paste lookup from that address gets 429.
 
 Passwords travel in headers, never in URLs: `X-Paste-Password` opens, edits and deletes read-only and \
 private pastes; `X-Paste-Verifier` (64 hex characters, derived in the browser) deletes a secret paste; \
