@@ -65,7 +65,8 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist/bin
-      - run: cargo install --locked cargo-about
+      # The binary is behind the `cli` feature; without it nothing is installed.
+      - run: cargo install --locked --version 0.9.3 --features cli cargo-about
       - run: sh scripts/bundle.sh "$BIN" "$VERSION" dist
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
