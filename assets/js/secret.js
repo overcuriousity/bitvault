@@ -136,7 +136,7 @@ function bind(view) {
   const region = view.querySelector("#secret-notice");
   const form = view.querySelector("#secret-open");
   const input = view.querySelector("#secret-password");
-  const target = view.querySelector("pre.paste-text");
+  const target = view.querySelector("#paste-text");
   const filesSection = view.querySelector(".bv-files");
   const cipher = view.querySelector("#secret-cipher");
   const remove = view.querySelector("form.bv-delete[data-verifier-salt]");

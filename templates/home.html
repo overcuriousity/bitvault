@@ -2,6 +2,7 @@
 {% import "components/help.html" as help %}
 {% import "components/notice.html" as notice %}
 <h1 class="oc-sr-only">New paste</h1>
+{% call notice::icons() %}{% endcall %}
 {% if let Some(deleted) = deleted %}{% call notice::notice_escaped("success", deleted) %}{% endcall %}{% endif %}
 
 {#- One box: text or a link is kept as a new paste, and three words open the paste

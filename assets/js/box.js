@@ -107,7 +107,8 @@ export function bindBox(form) {
       .then((res) => (res.ok ? res.text() : ""))
       .then((text) => {
         words = text.split("\n").filter(Boolean);
-        render();
+        // Not just drawn again: what was typed or pasted while the list loaded has to be looked up.
+        update();
       })
       .catch(() => {
         // Without the list the box still works: the server decides on submit.

@@ -7,6 +7,9 @@ export function showNotice(region, kind, message) {
   const box = document.createElement("div");
   box.className = `oc-notice oc-notice--${kind}`;
   box.setAttribute("role", "status");
+  // The status symbol, from the set the page was rendered with.
+  const icon = document.getElementById("bv-notice-icons")?.content.querySelector(`[data-kind="${kind}"] > svg`);
+  if (icon) box.append(icon.cloneNode(true));
   const text = document.createElement("span");
   text.className = "oc-notice__text";
   text.textContent = message;

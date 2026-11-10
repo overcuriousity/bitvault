@@ -127,6 +127,17 @@ pub fn icon(name: &str, size: IconSize) -> String {
     )
 }
 
+/// The status symbol of a notice of `kind`, so no status is told by colour alone.
+pub fn notice_icon(kind: &str) -> String {
+    let name = match kind {
+        "success" => "circle-check",
+        "warning" => "triangle-alert",
+        "danger" => "circle-x",
+        _ => "info",
+    };
+    icon(name, IconSize::Tool)
+}
+
 /// Escapes text for an element body. Quotation marks stay as they are, which keeps messages
 /// that quote the user's input readable in the source as well as on screen.
 pub fn escape_text(s: &str) -> String {

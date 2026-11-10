@@ -310,6 +310,11 @@ async fn the_secret_page_has_a_place_for_its_ciphertext_and_what_decrypts_it() {
     for part in ["iterations", "salt", "iv", "aad", "tag"] {
         assert!(html.contains(&format!("data-bv-cipher=\"{part}\"")), "{part}: {html}");
     }
+    // The page has two text blocks, so secret.js must fill the opened text into its own, by id.
+    assert_eq!(html.matches("id=\"paste-text\"").count(), 1, "{html}");
+    assert!(html.find("id=\"cipher-text\"").unwrap() < html.find("id=\"paste-text\"").unwrap());
+    let script = include_str!("../assets/js/secret.js");
+    assert!(script.contains("view.querySelector(\"#paste-text\")") && !script.contains("\"pre.paste-text\""));
     // Fetching the ciphertext is a read, so a paste that burns waits until it is asked for.
     let burning = body_text(app.get(&format!("/{}", create(&app, secret(1)).await)).await).await;
     assert!(burning.contains("<article class=\"paste-view\" data-secret data-burns>"), "{burning}");

@@ -444,3 +444,41 @@ async fn wrong_uploader_passwords_count_as_failed_attempts() {
     }
     assert_eq!(guess(&app, b"wrong").await, StatusCode::TOO_MANY_REQUESTS);
 }
+
+#[tokio::test]
+async fn each_level_shows_at_most_its_own_password_field() {
+    let html = body_text(app().await.get("/").await).await;
+    let css = include_str!("../assets/css/app.css");
+    // The style sheet hides a password field by the level it is for, so the names must agree.
+    let fields: Vec<&str> =
+        html.split("class=\"bv-password\" data-for=\"").skip(1).filter_map(|s| s.split('"').next()).collect();
+    assert_eq!(fields, ["private", "secret"]);
+    for (level, hidden) in [("private", "secret"), ("secret", "private")] {
+        let rule = format!(".bv-create[data-privacy=\"{level}\"] .bv-password[data-for=\"{hidden}\"]");
+        assert!(css.contains(&rule), "{rule}");
+    }
+    for level in ["public", "unlisted", "readonly"] {
+        assert!(css.contains(&format!(".bv-create[data-privacy=\"{level}\"] .bv-password,")), "{level}");
+    }
+}
+
+#[tokio::test]
+async fn every_notice_carries_its_status_symbol() {
+    let app = app().await;
+    // Server-rendered: the symbol comes before the text, inside the notice.
+    let (words, cookie) = support::created(&post_box(&app, "x", &[]).await);
+    let html = body_text(app.get_with_cookie(&format!("/{words}"), &cookie).await).await;
+    assert!(html.contains("<div class=\"oc-notice oc-notice--success\" role=\"status\"><svg"), "{html}");
+    assert!(html.contains("data-icon=\"circle-check\""), "{html}");
+    // Built in the browser: notice.js takes its symbols from the set the page ships.
+    let home = body_text(app.get("/").await).await;
+    let set = &home[home.find("<template id=\"bv-notice-icons\">").expect("the icon set")..];
+    let set = &set[..set.find("</template>").unwrap()];
+    for (kind, icon) in
+        [("info", "info"), ("success", "circle-check"), ("warning", "triangle-alert"), ("danger", "circle-x")]
+    {
+        let at = set.find(&format!("<span data-kind=\"{kind}\">")).unwrap_or_else(|| panic!("{kind}: {set}"));
+        assert!(set[at..].contains(&format!("data-icon=\"{icon}\"")), "{kind}");
+    }
+    assert!(include_str!("../assets/js/notice.js").contains("bv-notice-icons"));
+}
