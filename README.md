@@ -27,7 +27,7 @@ BitVault listens on `127.0.0.1:8080` and expects a reverse proxy to terminate TL
 
 ### Plain HTTP on a private network
 
-Set `insecure_http = true` to serve plain HTTP without a proxy, for example on `0.0.0.0:8080` in a home network: any host name is answered and addresses follow the one in the browser. Secret pastes are unavailable, because browsers only encrypt on https pages. Passwords and pastes then cross the network unencrypted, so never use it on a network you do not trust.
+Set `insecure_http = true` to serve plain HTTP without a proxy, for example on `0.0.0.0:8080` in a home network: any host name is answered and addresses follow the one in the browser. Secret pastes are unavailable, because browsers only encrypt on https pages. Passwords and pastes then cross the network unencrypted, any web page can reach the instance through DNS rebinding because every host name is answered, and cross-site posts without cookies are not blocked, so never use it on a network you do not trust.
 
 ## Configuration
 

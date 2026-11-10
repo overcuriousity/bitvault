@@ -296,6 +296,15 @@ async fn plain_http_answers_any_host_without_hsts() {
 }
 
 #[tokio::test]
+async fn the_referrer_policy_is_no_referrer_by_default_and_same_origin_over_plain_http() {
+    let app = app().await;
+    assert_eq!(app.get("/").await.headers()[header::REFERRER_POLICY], "no-referrer");
+    let plain_app = app_with_test_routes(PLAIN).await;
+    let res = plain_app.send(with_host(plain(plain_app.req("GET", "/")), LAN_HOST)).await;
+    assert_eq!(res.headers()[header::REFERRER_POLICY], "same-origin");
+}
+
+#[tokio::test]
 async fn plain_http_still_refuses_a_host_that_is_not_a_host_name() {
     let app = app_with_test_routes(PLAIN).await;
     for host in ["evil.example/x", "a\"b", "user@evil.example", "a b", ""] {

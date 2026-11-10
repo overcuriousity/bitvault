@@ -257,3 +257,44 @@ async fn the_admin_settings_show_whether_plain_http_is_on() {
     assert!(html.contains(&row("on")), "{html}");
     assert!(html.contains("public, unlisted, readonly, private<"), "Secret is not offered over plain HTTP: {html}");
 }
+
+/// A native form post as a browser sends it over plain HTTP to a LAN address: the session cookie
+/// and an Origin, but no Sec-Fetch-Site (the origin is not trustworthy).
+async fn native_post(app: &App, uri: &str, origin: &str, form: &str) -> axum::http::Response<axum::body::Body> {
+    let r = axum::http::Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::HOST, &app.origin.0)
+        .header(header::ORIGIN, origin)
+        .header(header::COOKIE, app.cookie.clone().unwrap())
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(axum::body::Body::from(form.to_owned()))
+        .unwrap();
+    app.send(r).await
+}
+
+#[tokio::test]
+async fn over_plain_http_signed_in_native_posts_with_their_origin_succeed() {
+    let mut app = plain_admin_app().await;
+    let w = create(&app, new("guarded", Privacy::Readonly, Some("pw"))).await;
+    app.sign_in_admin().await;
+    let origin = app.origin.1.clone();
+    let res = native_post(&app, &format!("/{w}/delete"), &origin, "next=admin").await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(app.get(&format!("/{w}")).await.status(), StatusCode::NOT_FOUND);
+    let res = native_post(&app, "/admin/sign-out", &origin, "").await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert!(res.headers()[header::SET_COOKIE].to_str().unwrap().contains("Max-Age=0"));
+}
+
+/// Why plain HTTP sends `Referrer-Policy: same-origin`: under no-referrer the browser would send
+/// `Origin: null`, which with a cookie and no Sec-Fetch-Site cannot be told from a cross-site post.
+#[tokio::test]
+async fn over_plain_http_a_signed_in_post_with_a_null_origin_is_refused() {
+    let mut app = plain_admin_app().await;
+    let w = create(&app, new("guarded", Privacy::Readonly, Some("pw"))).await;
+    app.sign_in_admin().await;
+    let res = native_post(&app, &format!("/{w}/delete"), "null", "next=admin").await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    assert_eq!(native_post(&app, "/admin/sign-out", "null", "").await.status(), StatusCode::FORBIDDEN);
+}

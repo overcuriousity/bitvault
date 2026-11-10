@@ -111,7 +111,11 @@ async fn headers(State(ctx): State<Arc<Ctx>>, req: Request, next: Next) -> Respo
         h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP));
     }
     h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
-    h.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    // With no-referrer, browsers send `Origin: null` on our own form posts; over plain HTTP to a
+    // LAN address they send no Sec-Fetch-Site either, so a signed-in post would be refused.
+    // same-origin keeps the true Origin on our own posts and still sends nothing cross-origin.
+    let referrer = if ctx.dep.plain_http { "same-origin" } else { "no-referrer" };
+    h.insert(header::REFERRER_POLICY, HeaderValue::from_static(referrer));
     h.insert("cross-origin-opener-policy", HeaderValue::from_static("same-origin"));
     if ctx.dep.secure {
         h.insert(header::STRICT_TRANSPORT_SECURITY, HeaderValue::from_static("max-age=63072000"));
