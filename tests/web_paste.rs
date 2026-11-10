@@ -1056,3 +1056,29 @@ async fn a_range_request_cannot_open_a_burned_pastes_file_without_a_grant() {
     assert_eq!(bytes_of(res).await, b"abc");
     assert_eq!(ranged(format!("/{w}/file/1")).await.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn list_rows_show_their_expiry_and_a_copy_button_without_counting_a_read() {
+    let app = app().await;
+    let words = create(&app, new("listed text", Privacy::Public)).await;
+    let html = body_text(app.get("/list").await).await;
+    assert!(html.contains("data-bv-relative=\"expires\""), "{html}");
+    assert!(html.contains(&format!("data-oc-copy=\"http://localhost:8080/{words}\"")), "{html}");
+    assert!(html.contains("js/paste."));
+    assert!(!html.contains("listed text"));
+    assert_eq!(read_count(&app, &words).await, 0);
+}
+
+#[tokio::test]
+async fn the_guide_has_an_anchor_for_every_help_link_on_the_create_form() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let home = body_text(app.get("/").await).await;
+    let guide = body_text(app.get("/guide").await).await;
+    let mut targets: Vec<&str> = home.split("href=\"/guide#").skip(1).map(|r| r.split('"').next().unwrap()).collect();
+    for fixed in ["privacy", "password", "expiry", "burn", "syntax", "files", "editing", "api"] {
+        targets.push(fixed);
+    }
+    for id in targets {
+        assert!(guide.contains(&format!("id=\"{id}\"")), "the guide has no #{id}");
+    }
+}

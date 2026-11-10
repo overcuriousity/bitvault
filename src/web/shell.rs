@@ -10,6 +10,8 @@ pub struct NavItem {
     pub label: &'static str,
     pub icon: &'static str,
     pub current: bool,
+    /// Shown in the top bar only: the tab bar keeps to a few destinations.
+    pub wide_only: bool,
 }
 
 /// The page frame: top bar, main region, bottom tab bar and the notices region.
@@ -20,8 +22,6 @@ pub struct Layout {
     pub current: &'static str,
     pub body: String,
     pub admin: bool,
-    /// An admin is configured, so the top bar offers "Sign in".
-    pub sign_in: bool,
     pub extra_css: Vec<String>,
     /// ES modules.
     pub extra_js: Vec<String>,
@@ -66,15 +66,22 @@ impl Layout {
     }
 
     fn nav(&self) -> Vec<NavItem> {
-        let item = |href, label, icon, key| NavItem { href, label, icon, current: self.current == key };
+        let item =
+            |href, label, icon, key| NavItem { href, label, icon, current: self.current == key, wide_only: false };
         let mut items = vec![item("/", "New", "plus", "new")];
         if self.cfg.app.listing {
             items.push(item("/list", "List", "list", "list"));
         }
+        items.push(item("/guide", "Guide", "circle-question-mark", "guide"));
+        items.push(NavItem { wide_only: true, ..item("/docs", "API", "file", "docs") });
         if self.admin {
             items.push(item("/admin", "Admin", "settings", "admin"));
         }
         items
+    }
+
+    fn version(&self) -> &'static str {
+        env!("CARGO_PKG_VERSION")
     }
 
     fn icon(&self, name: &str) -> String {

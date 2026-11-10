@@ -53,7 +53,6 @@ pub fn page_with(
         current,
         body,
         admin,
-        sign_in: st.admin.is_some(),
         extra_css: extras.css,
         extra_js: extras.js,
         extra_scripts: extras.scripts,
@@ -170,6 +169,33 @@ pub fn relative(now: i64, ts: i64) -> String {
         with_rest(days / 365, "y", days % 365, "d")
     };
     if delta >= 0 { format!("in {amount}") } else { format!("{amount} ago") }
+}
+
+/// A moment shown as a `<time>` whose text `paste.js` keeps fresh.
+pub struct TimeView {
+    pub iso: String,
+    /// The absolute time, for the tooltip.
+    pub title: String,
+    pub text: String,
+    /// "expires" reads "Expired" once past; "ago" reads "5 min ago".
+    pub kind: &'static str,
+}
+
+impl TimeView {
+    pub fn new(ts: i64, now: i64, kind: &'static str) -> Self {
+        let text = match kind {
+            "expires" if ts <= now => "Expired".to_owned(),
+            // Another clock may run ahead; a past event is never shown as in the future.
+            "ago" => relative(now, ts.min(now - 1)),
+            _ => relative(now, ts),
+        };
+        Self { iso: iso(ts), title: date(ts), text, kind }
+    }
+
+    /// An expiry: "in 3 h", "Expired", or "Never" when there is none.
+    pub fn expiry(ts: Option<i64>, now: i64) -> Option<Self> {
+        ts.map(|t| Self::new(t, now, "expires"))
+    }
 }
 
 fn with_rest(big: u64, big_unit: &str, small: u64, small_unit: &str) -> String {

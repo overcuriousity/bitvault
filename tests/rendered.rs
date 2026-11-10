@@ -138,6 +138,9 @@ async fn every_rendered_page_and_fragment_is_clean() {
     check("admin sign-in", app.get("/admin/sign-in").await, StatusCode::OK).await;
     app.sign_in_admin().await;
     check("admin", app.get("/admin").await, StatusCode::OK).await;
+    check("home signed in", app.get("/").await, StatusCode::OK).await;
+    check("list signed in", app.get("/list").await, StatusCode::OK).await;
+    check("guide signed in", app.get("/guide").await, StatusCode::OK).await;
     app.cookie = None;
 
     check("guide", app.get("/guide").await, StatusCode::OK).await;

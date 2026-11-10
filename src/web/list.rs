@@ -8,7 +8,8 @@ use axum::routing::get;
 use serde::Deserialize;
 
 use super::admin::MaybeAdmin;
-use super::{date, page, render};
+use super::{Extras, TimeView, copy_icons, date, page_with, paste_urls, render};
+use crate::assets::Assets;
 use crate::domain::{self, paste};
 use crate::error::Error;
 use crate::state::AppState;
@@ -25,6 +26,9 @@ struct ListQuery {
 struct Item {
     words: String,
     meta: String,
+    /// `None` never expires.
+    expires: Option<TimeView>,
+    url: String,
 }
 
 #[derive(Template)]
@@ -33,6 +37,7 @@ struct List {
     items: Vec<Item>,
     newer: Option<u32>,
     older: Option<u32>,
+    icons: String,
 }
 
 fn files(n: usize) -> String {
@@ -56,10 +61,25 @@ async fn list(
     let full = pastes.len() == paste::PAGE_SIZE as usize;
     // Only addresses and dates: showing content here would let a list view read a paste
     // without counting it.
+    let now = domain::now();
     let items = pastes
         .iter()
-        .map(|p| Item { words: p.id.words(), meta: format!("Created {}{}", date(p.created_at), files(p.files.len())) })
+        .map(|p| {
+            let words = p.id.words();
+            Item {
+                meta: format!("Created {}{}", date(p.created_at), files(p.files.len())),
+                expires: TimeView::expiry(p.expires_at, now),
+                url: paste_urls(&st, &words).0,
+                words,
+            }
+        })
         .collect();
-    let body = render(&List { items, newer: (number > 1).then(|| number - 1), older: full.then(|| number + 1) })?;
-    page(&st, admin, "list", "Public pastes", body)
+    let body = render(&List {
+        items,
+        newer: (number > 1).then(|| number - 1),
+        older: full.then(|| number + 1),
+        icons: copy_icons(),
+    })?;
+    let extras = Extras { js: vec![Assets::url("js/paste.js")], ..Extras::default() };
+    page_with(&st, admin, "list", "Public pastes", body, extras)
 }

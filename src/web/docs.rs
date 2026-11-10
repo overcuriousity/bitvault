@@ -23,5 +23,5 @@ async fn docs(State(st): State<AppState>, MaybeAdmin(admin): MaybeAdmin) -> Resu
         // A UMD bundle, so a classic script: as a module its wrapper would find no global object.
         scripts: vec![Assets::url("vendor/swagger-ui/swagger-ui-bundle.js")],
     };
-    page_with(&st, admin, "", "API", body, extras)
+    page_with(&st, admin, "docs", "API", body, extras)
 }

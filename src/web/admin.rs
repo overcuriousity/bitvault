@@ -14,8 +14,11 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use serde::Deserialize;
 
-use super::{DeletedQuery, date, icon, page, privacy_label, render, size};
+use super::{DeletedQuery, Extras, TimeView, date, icon, page, page_with, privacy_label, render, size};
+use crate::assets::Assets;
+use crate::config::AppConfig;
 use crate::domain::admin::COOKIE;
+use crate::domain::expiry::{self, Expiry};
 use crate::domain::{self, paste};
 use crate::error::Error;
 use crate::ratelimit::{self, RateLimiter};
@@ -154,8 +157,33 @@ struct Row {
     size: String,
     files: usize,
     created: String,
-    expires: String,
+    expires: Option<TimeView>,
+    editable: bool,
     reads: u64,
+    last_read: Option<TimeView>,
+}
+
+/// The non-secret effective settings, as term and value. Passwords only show whether they are set.
+fn settings(app: &AppConfig) -> Vec<(&'static str, String)> {
+    let yes = |on: bool| if on { "on" } else { "off" }.to_owned();
+    let expiry = |value: &str| Expiry::parse(value).map_or_else(|| value.to_owned(), |e| e.label().to_owned());
+    let mb = |n: u64| format!("{n} MB");
+    vec![
+        ("Listing", yes(app.listing)),
+        ("Editing by default", yes(app.editable)),
+        ("Syntax highlighting", yes(app.highlight)),
+        ("QR codes", yes(app.qr)),
+        ("Read statistics", yes(app.read_stats)),
+        ("Privacy levels", app.privacy_levels.join(", ")),
+        ("Default expiry", expiry(&app.default_expiry)),
+        ("Longest expiry", expiry::max(app).label().to_owned()),
+        ("Largest upload", mb(app.max_file_mb)),
+        ("Largest secret file", mb(app.max_secret_file_mb)),
+        ("Short address", app.short_url.clone().unwrap_or_else(|| "none".into())),
+        ("Translate service", app.translate_url.clone().unwrap_or_else(|| "none".into())),
+        ("Uploader password", yes(app.uploader_password.is_some())),
+        // Task R6 adds the plain-HTTP mode here.
+    ]
 }
 
 #[derive(Template)]
@@ -167,6 +195,8 @@ struct Table {
     content_size: String,
     file_size: String,
     trash: String,
+    version: &'static str,
+    settings: Vec<(&'static str, String)>,
 }
 
 async fn table(
@@ -180,6 +210,7 @@ async fn table(
     let pastes = paste::list_all(&st, domain::now()).await?;
     let content: u64 = pastes.iter().map(|p| p.content_len).sum();
     let files: u64 = pastes.iter().flat_map(|p| &p.files).map(|f| f.size).sum();
+    let now = domain::now();
     let rows = pastes
         .iter()
         .map(|p| Row {
@@ -189,8 +220,10 @@ async fn table(
             size: size(p.content_len + p.files.iter().map(|f| f.size).sum::<u64>()),
             files: p.files.len(),
             created: date(p.created_at),
-            expires: p.expires_at.map_or_else(|| "Never".to_owned(), date),
+            expires: TimeView::expiry(p.expires_at, now),
+            editable: p.editable,
             reads: p.read_count,
+            last_read: p.last_read_at.map(|t| TimeView::new(t, now, "ago")),
         })
         .collect();
     let body = render(&Table {
@@ -200,6 +233,9 @@ async fn table(
         content_size: size(content),
         file_size: size(files),
         trash: icon("trash-2", super::IconSize::Row),
+        version: env!("CARGO_PKG_VERSION"),
+        settings: settings(&st.cfg.app),
     })?;
-    Ok(page(&st, true, "admin", "Admin", body)?.into_response())
+    let extras = Extras { js: vec![Assets::url("js/paste.js")], ..Extras::default() };
+    Ok(page_with(&st, true, "admin", "Admin", body, extras)?.into_response())
 }

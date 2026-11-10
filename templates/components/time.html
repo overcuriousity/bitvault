@@ -1,0 +1,2 @@
+{# A relative time kept fresh by paste.js; t is a web::TimeView. #}
+{% macro time(t) %}<time datetime="{{ t.iso }}" title="{{ t.title }}" data-bv-relative="{{ t.kind }}">{{ t.text }}</time>{% endmacro %}

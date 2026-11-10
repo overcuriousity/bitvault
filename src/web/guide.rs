@@ -54,5 +54,5 @@ async fn guide(State(st): State<AppState>, MaybeAdmin(admin): MaybeAdmin) -> Res
         max_file_mb: app.max_file_mb,
         max_secret_file_mb: app.max_secret_file_mb,
     })?;
-    page(&st, admin, "", "Guide", body)
+    page(&st, admin, "guide", "Guide", body)
 }

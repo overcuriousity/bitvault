@@ -46,7 +46,8 @@ async fn admin_requires_sign_in() {
     let html = body_text(app.get("/admin/sign-in").await).await;
     assert!(html.contains("autocomplete=\"current-password\""));
     assert!(!html.contains("username"));
-    assert!(body_text(app.get("/").await).await.contains("Sign in"));
+    // Visitors are not invited to sign in; the page is reachable by its address.
+    assert!(!body_text(app.get("/").await).await.contains("Sign in"));
 }
 
 #[tokio::test]
@@ -156,4 +157,47 @@ async fn the_admin_password_matches_in_either_unicode_form() {
     let typed: String = url::form_urlencoded::byte_serialize("cafe\u{301}-admin".as_bytes()).collect();
     let res = app.post_form("/admin/sign-in", &format!("password={typed}")).await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn the_top_bar_shows_admin_and_sign_out_only_when_signed_in() {
+    let mut app = app_with(ADMIN_CONFIG).await;
+    let anonymous = body_text(app.get("/").await).await;
+    assert!(!anonymous.contains("href=\"/admin\"") && !anonymous.contains("/admin/sign-out"));
+    app.sign_in_admin().await;
+    let html = body_text(app.get("/").await).await;
+    assert!(html.contains("href=\"/admin\"") && html.contains("action=\"/admin/sign-out\""));
+}
+
+#[tokio::test]
+async fn the_shell_links_the_guide_and_api_and_shows_the_version_footer() {
+    let app = app().await;
+    let html = body_text(app.get("/").await).await;
+    assert!(html.contains("href=\"/guide\"") && html.contains("href=\"/docs\""));
+    assert!(html.contains(&format!("BitVault {}", env!("CARGO_PKG_VERSION"))));
+    assert!(!html.contains("https://github"));
+    // The tab bar keeps to New, List and Guide; the API link is for wide screens only.
+    let tabs = &html[html.find("class=\"oc-tabbar\"").unwrap()..];
+    let tabs = &tabs[..tabs.find("</nav>").unwrap()];
+    assert!(tabs.contains("href=\"/guide\"") && !tabs.contains("href=\"/docs\""));
+    let unlisted = app_with("[app]\nlisting = false\n").await;
+    assert!(!body_text(unlisted.get("/").await).await.contains("href=\"/list\""));
+}
+
+#[tokio::test]
+async fn the_admin_page_shows_the_version_settings_editable_and_last_read() {
+    let mut app =
+        app_with("[app]\nadmin_password = \"admin-pw-123\"\nuploader_password = \"secret-up\"\neditable = true\n")
+            .await;
+    let words = create(&app, NewPaste { editable: true, ..new("a", Privacy::Public, None) }).await;
+    assert_eq!(app.get(&format!("/{words}")).await.status(), StatusCode::OK);
+    app.sign_in_admin().await;
+    let html = body_text(app.get("/admin").await).await;
+    assert!(html.contains(&format!("BitVault {}", env!("CARGO_PKG_VERSION"))));
+    assert!(html.contains(">Settings<") && html.contains("Uploader password"));
+    assert!(!html.contains("secret-up") && !html.contains("admin-pw-123"));
+    assert!(html.contains(">Editable<") && html.contains(">Last read<"));
+    assert!(html.contains("data-bv-relative=\"ago\""), "a read paste shows its last read as a relative time");
+    assert!(html.contains("data-bv-relative=\"expires\""));
+    assert!(html.contains("js/paste."), "the page loads the relative-time module");
 }

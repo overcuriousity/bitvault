@@ -15,8 +15,8 @@ use tokio::sync::Semaphore;
 use super::admin::MaybeAdmin;
 use super::files::{GrantQuery, inline_image};
 use super::{
-    Extras, IconSize, copy_icons, date, escape_text, icon, iso, page_with, paste_id, paste_urls, privacy_icon,
-    privacy_label, relative, render, size,
+    Extras, IconSize, TimeView, copy_icons, date, escape_text, icon, page_with, paste_id, paste_urls, privacy_icon,
+    privacy_label, render, size,
 };
 use crate::assets::Assets;
 use crate::domain::paste::{self, Access, Body, DeleteAuth, Opened, Paste};
@@ -87,16 +87,6 @@ struct FileView {
     preview: bool,
 }
 
-/// A moment shown as a `<time>` whose text `paste.js` keeps fresh.
-struct TimeView {
-    iso: String,
-    /// The absolute time, for the tooltip.
-    title: String,
-    text: String,
-    /// "expires" reads "Expired" once past; "ago" reads "5 min ago".
-    kind: &'static str,
-}
-
 /// One row of the facts list: some text, then optionally a time.
 struct Fact {
     term: &'static str,
@@ -110,13 +100,7 @@ impl Fact {
     }
 
     fn time(term: &'static str, text: &str, ts: i64, now: i64, kind: &'static str) -> Self {
-        let words = match kind {
-            "expires" if ts <= now => "Expired".to_owned(),
-            // Another clock may run ahead; a past event is never shown as in the future.
-            "ago" => relative(now, ts.min(now - 1)),
-            _ => relative(now, ts),
-        };
-        Self { term, text: text.to_owned(), time: Some(TimeView { iso: iso(ts), title: date(ts), text: words, kind }) }
+        Self { term, text: text.to_owned(), time: Some(TimeView::new(ts, now, kind)) }
     }
 }
 

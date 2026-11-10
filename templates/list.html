@@ -1,3 +1,5 @@
+{% import "components/time.html" as time %}
+{% import "components/copy.html" as copy %}
 <div class="oc-columns">
 <div class="oc-page-head"><h1>Public pastes</h1></div>
 {%- if items.is_empty() %}
@@ -8,8 +10,9 @@
   <li class="oc-list__item">
     <div class="oc-list__main">
       <a class="oc-list__title oc-link--data" href="/{{ item.words }}">{{ item.words }}</a>
-      <span class="oc-list__meta">{{ item.meta }}</span>
+      <span class="oc-list__meta">{{ item.meta }} · Expires {% if let Some(t) = item.expires %}{% call time::time(t) %}{% endcall %}{% else %}never{% endif %}</span>
     </div>
+    {% call copy::copy("link", item.url, icons) %}{% endcall %}
   </li>
   {%- endfor %}
 </ul>

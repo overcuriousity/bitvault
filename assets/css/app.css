@@ -170,3 +170,8 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 }
 :root[data-theme="dark"] .qr-bg { fill: var(--color-fg-primary); }
 :root[data-theme="dark"] .qr-fg { fill: var(--color-bg-base); }
+
+/* Footer: one quiet line at the end of the page, above the phone tab bar's reserved space. */
+.bv-footer { margin-top: var(--space-6); padding-block: var(--space-3); color: var(--color-fg-muted); font-size: var(--text-micro); text-align: center; }
+.bv-settings { margin-block: var(--space-4); }
+.bv-settings summary { cursor: pointer; font-weight: 600; }

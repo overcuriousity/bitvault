@@ -1,5 +1,6 @@
 {% import "components/empty.html" as empty %}
 {% import "components/notice.html" as notice %}
+{% import "components/time.html" as time %}
 <div class="bv-admin">
 <div class="oc-page-head"><h1>Admin</h1></div>
 {% if let Some(message) = deleted %}{% call notice::notice("success", message) %}{% endcall %}{% endif %}
@@ -7,7 +8,16 @@
   <dt>Pastes</dt><dd><span class="oc-value">{{ count }}</span></dd>
   <dt>Text and links</dt><dd><span class="oc-value">{{ content_size }}</span></dd>
   <dt>Files</dt><dd><span class="oc-value">{{ file_size }}</span></dd>
+  <dt>Version</dt><dd><span class="oc-value">BitVault {{ version }}</span></dd>
 </dl>
+<details class="bv-settings">
+  <summary>Settings</summary>
+  <dl class="oc-facts">
+    {%- for (term, value) in settings %}
+    <dt>{{ term }}</dt><dd><span class="oc-value">{{ value }}</span></dd>
+    {%- endfor %}
+  </dl>
+</details>
 {% if rows.is_empty() %}
 {% call empty::empty("There are no pastes yet. New pastes appear here as people create them.") %}{% endcall %}
 {% else %}
@@ -22,7 +32,9 @@
       <th scope="col" class="oc-num bv-narrow-hide">Files</th>
       <th scope="col" class="bv-narrow-hide">Created</th>
       <th scope="col">Expires</th>
+      <th scope="col" class="bv-narrow-hide">Editable</th>
       <th scope="col" class="oc-num bv-narrow-hide">Reads</th>
+      <th scope="col" class="bv-narrow-hide">Last read</th>
       <th scope="col" class="oc-col-actions"><span class="oc-sr-only">Actions</span></th>
     </tr>
   </thead>
@@ -35,8 +47,10 @@
       <td class="oc-num bv-narrow-hide">{{ row.size }}</td>
       <td class="oc-num bv-narrow-hide">{{ row.files }}</td>
       <td class="bv-narrow-hide">{{ row.created }}</td>
-      <td class="bv-wrap">{{ row.expires }}</td>
+      <td class="bv-wrap">{% if let Some(t) = row.expires %}{% call time::time(t) %}{% endcall %}{% else %}Never{% endif %}</td>
+      <td class="bv-narrow-hide">{% if row.editable %}Yes{% else %}No{% endif %}</td>
       <td class="oc-num bv-narrow-hide">{{ row.reads }}</td>
+      <td class="bv-narrow-hide">{% if let Some(t) = row.last_read %}{% call time::time(t) %}{% endcall %}{% else %}Never{% endif %}</td>
       <td class="oc-col-actions">
         <form class="bv-inline" method="post" action="/{{ row.words }}/delete">
           <input type="hidden" name="next" value="admin">
