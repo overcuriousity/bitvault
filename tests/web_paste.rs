@@ -834,3 +834,73 @@ async fn the_creator_view_of_a_secret_paste_is_the_secret_shell() {
     assert!(html.contains("Paste created.") && html.contains("id=\"secret-open\""), "{html}");
     assert!(html.contains("js/secret.js"));
 }
+
+async fn post_htmx_multipart(app: &App, parts: &[(&str, Option<&str>, &[u8])]) -> axum::http::Response<Body> {
+    let r = app
+        .req("POST", "/")
+        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={}", support::BOUNDARY))
+        .header("hx-request", "true")
+        .body(Body::from(support::multipart_body(parts)))
+        .unwrap();
+    app.send(r).await
+}
+
+/// The words and creator cookie of a create answered for htmx/fetch: 200 with `HX-Redirect`.
+fn created_for_fetch(res: &axum::http::Response<Body>) -> (String, String) {
+    assert_eq!(res.status(), StatusCode::OK, "a fetch create is not redirected");
+    assert!(res.headers().get(header::LOCATION).is_none());
+    let to = res.headers()["hx-redirect"].to_str().unwrap();
+    let words = to.strip_prefix('/').unwrap().to_owned();
+    let set = set_cookie(res).expect("the fetch create sets the creator cookie");
+    assert_eq!(set.split_once("; ").unwrap().1, format!("Path=/{words}; HttpOnly; SameSite=Lax; Max-Age=600"));
+    (words, set.split(';').next().unwrap().to_owned())
+}
+
+#[tokio::test]
+async fn a_fetch_create_gets_hx_redirect_and_the_cookie_instead_of_a_followed_redirect() {
+    let app = app().await;
+    let parts: &[(&str, Option<&str>, &[u8])] = &[("content", None, b"only once"), ("burn_after_reads", None, b"1")];
+    let (w, cookie) = created_for_fetch(&post_htmx_multipart(&app, parts).await);
+    let html = body_text(app.get_with_cookie(&format!("/{w}"), &cookie).await).await;
+    assert!(html.contains("Paste created.") && html.contains("only once"), "{html}");
+    assert_eq!(read_count(&app, &w).await, 0);
+    // A native form post keeps the 303.
+    let res = app.post_multipart("/", &[("content", None, b"hello")]).await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    support::created(&res);
+}
+
+#[tokio::test]
+async fn a_secret_paste_created_by_fetch_gets_its_creator_view() {
+    let app = app().await;
+    let container =
+        crypto::seal_alg2_for_tests(SECRET_PASSWORD, &[9; 16], PBKDF2_ITERATIONS, br#"{"text":"hi","files":[]}"#);
+    let verifier = hex::encode(crypto::browser_verifier(SECRET_PASSWORD, &VERIFIER_SALT));
+    let salt = hex::encode(VERIFIER_SALT);
+    let parts: &[(&str, Option<&str>, &[u8])] = &[
+        ("privacy", None, b"secret"),
+        ("content_container", Some("blob"), &container),
+        ("verifier_salt", None, salt.as_bytes()),
+        ("verifier", None, verifier.as_bytes()),
+    ];
+    let (w, cookie) = created_for_fetch(&post_htmx_multipart(&app, parts).await);
+    let html = body_text(app.get_with_cookie(&format!("/{w}"), &cookie).await).await;
+    assert!(html.contains("Paste created.") && html.contains("id=\"secret-open\""), "{html}");
+    assert_eq!(read_count(&app, &w).await, 0);
+}
+
+#[tokio::test]
+async fn a_replayed_creator_cookie_gets_the_ordinary_view() {
+    let app = app().await;
+    let res = app.post_multipart("/", &[("content", None, b"plain words")]).await;
+    let (w, cookie) = support::created(&res);
+    let first = body_text(app.get_with_cookie(&format!("/{w}"), &cookie).await).await;
+    assert!(first.contains("Paste created."));
+    assert_eq!(read_count(&app, &w).await, 0);
+    // The same cookie again, as a captured copy would be sent despite the clearing.
+    let res = app.get_with_cookie(&format!("/{w}"), &cookie).await;
+    assert_eq!(set_cookie(&res).unwrap(), cleared(&w));
+    let again = body_text(res).await;
+    assert!(again.contains("plain words") && !again.contains("Paste created."), "{again}");
+    assert_eq!(read_count(&app, &w).await, 1);
+}

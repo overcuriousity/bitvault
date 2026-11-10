@@ -377,7 +377,8 @@ fn wants_page(query: Option<&str>) -> bool {
 /// `GET /{words}`: content for plaintext levels (a read), the unlock form for private (no
 /// read), and an empty shell for secret, which the browser fills from `/raw`. A URL paste
 /// redirects, or shows its page with `?view`; both count a read. A valid creator cookie shows
-/// the creator view instead, once: any creator cookie, valid or not, is cleared.
+/// the creator view instead, once: any creator cookie, valid or not, is cleared, and a token
+/// already redeemed is refused even if the cookie is sent again.
 async fn view(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
@@ -390,7 +391,7 @@ async fn view(
     let id = paste_id(&words)?;
     let now = domain::now();
     let tokens = created_tokens(&headers);
-    let mut res = if tokens.iter().any(|t| grant::check_creator(&st.grant_key, t, id, now)) {
+    let mut res = if tokens.iter().any(|t| grant::redeem_creator(&st.grant_key, &st.redeemed, t, id, now)) {
         render_creator(&st, admin, id, now).await?
     } else {
         ordinary_view(&st, admin, ip, &method, id, now, wants_page(query.as_deref())).await?

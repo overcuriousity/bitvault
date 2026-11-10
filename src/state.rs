@@ -6,7 +6,7 @@ use sqlx::SqlitePool;
 use crate::config::Config;
 use crate::deployment::Deployment;
 use crate::domain::admin::AdminAuth;
-use crate::domain::grant::GrantKey;
+use crate::domain::grant::{GrantKey, Redeemed};
 use crate::ratelimit::RateLimiter;
 
 #[derive(Clone)]
@@ -21,6 +21,8 @@ pub struct AppState {
     pub lookups: Arc<RateLimiter>,
     /// Seals download grants; random per process, so a restart voids outstanding grants.
     pub grant_key: Arc<GrantKey>,
+    /// Creator tokens already used, so each shows the creator view once.
+    pub redeemed: Arc<Redeemed>,
     /// Present only when `admin_password` is configured; without it there are no admin routes.
     pub admin: Option<Arc<AdminAuth>>,
 }

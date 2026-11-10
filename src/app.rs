@@ -45,6 +45,7 @@ pub async fn build_with(
         failures: Arc::new(RateLimiter::new(10, 5)),
         lookups: Arc::new(RateLimiter::new(20, 10)),
         grant_key: Arc::new(GrantKey::random()),
+        redeemed: Arc::default(),
         admin,
     };
     files::remove_orphans(&st).await?;

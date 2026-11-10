@@ -129,3 +129,29 @@ fn malformed_creator_tokens_are_refused_without_panicking() {
         raw[i] ^= 0x01;
     }
 }
+
+#[test]
+fn a_creator_token_is_redeemed_only_once() {
+    use bitvault::domain::grant::Redeemed;
+    let key = GrantKey::random();
+    let redeemed = Redeemed::default();
+    let token = grant::issue_creator(&key, PasteId(8), NOW);
+    let other = grant::issue_creator(&key, PasteId(8), NOW);
+    assert!(grant::redeem_creator(&key, &redeemed, &token, PasteId(8), NOW));
+    assert!(!grant::redeem_creator(&key, &redeemed, &token, PasteId(8), NOW + 1), "a replay is refused");
+    assert!(grant::redeem_creator(&key, &redeemed, &other, PasteId(8), NOW + 1), "another token still works");
+    assert!(!grant::redeem_creator(&key, &redeemed, "forged", PasteId(8), NOW));
+    assert!(!grant::redeem_creator(&key, &redeemed, &grant::issue_creator(&key, PasteId(9), NOW), PasteId(8), NOW));
+    assert_eq!(redeemed.len(), 2, "only valid tokens are remembered");
+}
+
+#[test]
+fn redeemed_creator_tokens_are_forgotten_once_they_have_expired() {
+    use bitvault::domain::grant::Redeemed;
+    let key = GrantKey::random();
+    let redeemed = Redeemed::default();
+    assert!(grant::redeem_creator(&key, &redeemed, &grant::issue_creator(&key, PasteId(1), NOW), PasteId(1), NOW));
+    let later = NOW + TTL_SECS + 1;
+    assert!(grant::redeem_creator(&key, &redeemed, &grant::issue_creator(&key, PasteId(2), later), PasteId(2), later));
+    assert_eq!(redeemed.len(), 1, "the expired entry was pruned on insert");
+}

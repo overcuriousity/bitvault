@@ -14,6 +14,13 @@ export function tooLarge(files, maxMb) {
   return Array.from(files).some((f) => f.size > maxMb * MIB);
 }
 
+// Where a created paste opens: the server's HX-Redirect, accepted only as a path on this origin.
+// Browsers read "/\host" like "//host", so a backslash after the slash is refused too.
+export function createdLocation(headers) {
+  const to = headers.get("hx-redirect") ?? "";
+  return /^\/(?![/\\])/.test(to) ? to : null;
+}
+
 function bindPrivacy(form) {
   const select = form.querySelector("#privacy");
   if (!select) return;
@@ -122,11 +129,12 @@ function bindSecretSubmit(form) {
     showNotice(region, "info", "Encrypting in your browser…");
     try {
       const body = await secretBody(form, password, files);
-      // The header makes the server answer an error with its notice fragment.
+      // The header makes the server answer an error with its notice fragment, and a success with
+      // HX-Redirect rather than a 303: fetch would follow that itself and use up the creator cookie.
       const res = await fetch("/", { method: "POST", body, headers: { "HX-Request": "true" } });
       if (res.ok) {
         // The button stays busy until the paste page replaces this one.
-        window.location.assign(res.url);
+        window.location.assign(createdLocation(res.headers) ?? res.url);
         return;
       }
       showNotice(region, "danger", await serverMessage(res, "The paste could not be created. Try again."));

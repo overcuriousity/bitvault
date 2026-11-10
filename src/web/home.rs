@@ -317,14 +317,22 @@ impl Form {
 }
 
 /// `POST /`: to the new paste, with the creator cookie that shows it once without counting a read.
+/// A fetch or htmx create (`HX-Request`) gets 200 with `HX-Redirect` instead of a 303: fetch
+/// would follow the 303 itself, using up the cookie on a response the browser never shows.
 async fn create(State(st): State<AppState>, req: Request) -> Result<Response, Error> {
+    let htmx = req.headers().contains_key("hx-request");
     let rules = CreateRules { uploader_checked: false, allow_secret: true };
     let (new, staging) = read_multipart(&st, req, rules).await?;
     let now = domain::now();
     let id = paste::create(&st, new, staging, now).await?;
     let words = id.words();
     let token = grant::issue_creator(&st.grant_key, id, now);
-    let mut res = Redirect::to(&format!("/{words}")).into_response();
+    let target = format!("/{words}");
+    let mut res = if htmx {
+        (StatusCode::OK, [("hx-redirect", target)]).into_response()
+    } else {
+        Redirect::to(&target).into_response()
+    };
     res.headers_mut().insert(header::SET_COOKIE, super::paste::created_cookie(&st, &words, &token, grant::TTL_SECS)?);
     Ok(res)
 }

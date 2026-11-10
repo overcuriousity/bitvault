@@ -7,12 +7,15 @@
 //! kind has its own AAD, so neither passes as the other. A restart makes a new key, which voids
 //! every token.
 
+use std::collections::HashMap;
 use std::fmt;
+use std::sync::{Mutex, PoisonError};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chacha20poly1305::aead::{Aead, Payload};
 use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
+use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::domain::crypto::{Dek, KEY_LEN, random_bytes};
@@ -119,4 +122,34 @@ pub fn issue_creator(key: &GrantKey, paste: PasteId, now: i64) -> String {
 /// Whether `token` is a creator token for `paste` that is still valid at `now`.
 pub fn check_creator(key: &GrantKey, token: &str, paste: PasteId, now: i64) -> bool {
     open(key, CREATOR_AAD, token).is_some_and(|payload| live_for(&payload, paste, now).is_some_and(<[u8]>::is_empty))
+}
+
+/// Creator tokens already redeemed, as `SHA-256(token)` with the time they may be forgotten, so a
+/// captured creator cookie cannot show the creator view again. In memory only: a restart makes a
+/// new grant key, which voids every token anyway.
+#[derive(Debug, Default)]
+pub struct Redeemed(Mutex<HashMap<[u8; 32], i64>>);
+
+impl Redeemed {
+    /// Records `token` and reports whether this is its first use; expired entries go first.
+    fn first_use(&self, token: &str, now: i64) -> bool {
+        let mut seen = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        seen.retain(|_, forget_at| *forget_at >= now);
+        // Every token was issued at or before `now`, so it has expired by `now + TTL_SECS`.
+        seen.insert(Sha256::digest(token.as_bytes()).into(), now.saturating_add(TTL_SECS)).is_none()
+    }
+
+    /// How many redeemed tokens are remembered.
+    pub fn len(&self) -> usize {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// [`check_creator`], once per token: a valid token is accepted the first time and refused after.
+pub fn redeem_creator(key: &GrantKey, redeemed: &Redeemed, token: &str, paste: PasteId, now: i64) -> bool {
+    check_creator(key, token, paste, now) && redeemed.first_use(token, now)
 }
