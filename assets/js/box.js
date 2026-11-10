@@ -55,7 +55,8 @@ export function bindBox(form) {
   if (!box || !echo || !submit) return { decide: async () => ({}) };
 
   const idleEcho = echo.textContent;
-  const idleLabel = submit.textContent;
+  const label = submit.querySelector(".bv-go__label") ?? submit;
+  const idleLabel = label.textContent;
   const results = new Map();
   let words = null;
   let loading = null;
@@ -117,14 +118,38 @@ export function bindBox(form) {
     chipRow.hidden = false;
   };
 
+  // The form's look follows the box, for those who never read the line under it: "open" turns
+  // the box and the button green with an arrow, "attention" amber. See app.css.
+  const look = (state) => (state === "found" ? "open" : state === "ambiguous" || state === "busy" ? "attention" : "");
+
   function render() {
     const { state, address } = reading();
     setText(echo, echoFor(state, address) ?? idleEcho);
     const opens = state === "found";
-    setText(submit, opens ? "Open paste" : idleLabel);
+    setText(label, opens ? "Open paste" : idleLabel);
     if (keep) keep.hidden = !opens;
+    const shown = look(state);
+    if (shown) form.dataset.box = shown;
+    else delete form.dataset.box;
     renderChips();
   }
+
+  // A short shake when Enter cannot open what is in the box.
+  const nudge = () => {
+    delete form.dataset.boxNudge;
+    // Read layout so removing and setting the attribute restarts the animation.
+    void box.offsetWidth;
+    form.dataset.boxNudge = "";
+    setTimeout(() => delete form.dataset.boxNudge, 400);
+  };
+  // The arrow leaves to the right while the paste loads.
+  const opening = (address) => {
+    form.dataset.box = "opening";
+    window.location.assign(`/${address}`);
+  };
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) render();
+  });
 
   function update() {
     render();
@@ -150,7 +175,10 @@ export function bindBox(form) {
     await load();
     const read = words ? readAddress(box.value.trim(), words) : null;
     if (!read || hasFiles()) return newLine();
-    if (read.ambiguous) return render();
+    if (read.ambiguous) {
+      render();
+      return nudge();
+    }
     clearTimeout(timer);
     let result = results.get(read.address);
     if (!result) {
@@ -162,11 +190,9 @@ export function bindBox(form) {
         return render();
       }
     }
-    if (result === "found") {
-      window.location.assign(`/${read.address}`);
-      return;
-    }
+    if (result === "found") return opening(read.address);
     render();
+    nudge();
     if (result === "missing") {
       setText(echo, `No paste has the words ${read.address}. Check them, or press Create paste to keep them as text.`);
     }
@@ -232,6 +258,7 @@ export function bindBox(form) {
         }
       }
       render();
+      if (result === "found") form.dataset.box = "opening";
       return result === "found" ? { open: `/${read.address}` } : { intent: "create" };
     },
   };

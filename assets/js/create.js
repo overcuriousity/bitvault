@@ -188,7 +188,7 @@ function bindSizeCheck(form) {
 // The primary button while a create runs: disabled at once, a spinner after 400 ms, and from
 // 1 s on the upload percentage.
 function busyButton(button) {
-  const label = button.textContent;
+  const content = Array.from(button.childNodes);
   let uploaded = null;
   let reveal = false;
   const render = () => {
@@ -214,7 +214,7 @@ function busyButton(button) {
       button.disabled = false;
       button.removeAttribute("aria-busy");
       delete button.dataset.progress;
-      button.textContent = label;
+      button.replaceChildren(...content);
     },
   };
 }

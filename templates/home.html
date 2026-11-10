@@ -86,7 +86,8 @@
   <div id="create-notice" aria-live="polite"></div>
   <div class="oc-form__actions">
     {#- box.js names the action: Open paste when the box holds the words of a paste that exists. #}
-    <button type="submit" class="oc-btn oc-btn--primary" id="box-submit">Create paste</button>
+    {#- The icon says it without words: a plus keeps a new paste, an arrow opens one. #}
+    <button type="submit" class="oc-btn oc-btn--primary bv-go" id="box-submit"><span class="bv-go__icon bv-go__icon--create">{{ create_icon|safe }}</span><span class="bv-go__icon bv-go__icon--open">{{ open_icon|safe }}</span><span class="bv-go__label">Create paste</span></button>
     <button type="submit" class="oc-btn oc-btn--default" id="box-keep" name="intent" value="create" hidden>Keep as a new paste</button>
   </div>
 </form>

@@ -63,6 +63,8 @@ struct Home {
     max_secret_mb: u64,
     words_src: String,
     help_icon: String,
+    create_icon: String,
+    open_icon: String,
     deleted: Option<String>,
 }
 
@@ -124,6 +126,8 @@ async fn index(
         max_secret_mb: app.max_secret_file_mb,
         words_src: Assets::url("bip39-english.txt"),
         help_icon: super::icon("circle-question-mark", super::IconSize::Row),
+        create_icon: super::icon("plus", super::IconSize::Tool),
+        open_icon: super::icon("arrow-right", super::IconSize::Tool),
         deleted: q.notice().map(|n| super::escape_text(&n)),
     };
     let body = home.render().map_err(Error::internal)?;

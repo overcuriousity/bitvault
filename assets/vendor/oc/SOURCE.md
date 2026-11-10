@@ -21,6 +21,7 @@ Copied unmodified from overcuriousity/overcuriousity-dev-manifest, tag v2026.11.
 | htmx/htmx.min.js | crates/oc-kit/assets/vendor/htmx.min.js |
 | icons/LICENSE-lucide.txt | crates/oc-kit/assets/icons/LICENSE-lucide.txt |
 | icons/a-large-small.svg | crates/oc-kit/assets/icons/a-large-small.svg |
+| icons/arrow-right.svg | bitvault addition from Lucide 1.70.0 (lucide-icons/lucide, icons/arrow-right.svg), ISC |
 | icons/book-open.svg | crates/oc-kit/assets/icons/book-open.svg |
 | icons/check.svg | crates/oc-kit/assets/icons/check.svg |
 | icons/chevron-down.svg | crates/oc-kit/assets/icons/chevron-down.svg |
@@ -60,6 +61,6 @@ Copied unmodified from overcuriousity/overcuriousity-dev-manifest, tag v2026.11.
 | js/notices.js | crates/oc-kit/assets/js/notices.js |
 | js/theme.js | crates/oc-kit/assets/js/theme.js |
 
-The four bitvault additions (file, languages, qr-code, upload) were checked against Lucide release tag 1.70.0, commit b826f0c527e1498f5e46f41ca0277ccab144bf31 (2026-11-05): their shapes match that tag element for element. Only the wrapping `<svg>` attributes differ, rewritten to the manifest's icon format (`class="oc-icon"`, `aria-hidden`, `focusable`, no width, height or stroke-width).
+The five bitvault additions (arrow-right, file, languages, qr-code, upload) were checked against Lucide release tag 1.70.0, commit b826f0c527e1498f5e46f41ca0277ccab144bf31 (2026-11-05): their shapes match that tag element for element. Only the wrapping `<svg>` attributes differ, rewritten to the manifest's icon format (`class="oc-icon"`, `aria-hidden`, `focusable`, no width, height or stroke-width).
 
 Not copied: prefs.js (it posts to the kit's server endpoint; bitvault has its own assets/js/prefs.js), live.js and htmx-ext-sse.js (no SSE in bitvault).

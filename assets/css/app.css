@@ -108,6 +108,41 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-attach > .bv-files { margin-top: var(--space-2); }
 .bv-attach__hint { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
 
+/* What the box will do, without words. box.js sets data-box: "open" when Enter or the button
+   opens the paste the words name (green, and the button's plus turns into an arrow),
+   "attention" when the words read two ways or lookups are paused (amber), "opening" while the
+   paste loads (the arrow leaves). data-box-nudge shakes the box red when Enter cannot open. With
+   reduced motion the kit stops every animation, and the colours still tell. */
+.bv-create #content { transition: border-color var(--motion-panel) var(--ease), box-shadow var(--motion-panel) var(--ease); }
+.bv-go { transition: background-color var(--motion-panel) var(--ease), border-color var(--motion-panel) var(--ease); }
+.bv-go__icon { display: inline-flex; }
+.bv-go__icon--open { display: none; }
+.bv-create:is([data-box="open"], [data-box="opening"]) #content {
+  border-color: var(--color-success);
+  box-shadow: 0 0 0 3px var(--color-success-dim);
+  outline-color: var(--color-success);
+}
+.bv-create:is([data-box="open"], [data-box="opening"]) .bv-go { background: var(--color-success); border-color: var(--color-success); }
+.bv-create:is([data-box="open"], [data-box="opening"]) .bv-go:hover { background: color-mix(in srgb, var(--color-success) 88%, var(--color-fg-primary)); }
+.bv-create:is([data-box="open"], [data-box="opening"]) .bv-go__icon--create { display: none; }
+.bv-create:is([data-box="open"], [data-box="opening"]) .bv-go__icon--open { display: inline-flex; animation: bv-arrow-in var(--motion-panel) var(--ease); }
+.bv-create[data-box="opening"] .bv-go__icon--open { animation: bv-arrow-out 240ms var(--ease) forwards; }
+.bv-create[data-box="attention"] #content { border-color: var(--color-warning); box-shadow: 0 0 0 3px var(--color-warning-dim); outline-color: var(--color-warning); }
+.bv-create[data-box-nudge] #content {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 3px var(--color-danger-dim);
+  outline-color: var(--color-danger);
+  animation: bv-nudge 360ms var(--ease);
+}
+@keyframes bv-arrow-in { from { translate: -0.5rem 0; opacity: 0; } }
+@keyframes bv-arrow-out { to { translate: 0.75rem 0; opacity: 0; } }
+@keyframes bv-nudge {
+  20% { translate: -6px 0; }
+  40% { translate: 5px 0; }
+  60% { translate: -3px 0; }
+  80% { translate: 2px 0; }
+}
+
 /* The listbox of a grouped select shows the group labels create.js adds. */
 .oc-menu .bv-menu-group { padding: var(--space-2) var(--space-3) var(--space-1); color: var(--color-fg-muted); font-size: var(--text-micro); font-weight: 600; }
 
