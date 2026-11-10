@@ -283,6 +283,7 @@ function bindSubmit(form) {
   const fileInput = form.querySelector("#files");
   const button = form.querySelector("button[type=submit]");
   let running = false;
+  let busy = null;
   const fail = (message) => {
     if (options) options.open = true;
     showNotice(region, "danger", message);
@@ -305,7 +306,7 @@ function bindSubmit(form) {
       return;
     }
     running = true;
-    const busy = busyButton(button);
+    busy = busyButton(button);
     try {
       let body;
       if (secret) {
@@ -329,6 +330,14 @@ function bindSubmit(form) {
     }
     running = false;
     busy.reset();
+  });
+  // A page restored from the back-forward cache keeps the busy button of the create that left it.
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted || !busy) return;
+    running = false;
+    busy.reset();
+    busy = null;
+    showNotice(region, "", "");
   });
 }
 

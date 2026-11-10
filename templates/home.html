@@ -2,7 +2,7 @@
 {% import "components/field.html" as field %}
 {% import "components/help.html" as help %}
 {% import "components/notice.html" as notice %}
-<div class="oc-page-head"><h1>New paste</h1></div>
+<h1 class="oc-sr-only">New paste</h1>
 {% if let Some(deleted) = deleted %}{% call notice::notice_escaped("success", deleted) %}{% endcall %}{% endif %}
 
 <section class="bv-open" aria-labelledby="open-heading">

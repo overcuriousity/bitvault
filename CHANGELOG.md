@@ -26,8 +26,9 @@ This is a rewrite and a fresh start. There is no compatibility with 1.6.0: no da
 - Three-word canonical URLs: every paste lives at `/{three-words}`.
 - A generated OpenAPI document at `/api/v1/openapi.json` with Swagger UI at `/docs`.
 - Per-address rate limits: creates 30 per minute (burst 10), other API calls 120 (burst 30), wrong passwords 10 (burst 5), and lookups of words that match no paste 20 (burst 10), so unlisted pastes cannot be enumerated.
-- After creating on the web you see the new paste with its words, address, Copy link, Share, QR code and delete; fetch-based creates show upload progress and you can paste images from the clipboard.
+- After creating on the web you see the new paste with its words, address, Copy link, Share, QR code and delete; creating on the home page shows upload progress and you can paste images from the clipboard.
 - Open a paste by typing the first four letters of each word.
+- Add `?view` to a link's address to see where it goes before following it.
 - Syntax "Automatic" (the default) detects the language from the first line, such as a shebang; code gets line numbers.
 - Copy text and Share (where the browser has it) on paste pages; raw text, link and QR stay in one toolbar.
 - File downloads send `Content-Length` and resume with byte ranges, except in private pastes and zip downloads.

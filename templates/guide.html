@@ -3,7 +3,7 @@
 <p>{{ cfg_title }} keeps text, links and files under an address of three words, such as apple-banana-cherry. Share the words, the full address or its QR code, and choose how private the paste is and how long it lasts.</p>
 
 <h2 id="create">Create a paste</h2>
-<p>Write or paste your text, add files if you want, choose a privacy level and an expiry, then select Create paste. You are taken to the new paste, whose three words are its address.</p>
+<p>Write or paste your text, add files if you want, choose a privacy level and an expiry, then select Create paste. The privacy level, expiry, burn count and syntax are under Options. You are taken to the new paste, whose three words are its address.</p>
 <p>A paste can be text, files or both. Files can add up to {{ max_file_mb }} MB per paste{% if self.offers("secret") %}, and each file of a secret paste can be at most {{ max_secret_file_mb }} MB{% endif %}.</p>
 {%- if self.offers("public") || self.offers("unlisted") %}
 <p>When a public or unlisted paste is a single web address and nothing else, it becomes a short link: opening the paste takes you straight to that address.</p>
@@ -36,12 +36,11 @@
 {%- if self.offers("secret") %}
 <h3>Secret</h3>
 <p>Your browser encrypts the text, the file names and the files before anything is sent, and the password never leaves your device. Opening and deleting happen in your browser as well, so secret pastes need JavaScript, and they cannot be changed.</p>
-<p>Nobody can recover a forgotten password, not even the administrator.</p>
 {%- endif %}
 
 {%- if self.offers("readonly") || self.offers("private") || self.offers("secret") %}
 <h2 id="password">Password</h2>
-<p>Read-only, private and secret pastes are protected by a password. Nobody can recover a forgotten one.</p>
+<p>Read-only, private and secret pastes are protected by a password. Nobody can recover a forgotten one, not even the administrator.</p>
 {%- endif %}
 
 <h2 id="expiry">Expiry</h2>
@@ -50,16 +49,18 @@
 <h2 id="burn">Burn after reads</h2>
 <p>Burn after reads deletes a paste once it has been read that many times; 0 turns it off. Viewing the paste, fetching its raw text and reading it through the API each count as a read. Downloading files does not. After the last read, the page that showed it keeps its file downloads working for ten minutes.</p>
 
-{%- if highlight %}
 <h2 id="syntax">Syntax highlighting</h2>
+{%- if highlight %}
 <p>Automatic detects the language from the first line. Or choose a language under Syntax to colour code by its structure. The server does the highlighting, so it works without JavaScript. Very large pastes are shown without colours.</p>
+{%- else %}
+<p>Syntax highlighting is turned off on this server, so code is shown as plain text.</p>
 {%- endif %}
 
 <h2 id="files">Files</h2>
 <p>Files can be added to any paste and downloaded one by one or as a zip. Interrupted downloads of single files resume, except in private pastes; zip downloads do not.</p>
 
 <h2>Share</h2>
-<p>Each of the three words and the full address has a copy button.{% if qr %} The QR code button shows the address for a phone camera.{% endif %} Raw text opens the paste as plain text.</p>
+<p>Each of the three words has a copy button, and Copy link copies the full address. Copy text copies the paste's text, and Share opens your device's share sheet where there is one.{% if qr %} The QR code button shows the address for a phone camera.{% endif %} Raw text opens the paste as plain text. Add <code>?view</code> to a link's address to see where it goes before following it.</p>
 
 {%- if editable %}
 <h2 id="editing">Change a paste</h2>
