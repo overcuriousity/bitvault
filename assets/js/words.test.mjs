@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { accept, chips, choose, findIn, readAddress } from "./words.js";
+import { accept, addressLike, chips, choose, findIn, readAddress } from "./words.js";
 
 const WORDS = readFileSync(new URL("../bip39-english.txt", import.meta.url), "utf8").split("\n").filter(Boolean);
 
@@ -54,4 +54,19 @@ test("Tab takes the first word in the list, and has nothing to do once the addre
   assert.equal(accept("happy-apple-banana", WORDS), null);
   assert.equal(accept("happy-", WORDS), null);
   assert.equal(accept("lorem ipsum", WORDS), null);
+});
+
+test("the box stays one line while what is typed can still be three words", () => {
+  for (const v of ["", "h", "happy", "happy ", "happy-apple ban", "happyapple ban", "happyapplebanana", "Happy Apple Banana"]) {
+    assert.equal(addressLike(v, WORDS), true, v);
+  }
+});
+
+test("the box grows for anything that cannot be three words", () => {
+  for (const v of ["lorem ", "happy apple banana cherry", "happy apple xyzq", "line one\nline two", "https://example.org", "it's", "happy, apple", "a".repeat(65)]) {
+    assert.equal(addressLike(v, WORDS), false, v);
+  }
+  // Without the word list, only the shape counts.
+  assert.equal(addressLike("lorem ipsum", null), true);
+  assert.equal(addressLike("lorem ipsum dolor sit", null), false);
 });

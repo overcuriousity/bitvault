@@ -64,6 +64,24 @@ export function readAddress(value, words) {
 }
 
 /**
+ * Whether `value` could still become three paste words: one line of at most three letter runs,
+ * each finished one a paste word (or words run together), and a third one that begins a word.
+ * Without the word list only the shape is checked.
+ */
+export function addressLike(value, words) {
+  if (value.includes("\n") || value.length > 64 || /[^\sa-z-]/i.test(value)) return false;
+  const parts = value.toLowerCase().split(SEPARATORS).filter(Boolean);
+  if (parts.length > 3) return false;
+  if (!words) return true;
+  const ended = /[\s-]$/.test(value);
+  const finished = ended ? parts : parts.slice(0, -1);
+  const readable = (p) => findIn(words, p) !== -1 || wholeWords(words, p, 2).length > 0 || wholeWords(words, p, 3).length > 0;
+  if (!finished.every(readable)) return false;
+  const last = ended ? null : parts[parts.length - 1];
+  return !(last && parts.length === 3 && !words.some((w) => w.startsWith(last)));
+}
+
+/**
  * The words that fit the one being typed, while the box still looks like an address: one line,
  * at most three words so far, each finished one a paste word. Null otherwise.
  */

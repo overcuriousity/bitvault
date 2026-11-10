@@ -7,7 +7,7 @@
 {#- One box: text or a link is kept as a new paste, and three words open the paste
     they name. The server decides on submit; box.js says which before the button is pressed.
     Field order is a contract with the server: every text field, and so the options, before the file input. #}
-<form class="oc-form bv-create" id="create-form" method="post" action="/" enctype="multipart/form-data" data-max-file-mb="{{ max_file_mb }}" data-max-secret-mb="{{ max_secret_mb }}">
+<form class="oc-form bv-create" id="create-form" method="post" action="/" enctype="multipart/form-data" data-compact data-max-file-mb="{{ max_file_mb }}" data-max-secret-mb="{{ max_secret_mb }}">
   <div class="oc-field bv-box">
     <label for="content">Text, a link, or three words</label>
     <textarea class="oc-input bv-mono" id="content" name="content" rows="8" spellcheck="false" autocomplete="off" autofocus aria-describedby="box-echo" data-words-src="{{ words_src }}"></textarea>

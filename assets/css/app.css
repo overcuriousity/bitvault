@@ -113,7 +113,15 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
    "attention" when the words read two ways or lookups are paused (amber), "opening" while the
    paste loads (the arrow leaves). data-box-nudge shakes the box red when Enter cannot open. With
    reduced motion the kit stops every animation, and the colours still tell. */
-.bv-create #content { transition: border-color var(--motion-panel) var(--ease), box-shadow var(--motion-panel) var(--ease); }
+.bv-create #content {
+  height: 12rem;
+  transition: border-color var(--motion-panel) var(--ease), box-shadow var(--motion-panel) var(--ease), height var(--motion-panel) var(--ease);
+}
+/* One line until what is typed cannot be three words; box.js removes data-compact then. Only
+   with scripts on, so a browser without them gets the full box. */
+@media (scripting: enabled) {
+  .bv-create[data-compact] #content { min-height: 0; height: calc(1lh + 2 * var(--space-2) + 2px); resize: none; overflow-y: auto; }
+}
 .bv-go { transition: background-color var(--motion-panel) var(--ease), border-color var(--motion-panel) var(--ease); }
 .bv-go__icon { display: inline-flex; }
 .bv-go__icon--open { display: none; }

@@ -5,7 +5,7 @@
 //
 // Enter on a box that is one line of three words opens that paste, the quick way in. It only ever
 // opens: words no paste has stay in the box with a note, and keeping them takes the button.
-import { accept, chips, choose, readAddress } from "./words.js";
+import { accept, addressLike, chips, choose, readAddress } from "./words.js";
 
 // Long enough that a lookup waits for a pause in typing, short enough to answer before a press.
 const LOOKUP_DELAY = 350;
@@ -122,7 +122,18 @@ export function bindBox(form) {
   // the box and the button green with an arrow, "attention" amber. See app.css.
   const look = (state) => (state === "found" ? "open" : state === "ambiguous" || state === "busy" ? "attention" : "");
 
+  // The box starts one line tall, like the address field it may be, and grows into the text area
+  // once what is typed can no longer be three words. It stays grown until it is emptied, so it
+  // never shrinks under someone editing text.
+  let grown = !form.hasAttribute("data-compact");
+  const size = () => {
+    if (!box.value.trim()) grown = false;
+    else if (!grown && !addressLike(box.value, words)) grown = true;
+    form.toggleAttribute("data-compact", !grown);
+  };
+
   function render() {
+    size();
     const { state, address } = reading();
     setText(echo, echoFor(state, address) ?? idleEcho);
     const opens = state === "found";
@@ -207,6 +218,8 @@ export function bindBox(form) {
 
   box.addEventListener("focus", load);
   if (document.activeElement === box) load();
+  // A box the browser refilled (back, reload) is sized at once, by its shape until the list loads.
+  size();
   box.addEventListener("input", () => {
     load();
     update();
