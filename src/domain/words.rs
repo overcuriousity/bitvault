@@ -26,18 +26,77 @@ impl PasteId {
 pub const PREFIX_LEN: usize = 4;
 
 /// Accepts words separated by spaces and/or hyphens, in any case, each in full or as a prefix of
-/// at least [`PREFIX_LEN`] letters.
+/// at least [`PREFIX_LEN`] letters. Words typed without a separator between them are accepted
+/// in full when exactly one reading fits, see [`read_joined`].
 pub fn parse(input: &str) -> Result<PasteId, Error> {
     let lowered = input.to_lowercase();
     let parts: Vec<&str> = lowered.split(|c: char| c.is_whitespace() || c == '-').filter(|p| !p.is_empty()).collect();
-    if parts.len() != 3 {
-        return Err(Error::Invalid("A paste address is three words. Check it and try again.".into()));
+    let indexes = match parts.len() {
+        3 => parts.iter().map(|p| find_in(&WORDS, p)).collect::<Result<Vec<_>, _>>()?,
+        1 | 2 => read_joined(&parts)?,
+        _ => return Err(three_words()),
+    };
+    Ok(PasteId(indexes.iter().fold(0, |id, &i| (id << WORD_BITS) | i as u64)))
+}
+
+fn three_words() -> Error {
+    Error::Invalid("A paste address is three words. Check it and try again.".into())
+}
+
+/// Reads one or two parts as three words: a part is one word (in full or as a prefix), or two or
+/// three whole words run together. Exactly one reading must fit; "seatrack" could be "sea track"
+/// or "seat rack", so such input needs a separator.
+fn read_joined(parts: &[&str]) -> Result<Vec<usize>, Error> {
+    let mut readings = Vec::new();
+    read_parts(parts, &mut Vec::new(), &mut readings);
+    match readings.len() {
+        1 => Ok(readings.swap_remove(0)),
+        0 => Err(three_words()),
+        _ => Err(Error::Invalid(
+            "These letters can be read as more than one address. Put spaces or hyphens between the words.".into(),
+        )),
     }
-    let mut id = 0u64;
-    for part in parts {
-        id = (id << WORD_BITS) | find_in(&WORDS, part)? as u64;
+}
+
+fn read_parts(parts: &[&str], done: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+    let Some((part, rest)) = parts.split_first() else {
+        if done.len() == 3 {
+            out.push(done.clone());
+        }
+        return;
+    };
+    if let Ok(index) = find_in(&WORDS, part) {
+        done.push(index);
+        read_parts(rest, done, out);
+        done.pop();
     }
-    Ok(PasteId(id))
+    for count in 2..=3 - done.len().min(3) {
+        for split in whole_words(part, count) {
+            let len = done.len();
+            done.extend(split);
+            read_parts(rest, done, out);
+            done.truncate(len);
+        }
+    }
+}
+
+/// Every way to read `s` as exactly `count` whole words, as word indexes.
+fn whole_words(s: &str, count: usize) -> Vec<Vec<usize>> {
+    // BIP39 English words are three to eight letters long.
+    if count == 0 || s.len() < 3 * count || s.len() > 8 * count {
+        return if count == 0 && s.is_empty() { vec![Vec::new()] } else { Vec::new() };
+    }
+    let mut out = Vec::new();
+    for len in 3..=8.min(s.len()) {
+        let Some(head) = s.get(..len) else { continue };
+        if let Ok(index) = WORDS.binary_search(&head) {
+            for mut tail in whole_words(&s[len..], count - 1) {
+                tail.insert(0, index);
+                out.push(tail);
+            }
+        }
+    }
+    out
 }
 
 /// The index in the sorted `list` of the word that `part` spells in full or begins.

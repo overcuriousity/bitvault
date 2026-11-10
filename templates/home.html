@@ -10,14 +10,15 @@
   <form class="oc-form" method="post" action="/open" hx-post="/open" hx-target="#open-result" hx-swap="innerHTML">
     <div class="oc-field">
       <label for="words">Three words</label>
-      {#- words.js fills the list on first focus; without it the field works the same, without suggestions. #}
-      <input class="oc-input" id="words" name="words" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" list="word-list" data-words-src="{{ words_src }}">
+      {#- words.js loads the words on first focus: completion in the field with a keyboard, the list on touch screens. Without it the field works the same, without help. #}
+      <input class="oc-input" id="words" name="words" type="text" placeholder="apple banana cherry" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" list="word-list" data-words-src="{{ words_src }}">
       <datalist id="word-list"></datalist>
     </div>
     <div class="oc-form__actions">
       {% call button::submit("default", "Open paste") %}{% endcall %}
     </div>
   </form>
+  <p class="bv-hint" id="words-hint" hidden>Tab completes a word.</p>
   <div id="open-result" aria-live="polite"></div>
 </section>
 

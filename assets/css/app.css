@@ -93,6 +93,8 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 /* One row: the words field grows, the button sits at its end, and wraps below when narrow. */
 .bv-open .oc-form { flex-direction: row; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2); }
 .bv-open .oc-field { flex: 1 1 12rem; }
+.bv-hint { margin-top: var(--space-1); color: var(--color-fg-muted); font-size: var(--text-micro); }
+.bv-hint[hidden] { display: none; }
 
 /* A label with its "?" link to the guide. */
 .bv-label { display: flex; align-items: center; gap: var(--space-1); }
@@ -100,10 +102,9 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-help { color: var(--color-fg-muted); }
 
 /* The create options: closed by default behind a one-line summary of the choices. */
-.bv-options { border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); }
-.bv-options > summary { padding: var(--space-2) var(--space-3); font-weight: 500; color: var(--color-fg-secondary); cursor: pointer; }
+.bv-options > summary { padding-block: var(--space-1); font-weight: 500; color: var(--color-fg-secondary); cursor: pointer; }
 .bv-options__summary { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
-.bv-options__body { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-3) var(--space-3) var(--space-4); border-top: 1px solid var(--color-border-subtle); }
+.bv-options__body { display: flex; flex-direction: column; gap: var(--space-4); padding-top: var(--space-3); }
 
 /* The listbox of a grouped select shows the group labels create.js adds. */
 .oc-menu .bv-menu-group { padding: var(--space-2) var(--space-3) var(--space-1); color: var(--color-fg-muted); font-size: var(--text-micro); font-weight: 600; }
@@ -129,6 +130,8 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-address > .oc-mono { overflow-wrap: anywhere; }
 .bv-target { display: flex; flex-direction: column; gap: var(--space-2); }
 .bv-target .bv-address { color: var(--color-fg-primary); }
+/* The paste facts are a quiet list, without the kit's row rules. */
+.bv-meta > dt, .bv-meta > dd { min-height: 0; border-bottom: 0; }
 .bv-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .bv-actions .oc-btn { gap: var(--space-1); }
 .bv-actions .oc-btn[data-copied] { color: var(--color-success); }
@@ -174,8 +177,9 @@ html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
 .bv-secret-open[hidden], .bv-delete[hidden] { display: none; }
 
 /* create.js turns the file field into a drop zone. */
-.bv-create .bv-drop { padding: var(--space-3); border: 1px dashed var(--color-border-control); border-radius: var(--radius-md); }
-.bv-create .bv-drop[data-dragging] { border-color: var(--color-accent); background: var(--color-accent-dim); }
+/* No box until files are dragged over it; an outline, so the page does not shift. */
+.bv-create .bv-drop { border-radius: var(--radius-md); }
+.bv-create .bv-drop[data-dragging] { outline: 2px dashed var(--color-accent); outline-offset: var(--space-2); background: var(--color-accent-dim); }
 .bv-drop__hint { color: var(--color-fg-muted); font-size: var(--text-micro); }
 
 .bv-pager { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) 0; }

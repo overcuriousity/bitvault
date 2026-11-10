@@ -27,7 +27,7 @@
   <a class="oc-topbar__logo" href="/" aria-label="{{ cfg.app.title }} home">{{ self.logo()|safe }}<span>{{ cfg.app.title }}</span></a>
   <nav class="oc-topnav" aria-label="Main">
     {%- for item in self.nav() %}
-    <a href="{{ item.href }}"{% if item.current %} aria-current="page"{% endif %}>{{ self.icon(item.icon)|safe }}<span>{{ item.label }}</span></a>
+    <a href="{{ item.href }}"{% if item.current %} aria-current="page"{% endif %}>{{ item.label }}</a>
     {%- endfor %}
   </nav>
   <div class="oc-topbar__end">

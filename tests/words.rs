@@ -28,6 +28,57 @@ fn input_with_spaces_mixed_case_and_hyphens_is_accepted() {
 }
 
 #[test]
+fn runs_of_spaces_and_hyphens_count_as_one_separator() {
+    let full = words::parse("happy-apple-banana").unwrap();
+    assert_eq!(words::parse("happy   apple \t banana").unwrap(), full);
+    assert_eq!(words::parse("--happy -- apple- -banana-").unwrap(), full);
+}
+
+#[test]
+fn words_typed_without_separators_are_read_when_only_one_reading_fits() {
+    let full = words::parse("happy-apple-banana").unwrap();
+    assert_eq!(words::parse("happyapplebanana").unwrap(), full);
+    assert_eq!(words::parse("HappyAppleBanana").unwrap(), full);
+    assert_eq!(words::parse("happy applebanana").unwrap(), full);
+    assert_eq!(words::parse("happyapple-banana").unwrap(), full);
+    // A part on its own may still be a prefix.
+    assert_eq!(words::parse("happ applebanana").unwrap(), full);
+    assert_eq!(words::parse("actaddzoo").unwrap(), words::parse("act-add-zoo").unwrap());
+}
+
+#[test]
+fn joined_words_round_trip_unless_they_read_two_ways() {
+    let mut ambiguous = 0;
+    for _ in 0..10_000 {
+        let id = PasteId::random();
+        match words::parse(&id.words().replace('-', "")) {
+            Ok(found) => assert_eq!(found, id),
+            Err(Error::Invalid(m)) if m.contains("more than one") => ambiguous += 1,
+            other => panic!("{} gave {other:?}", id.words()),
+        }
+    }
+    // About 1 in 20,000 triples reads two ways.
+    assert!(ambiguous < 10, "{ambiguous}");
+}
+
+#[test]
+fn joined_words_that_read_two_ways_ask_for_separators() {
+    // "quality sea then" or "quality seat hen".
+    match words::parse("qualityseathen") {
+        Err(Error::Invalid(m)) => assert!(m.contains("Put spaces or hyphens between the words"), "{m}"),
+        other => panic!("unexpected {other:?}"),
+    }
+    assert_eq!(words::parse("quality seat hen").unwrap(), words::parse("quality-seat-hen").unwrap());
+}
+
+#[test]
+fn joined_letters_that_are_not_three_words_are_rejected() {
+    for input in ["happyapple", "happyapplebananaable", "happyaplebanana", "xyzxyzxyz", "happy"] {
+        assert!(matches!(words::parse(input), Err(Error::Invalid(_))), "{input}");
+    }
+}
+
+#[test]
 fn an_unknown_word_is_named_in_the_error() {
     match words::parse("happy-aple-banana") {
         Err(Error::Invalid(m)) => assert_eq!(m, "\"aple\" is not one of the paste words. Check the spelling."),
