@@ -29,6 +29,14 @@ export function sizeProblem(files, privacy, maxFileMb, maxSecretMb) {
   return null;
 }
 
+// The options summary, the same line the server renders: "Unlisted · 24 hours".
+export function summaryText(privacy, expiry, burn) {
+  const parts = [privacy, expiry].filter(Boolean);
+  const reads = Number(burn);
+  if (Number.isInteger(reads) && reads > 0) parts.push(reads === 1 ? "Burns after 1 read" : `Burns after ${reads} reads`);
+  return parts.join(" · ");
+}
+
 export function progressText(loaded, total) {
   const percent = total > 0 ? Math.min(100, Math.max(0, Math.floor((loaded * 100) / total))) : 0;
   return `Uploading… ${percent}%`;
@@ -87,6 +95,21 @@ function bindPrivacy(form) {
     form.dataset.privacy = select.value;
   };
   select.addEventListener("change", sync);
+  sync();
+}
+
+function bindSummary(form) {
+  const out = form.querySelector("#options-summary");
+  if (!out) return;
+  const chosen = (id) => {
+    const select = form.querySelector(`#${id}`);
+    return select?.options[select.selectedIndex]?.textContent ?? "";
+  };
+  const sync = () => {
+    out.textContent = summaryText(chosen("privacy"), chosen("expiry"), form.querySelector("#burn")?.value);
+  };
+  form.addEventListener("change", sync);
+  form.addEventListener("input", sync);
   sync();
 }
 
@@ -269,7 +292,12 @@ function bindSubmit(form, box) {
   const button = form.querySelector("button[type=submit]");
   let running = false;
   let busy = null;
-  const fail = (message) => showNotice(region, "danger", message);
+  const options = form.querySelector("#options");
+  // A refusal is often about an option (a missing password, a level), so they open with it.
+  const fail = (message) => {
+    if (options) options.open = true;
+    showNotice(region, "danger", message);
+  };
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (running || !button) return;
@@ -339,6 +367,7 @@ if (typeof document !== "undefined") {
     // The page ships Secret disabled, so a browser without this script cannot post plaintext as secret.
     form.querySelector('#privacy option[value="secret"]')?.removeAttribute("disabled");
     bindPrivacy(form);
+    bindSummary(form);
     labelGroups(form.querySelector("#privacy"));
     bindDropZone(form);
     bindPaste(form);

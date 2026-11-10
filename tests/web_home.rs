@@ -278,10 +278,10 @@ async fn one_box_carries_the_word_list_and_says_what_it_does() {
 }
 
 #[tokio::test]
-async fn the_options_show_before_the_closed_file_field() {
+async fn the_options_are_open_as_rendered_with_their_summary_before_the_closed_file_field() {
     let html = body_text(app().await.get("/").await).await;
-    assert!(!html.contains("<details class=\"bv-options"), "the options are not folded away");
-    let options = html.find("<div class=\"bv-options\">").unwrap();
+    // Open, so a browser without scripts always shows them; box.js folds them while not needed.
+    let options = html.find("<details class=\"bv-options\" id=\"options\" open>").expect("open options");
     let attach = html.find("<details class=\"bv-attach\" id=\"attach\">").expect("closed file field");
     let file = html.find("type=\"file\"").unwrap();
     assert!(html.find("name=\"content\"").unwrap() < options);
@@ -291,7 +291,14 @@ async fn the_options_show_before_the_closed_file_field() {
         let at = html.find(name).unwrap();
         assert!(options < at && at < attach, "{name} sits with the options");
     }
-    assert!(attach < file && file < html.find("</details>").unwrap());
+    assert!(attach < file && file < html.rfind("</details>").unwrap());
+    assert!(
+        html.contains("<span class=\"bv-options__summary\" id=\"options-summary\">Unlisted · 24 hours</span>"),
+        "{html}"
+    );
+    let burning = app_with("[app]\ndefault_burn_after = 3\ndefault_privacy = \"public\"\n").await;
+    let html = body_text(burning.get("/").await).await;
+    assert!(html.contains(">Public · 24 hours · Burns after 3 reads</span>"), "{html}");
 }
 
 #[tokio::test]

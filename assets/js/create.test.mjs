@@ -8,6 +8,7 @@ import {
   pastedFiles,
   progressText,
   sizeProblem,
+  summaryText,
   tooLarge,
 } from "./create.js";
 
@@ -64,6 +65,14 @@ test("a secret file over its own limit is refused, and the total still counts", 
   assert.equal(sizeProblem([{ size: 3 * MB }], "secret", 2048, 2), "Secret files can be at most 2 MB.");
   assert.equal(sizeProblem([{ size: 3 * MB }], "unlisted", 2048, 2), null);
   assert.equal(sizeProblem([{ size: 2 * MB }, { size: 2 * MB }], "secret", 3, 2), "Files can be at most 3 MB together.");
+});
+
+test("the options summary names privacy, expiry and a read limit", () => {
+  assert.equal(summaryText("Unlisted", "24 hours", "0"), "Unlisted · 24 hours");
+  assert.equal(summaryText("Public", "Never", "1"), "Public · Never · Burns after 1 read");
+  assert.equal(summaryText("Private", "1 week", "10"), "Private · 1 week · Burns after 10 reads");
+  assert.equal(summaryText("Secret", "1 hour", ""), "Secret · 1 hour");
+  assert.equal(summaryText("Secret", "1 hour", "-2"), "Secret · 1 hour");
 });
 
 test("upload progress is a whole percentage that never passes 100", () => {

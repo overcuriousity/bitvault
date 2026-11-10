@@ -3,7 +3,7 @@
 <p>{{ cfg_title }} keeps text, links and files under an address of three words, such as apple-banana-cherry. Share the words, the full address or its QR code, and choose how private the paste is and how long it lasts.</p>
 
 <h2 id="create">Create a paste</h2>
-<p>Write or paste your text, choose a privacy level and an expiry under it, add files under Attach files if you want (or drop or paste them onto the form), then select Create paste. You are taken to the new paste, whose three words are its address.</p>
+<p>Write or paste your text, choose a privacy level and an expiry under Options (they open by themselves once the box holds text), add files under Attach files if you want (or drop or paste them onto the form), then select Create paste. You are taken to the new paste, whose three words are its address.</p>
 <p>A paste can be text, files or both. Files can add up to {{ max_file_mb }} MB per paste{% if self.offers("secret") %}, and each file of a secret paste can be at most {{ max_secret_file_mb }} MB{% endif %}.</p>
 {%- if self.offers("public") || self.offers("unlisted") %}
 <p>When a public or unlisted paste is a single web address and nothing else, it becomes a short link: opening the paste takes you straight to that address.</p>

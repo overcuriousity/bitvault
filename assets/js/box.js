@@ -126,10 +126,19 @@ export function bindBox(form) {
   // once what is typed can no longer be three words. It stays grown until it is emptied, so it
   // never shrinks under someone editing text.
   let grown = !form.hasAttribute("data-compact");
+  // The options follow: folded to their summary while the box is an address field, open once it
+  // holds text or files. Only a change of need moves them, so a fold or unfold by hand holds.
+  const options = form.querySelector("#options");
+  let needed = null;
   const size = () => {
     if (!box.value.trim()) grown = false;
     else if (!grown && !addressLike(box.value, words)) grown = true;
     form.toggleAttribute("data-compact", !grown);
+    const need = grown || hasFiles();
+    if (options && need !== needed) {
+      needed = need;
+      options.open = need;
+    }
   };
 
   function render() {

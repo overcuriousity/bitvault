@@ -15,8 +15,13 @@
     {#- box.js fills this with the paste words that fit what is being typed. #}
     <div class="bv-chips" id="box-chips" hidden></div>
   </div>
-  {#- Secret starts disabled: without create.js it would post the plaintext. create.js enables it. #}
-  <div class="bv-options">
+  {#- Open as rendered, so without scripts the options are always in view. box.js folds them to their
+      summary while the box is empty or holds words, and opens them once it holds text or files.
+      Secret starts disabled: without create.js it would post the plaintext. create.js enables it. #}
+  <details class="bv-options" id="options" open>
+  <summary><span class="bv-options__title">Options</span> <span class="bv-options__summary" id="options-summary">{{ summary }}</span></summary>
+  <div class="bv-options__body">
+  <div class="bv-options__grid">
     <div class="oc-field">
       {% call help::label("privacy", "Privacy", "privacy", help_icon) %}{% endcall %}
       <select id="privacy" name="privacy" data-oc-menu>
@@ -75,6 +80,8 @@
     <a class="oc-btn oc-btn--icon oc-btn--row bv-help" href="/guide#editing" aria-label="Help: Allow editing" data-oc-tip="Help: Allow editing">{{ help_icon|safe }}</a>
   </div>
   {%- endif %}
+  </div>
+  </details>
   {#- Closed until wanted; create.js opens it when files are dropped or pasted. #}
   <details class="bv-attach" id="attach">
     <summary>Attach files</summary>

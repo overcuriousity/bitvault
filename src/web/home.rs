@@ -63,6 +63,8 @@ struct Home {
     max_secret_mb: u64,
     words_src: String,
     help_icon: String,
+    /// The options' one-line summary as rendered; `create.js` keeps it in sync.
+    summary: String,
     create_icon: String,
     open_icon: String,
     deleted: Option<String>,
@@ -77,6 +79,18 @@ const PRIVACY_GROUPS: [(&str, &[Privacy]); 3] = [
 fn sentence_case(s: &str) -> String {
     let mut chars = s.chars();
     chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
+/// The same line `create.js` builds from the live choices, e.g. "Unlisted · 24 hours".
+fn options_summary(privacy: &str, expiry: &str, burn: u32) -> String {
+    let mut parts = vec![privacy.to_owned(), expiry.to_owned()];
+    parts.retain(|p| !p.is_empty());
+    match burn {
+        0 => {}
+        1 => parts.push("Burns after 1 read".to_owned()),
+        n => parts.push(format!("Burns after {n} reads")),
+    }
+    parts.join(" · ")
 }
 
 #[derive(Deserialize)]
@@ -114,6 +128,9 @@ async fn index(
         .filter(|e| expiry::allowed(app, *e))
         .map(|e| (e.as_str(), sentence_case(e.label()), e.as_str() == app.default_expiry))
         .collect();
+    let privacy = privacy_groups.iter().flat_map(|(_, o)| o).find(|o| o.2).map_or("", |o| o.1);
+    let expiry_label = expiry_options.iter().find(|o| o.2).map_or("", |o| o.1.as_str());
+    let summary = options_summary(privacy, expiry_label, app.default_burn_after);
     let home = Home {
         privacy_groups,
         expiry_options,
@@ -126,6 +143,7 @@ async fn index(
         max_secret_mb: app.max_secret_file_mb,
         words_src: Assets::url("bip39-english.txt"),
         help_icon: super::icon("circle-question-mark", super::IconSize::Row),
+        summary,
         create_icon: super::icon("plus", super::IconSize::Tool),
         open_icon: super::icon("arrow-right", super::IconSize::Tool),
         deleted: q.notice().map(|n| super::escape_text(&n)),

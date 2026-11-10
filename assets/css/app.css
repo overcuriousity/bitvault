@@ -76,7 +76,7 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
   .oc-topbar__logo { min-height: var(--target-touch); }
   .oc-field select:not(.oc-select-native) { min-height: var(--target-touch); font-size: 16px; }
   .bv-check { min-height: var(--target-touch); }
-  .bv-attach > summary { padding-block: var(--space-3); }
+  .bv-create .bv-attach > summary, .bv-create .bv-options > summary { padding-block: var(--space-3); }
   .bv-chip { min-height: var(--target-touch); }
   .bv-settings summary { padding-block: var(--space-3); }
   .bv-check input { width: 1.5rem; height: 1.5rem; }
@@ -103,7 +103,12 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-chips[hidden] { display: none; }
 .bv-chip { height: auto; min-height: 1.75rem; padding: 0 var(--space-2); font-family: var(--font-mono); font-size: var(--text-dense); }
 .bv-chip:first-child { border-color: var(--color-accent); }
-.bv-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: var(--space-3); align-items: end; }
+.bv-options > summary { width: fit-content; padding-block: var(--space-1); font-weight: 500; color: var(--color-fg-secondary); cursor: pointer; }
+.bv-options__summary { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
+.bv-options__body { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); }
+.bv-options[open] > .bv-options__body { animation: bv-reveal var(--motion-panel) var(--ease); }
+.bv-options__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: var(--space-3); align-items: end; }
+@keyframes bv-reveal { from { opacity: 0; translate: 0 calc(-1 * var(--space-2)); } }
 .bv-attach > summary { width: fit-content; padding-block: var(--space-1); font-weight: 500; color: var(--color-fg-secondary); cursor: pointer; }
 .bv-attach > .bv-files { margin-top: var(--space-2); }
 .bv-attach__hint { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
