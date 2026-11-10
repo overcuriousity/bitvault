@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO pastes (id, kind, privacy, content, syntax, editable, wrapped_key,\n                                 verifier_hash, burn_after_reads, created_at, expires_at)\n             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n             ON CONFLICT (id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "c305622aa846b6bb402d4fb468c66e0ee9eec277fe46918f4916a4fba234ac0c"
+}

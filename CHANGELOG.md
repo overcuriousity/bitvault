@@ -18,12 +18,16 @@ This is a rewrite and a fresh start. There is no compatibility with 1.6.0: no da
 - BitVault must be served over https from one public host: a non-loopback `bind` needs an https `public_url`, and requests for any other host name are refused. `insecure_http = true` opts out for private networks (any host name, no HSTS, no Secret pastes); see the README.
 - `editable` now means the "Allow editing" checkbox is shown and pre-checked on new pastes, and it sets the API default.
 - Text is limited to 1 MiB per paste.
+- Read-only pastes take no password: anyone with the address reads them, nobody changes or deletes them, and only the administrator can remove one.
+- A private or secret paste asks for its password once. The opened page deletes it (and changes a private one) without asking again.
 - The expiries 2, 4, 8 and 16 years exist again, but only as opt-in through `expiry_choices`.
 
 ### Added
 
 - Secret file encryption: files in a Secret paste are encrypted in the browser.
 - Three-word canonical URLs: every paste lives at `/{three-words}`.
+- A secret paste's page shows its ciphertext and the salt, iteration count, IV, associated data and tag that decrypt it in another tool.
+- The privacy menu groups the levels by encryption: not encrypted, encrypted on the server, end-to-end encrypted.
 - A generated OpenAPI document at `/api/v1/openapi.json`, and an API reference at `/docs` rendered from it on the server, with a `curl` line for each call.
 - Per-address rate limits: creates 30 per minute (burst 10), other API calls 120 (burst 30), wrong passwords (the uploader password included) 10 (burst 5), and lookups of words that match no paste 20 (burst 10), so unlisted pastes cannot be enumerated.
 - After creating on the web you see the new paste with its words, address, Copy link, Share, QR code and delete; creating on the home page shows upload progress and you can paste images from the clipboard.

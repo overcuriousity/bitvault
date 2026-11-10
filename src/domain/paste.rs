@@ -64,10 +64,13 @@ impl fmt::Debug for Access {
     }
 }
 
-/// How a deleter proves the right to delete.
+/// How a deleter proves the right to delete. A read-only paste takes no proof: only the admin
+/// deletes it.
 pub enum DeleteAuth {
     None,
     Password(String),
+    /// The grant from unlocking a private paste.
+    Grant(String),
     Verifier([u8; 32]),
     Admin,
 }
@@ -77,6 +80,7 @@ impl fmt::Debug for DeleteAuth {
         f.write_str(match self {
             Self::None => "None",
             Self::Password(_) => "Password(..)",
+            Self::Grant(_) => "Grant(..)",
             Self::Verifier(_) => "Verifier(..)",
             Self::Admin => "Admin",
         })
@@ -94,7 +98,6 @@ pub struct Paste {
     pub content_len: u64,
     pub syntax: Option<String>,
     pub editable: bool,
-    pub password_hash: Option<String>,
     pub wrapped_key: Option<Vec<u8>>,
     /// `verifier_salt ‖ SHA-256(verifier)`.
     pub verifier_hash: Option<Vec<u8>>,
@@ -119,7 +122,6 @@ impl fmt::Debug for Paste {
             .field("content_len", &self.content_len)
             .field("syntax", &self.syntax)
             .field("editable", &self.editable)
-            .field("password_hash", &redact(self.password_hash.is_some()))
             .field("wrapped_key", &redact(self.wrapped_key.is_some()))
             .field("verifier_hash", &redact(self.verifier_hash.is_some()))
             .field("burn_after_reads", &self.burn_after_reads)
@@ -178,7 +180,6 @@ struct Row {
     content_len: i64,
     syntax: Option<String>,
     editable: bool,
-    password_hash: Option<String>,
     wrapped_key: Option<Vec<u8>>,
     verifier_hash: Option<Vec<u8>>,
     burn_after_reads: i64,
@@ -208,7 +209,6 @@ impl TryFrom<Row> for Paste {
             verifier_salt,
             syntax: r.syntax,
             editable: r.editable,
-            password_hash: r.password_hash,
             wrapped_key: r.wrapped_key,
             verifier_hash: r.verifier_hash,
             last_read_at: r.last_read_at,
@@ -228,7 +228,6 @@ struct ReadRow {
     content: Vec<u8>,
     syntax: Option<String>,
     editable: bool,
-    password_hash: Option<String>,
     wrapped_key: Option<Vec<u8>>,
     verifier_hash: Option<Vec<u8>>,
     burn_after_reads: i64,
@@ -248,7 +247,6 @@ impl ReadRow {
             content_len: i64::try_from(self.content.len()).map_err(Error::internal)?,
             syntax: self.syntax,
             editable: self.editable,
-            password_hash: self.password_hash,
             wrapped_key: self.wrapped_key,
             verifier_hash: self.verifier_hash,
             burn_after_reads: self.burn_after_reads,
@@ -320,42 +318,37 @@ fn require_content(content: &str, has_files: bool) -> Result<(), Error> {
     Ok(())
 }
 
-fn require_password(privacy: Privacy, password: Option<&str>) -> Result<&str, Error> {
+fn require_password(password: Option<&str>) -> Result<&str, Error> {
     match password {
         Some(pw) if !pw.is_empty() => Ok(pw),
-        _ => {
-            let level = if privacy == Privacy::Readonly { "read-only" } else { "private" };
-            Err(Error::Invalid(format!("Enter a password for a {level} paste.")))
-        }
+        _ => Err(Error::Invalid("Enter a password for a private paste.".into())),
     }
 }
 
 struct Stored {
     kind: Kind,
     content: Vec<u8>,
-    password_hash: Option<String>,
     wrapped_key: Option<Vec<u8>>,
     verifier_hash: Option<Vec<u8>>,
 }
 
 /// `dek` is the staging's data key when files were encrypted for this paste.
 async fn prepare(new: NewPaste, has_files: bool, dek: Option<&Dek>) -> Result<Stored, Error> {
-    let none = |kind, content| Stored { kind, content, password_hash: None, wrapped_key: None, verifier_hash: None };
+    let none = |kind, content| Stored { kind, content, wrapped_key: None, verifier_hash: None };
     match new.privacy {
         Privacy::Public | Privacy::Unlisted => {
             require_content(&new.content, has_files)?;
             let (kind, content) = plain_content(new.privacy, new.content, has_files);
             Ok(none(kind, content))
         }
+        // Read-only is kept as written: never a redirect, never changed.
         Privacy::Readonly => {
             require_content(&new.content, has_files)?;
-            let pw = require_password(new.privacy, new.password.as_deref())?;
-            let hash = crypto::hash_password(pw).await?;
-            Ok(Stored { password_hash: Some(hash), ..none(Kind::Text, new.content.into_bytes()) })
+            Ok(none(Kind::Text, new.content.into_bytes()))
         }
         Privacy::Private => {
             require_content(&new.content, has_files)?;
-            let pw = require_password(new.privacy, new.password.as_deref())?;
+            let pw = require_password(new.password.as_deref())?;
             let fresh;
             let dek = match dek {
                 Some(dek) => dek,
@@ -426,7 +419,7 @@ pub async fn create(st: &AppState, new: NewPaste, staging: Option<Staging>, now:
     }
     let privacy = new.privacy;
     let syntax = new.syntax.clone();
-    let editable = new.editable && privacy != Privacy::Secret;
+    let editable = new.editable && !matches!(privacy, Privacy::Secret | Privacy::Readonly);
     let burn = i64::from(new.burn_after_reads);
     let expires_at = new.expiry.seconds().map(|s| now.saturating_add(s));
     let mut staging = staging.filter(|s| !s.files().is_empty());
@@ -440,9 +433,9 @@ pub async fn create(st: &AppState, new: NewPaste, staging: Option<Staging>, now:
         let db = db_id(id);
         let mut tx = st.pool.begin().await?;
         let inserted = sqlx::query!(
-            "INSERT INTO pastes (id, kind, privacy, content, syntax, editable, password_hash, wrapped_key,
+            "INSERT INTO pastes (id, kind, privacy, content, syntax, editable, wrapped_key,
                                  verifier_hash, burn_after_reads, created_at, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (id) DO NOTHING",
             db,
             kind,
@@ -450,7 +443,6 @@ pub async fn create(st: &AppState, new: NewPaste, staging: Option<Staging>, now:
             s.content,
             syntax,
             editable,
-            s.password_hash,
             s.wrapped_key,
             s.verifier_hash,
             burn,
@@ -514,7 +506,7 @@ pub async fn meta(st: &AppState, id: PasteId, now: i64) -> Result<Paste, Error> 
     let row = sqlx::query_as!(
         Row,
         r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", length(content) AS "content_len!: i64",
-                  syntax AS "syntax?", editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
+                  syntax AS "syntax?", editable AS "editable!: bool", wrapped_key AS "wrapped_key?",
                   verifier_hash AS "verifier_hash?", burn_after_reads AS "burn_after_reads!",
                   read_count AS "read_count!", last_read_at AS "last_read_at?", burned_at AS "burned_at?",
                   created_at AS "created_at!", expires_at AS "expires_at?"
@@ -537,7 +529,7 @@ pub async fn creator_view(st: &AppState, id: PasteId, now: i64) -> Result<(Paste
     let row = sqlx::query_as!(
         ReadRow,
         r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", content AS "content!",
-                  syntax AS "syntax?", editable AS "editable!: bool", password_hash AS "password_hash?",
+                  syntax AS "syntax?", editable AS "editable!: bool",
                   wrapped_key AS "wrapped_key?", verifier_hash AS "verifier_hash?",
                   burn_after_reads AS "burn_after_reads!", read_count AS "read_count!",
                   last_read_at AS "last_read_at?", burned_at AS "burned_at?", created_at AS "created_at!",
@@ -567,7 +559,7 @@ pub async fn meta_for_grant(st: &AppState, id: PasteId, now: i64) -> Result<Past
     let row = sqlx::query_as!(
         Row,
         r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", length(content) AS "content_len!: i64",
-                  syntax AS "syntax?", editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
+                  syntax AS "syntax?", editable AS "editable!: bool", wrapped_key AS "wrapped_key?",
                   verifier_hash AS "verifier_hash?", burn_after_reads AS "burn_after_reads!",
                   read_count AS "read_count!", last_read_at AS "last_read_at?", burned_at AS "burned_at?",
                   created_at AS "created_at!", expires_at AS "expires_at?"
@@ -609,8 +601,8 @@ async fn count_read(st: &AppState, id: PasteId, now: i64) -> Result<Option<(Past
                   burned_at = CASE WHEN burn_after_reads > 0 AND read_count + 1 >= burn_after_reads THEN ? END
            WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
            RETURNING id AS "id!", kind AS "kind!", privacy AS "privacy!", content AS "content!",
-                     syntax AS "syntax?", editable AS "editable!: bool", password_hash AS "password_hash?",
-                     wrapped_key AS "wrapped_key?", verifier_hash AS "verifier_hash?",
+                     syntax AS "syntax?", editable AS "editable!: bool",
+                  wrapped_key AS "wrapped_key?", verifier_hash AS "verifier_hash?",
                      burn_after_reads AS "burn_after_reads!", read_count AS "read_count!",
                      last_read_at AS "last_read_at?", burned_at AS "burned_at?", created_at AS "created_at!",
                      expires_at AS "expires_at?""#,
@@ -640,13 +632,6 @@ async fn limited<T>(st: &AppState, ip: IpAddr, check: impl Future<Output = Resul
 async fn unlock(st: &AppState, p: &Paste, password: &str, ip: IpAddr) -> Result<Dek, Error> {
     let wrapped = p.wrapped_key.as_deref().ok_or_else(|| Error::internal("a private paste has no wrapped key"))?;
     limited(st, ip, crypto::unwrap_dek(password, wrapped)).await
-}
-
-/// Checks a read-only paste's password; a wrong one counts as a failed attempt.
-async fn check_readonly(st: &AppState, p: &Paste, password: &str, ip: IpAddr) -> Result<(), Error> {
-    let phc = p.password_hash.as_deref().ok_or_else(|| Error::internal("a read-only paste has no password hash"))?;
-    limited(st, ip, async { if crypto::verify_password(password, phc).await { Ok(()) } else { Err(Error::Forbidden) } })
-        .await
 }
 
 /// Checks a secret paste's delete verifier; a wrong one counts as a failed attempt.
@@ -728,12 +713,14 @@ pub async fn files_access(
     }
 }
 
-/// Editing needs the config switch and the paste's own flag, and is never allowed for secret.
+/// Editing needs the config switch and the paste's own flag, and is never allowed for secret
+/// and read-only pastes.
 pub fn editable(st: &AppState, p: &Paste) -> bool {
-    st.cfg.app.editable && p.editable && p.privacy != Privacy::Secret
+    st.cfg.app.editable && p.editable && !matches!(p.privacy, Privacy::Secret | Privacy::Readonly)
 }
 
-/// Replaces the content and syntax of an editable paste. Secret pastes are never editable.
+/// Replaces the content and syntax of an editable paste. Secret and read-only pastes are never
+/// editable.
 pub async fn edit(
     st: &AppState,
     id: PasteId,
@@ -754,15 +741,16 @@ pub async fn edit(
     require_content(&content, has_files)?;
     let (kind, stored) = match (p.privacy, access) {
         (Privacy::Public | Privacy::Unlisted, _) => plain_content(p.privacy, content, has_files),
-        (Privacy::Readonly, Access::Password(pw)) => {
-            check_readonly(st, &p, &pw, ip).await?;
-            (Kind::Text, content.into_bytes())
-        }
         (Privacy::Private, Access::Password(pw)) => {
             let dek = match unlock(st, &p, &pw, ip).await {
                 Err(Error::WrongPassword) => return Err(Error::Forbidden),
                 other => other?,
             };
+            (Kind::Text, crypto::seal(&dek, content.as_bytes()))
+        }
+        // Whoever opened a private paste may change it: the grant from the unlock carries its key.
+        (Privacy::Private, Access::Grant(token)) => {
+            let dek = grant::check(&st.grant_key, &token, id, now)?.ok_or(Error::GrantExpired)?;
             (Kind::Text, crypto::seal(&dek, content.as_bytes()))
         }
         _ => return Err(Error::Forbidden),
@@ -797,7 +785,10 @@ pub async fn delete(st: &AppState, id: PasteId, auth: DeleteAuth, ip: IpAddr, no
     let p = meta(st, id, now).await?;
     match (p.privacy, auth) {
         (_, DeleteAuth::Admin) | (Privacy::Public | Privacy::Unlisted, _) => {}
-        (Privacy::Readonly, DeleteAuth::Password(pw)) => check_readonly(st, &p, &pw, ip).await?,
+        // Whoever opened a private paste may delete it: the grant from the unlock carries its key.
+        (Privacy::Private, DeleteAuth::Grant(token)) => {
+            grant::check(&st.grant_key, &token, id, now)?.ok_or(Error::GrantExpired)?;
+        }
         (Privacy::Private, DeleteAuth::Password(pw)) => match unlock(st, &p, &pw, ip).await {
             Err(Error::WrongPassword) => return Err(Error::Forbidden),
             other => other.map(|_| ())?,
@@ -836,7 +827,7 @@ pub async fn list_public(st: &AppState, page: u32, now: i64) -> Result<Vec<Paste
     let rows = sqlx::query_as!(
         Row,
         r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", length(content) AS "content_len!: i64",
-                  syntax AS "syntax?", editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
+                  syntax AS "syntax?", editable AS "editable!: bool", wrapped_key AS "wrapped_key?",
                   verifier_hash AS "verifier_hash?", burn_after_reads AS "burn_after_reads!",
                   read_count AS "read_count!", last_read_at AS "last_read_at?", burned_at AS "burned_at?",
                   created_at AS "created_at!", expires_at AS "expires_at?"
@@ -860,7 +851,7 @@ pub async fn list_all(st: &AppState, page: u32, now: i64) -> Result<Vec<Paste>, 
     let rows = sqlx::query_as!(
         Row,
         r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", length(content) AS "content_len!: i64",
-                  syntax AS "syntax?", editable AS "editable!: bool", password_hash AS "password_hash?", wrapped_key AS "wrapped_key?",
+                  syntax AS "syntax?", editable AS "editable!: bool", wrapped_key AS "wrapped_key?",
                   verifier_hash AS "verifier_hash?", burn_after_reads AS "burn_after_reads!",
                   read_count AS "read_count!", last_read_at AS "last_read_at?", burned_at AS "burned_at?",
                   created_at AS "created_at!", expires_at AS "expires_at?"

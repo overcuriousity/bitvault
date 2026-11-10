@@ -222,6 +222,11 @@ html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
 .bv-preview img { max-width: 100%; height: auto; border-radius: var(--radius-md); }
 .bv-preview figcaption { color: var(--color-fg-muted); font-size: var(--text-micro); }
 .bv-secret-open { margin-top: var(--space-2); }
+.bv-cipher { display: flex; flex-direction: column; gap: var(--space-3); }
+.bv-cipher[hidden] { display: none; }
+.bv-cipher__text { max-height: 16rem; overflow-y: auto; color: var(--color-fg-secondary); }
+.bv-cipher__how > summary { cursor: pointer; color: var(--color-fg-secondary); }
+.bv-cipher__value { overflow-wrap: anywhere; }
 .bv-secret-open[hidden], .bv-delete[hidden] { display: none; }
 
 /* create.js turns the file field into a drop zone. */

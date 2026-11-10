@@ -193,20 +193,22 @@ async fn an_open_prefix_of_each_word_finds_the_paste() {
 }
 
 #[tokio::test]
-async fn privacy_levels_are_grouped_by_how_they_are_protected() {
+async fn privacy_levels_are_grouped_by_how_they_are_encrypted() {
     let html = body_text(app().await.get("/").await).await;
-    let groups: Vec<usize> = ["No password", "Password", "Encrypted in your browser"]
+    let groups: Vec<usize> = ["Not encrypted", "Encrypted on the server", "End-to-end encrypted"]
         .iter()
         .map(|g| html.find(&format!("<optgroup label=\"{g}\">")).unwrap_or_else(|| panic!("{g}")))
         .collect();
     assert!(groups.windows(2).all(|w| w[0] < w[1]));
     let at = |v: &str| html.find(&format!("value=\"{v}\"")).unwrap();
-    assert!(groups[0] < at("public") && at("unlisted") < groups[1]);
-    assert!(groups[1] < at("readonly") && at("private") < groups[2]);
+    assert!(groups[0] < at("public") && at("unlisted") < at("readonly") && at("readonly") < groups[1]);
+    assert!(groups[1] < at("private") && at("private") < groups[2]);
     assert!(groups[2] < at("secret"));
+    // Only a private paste asks for a password on the server's form.
+    assert!(html.contains("class=\"bv-password\" data-for=\"private\""), "{html}");
     let only = body_text(app_with("[app]\nprivacy_levels = [\"public\", \"unlisted\"]\n").await.get("/").await).await;
-    assert!(only.contains("<optgroup label=\"No password\">"));
-    assert!(!only.contains("<optgroup label=\"Password\">") && !only.contains("Encrypted in your browser"));
+    assert!(only.contains("<optgroup label=\"Not encrypted\">"));
+    assert!(!only.contains("Encrypted on the server") && !only.contains("End-to-end encrypted"));
 }
 
 #[tokio::test]

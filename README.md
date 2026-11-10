@@ -5,7 +5,7 @@
 A self-hosted pastebin, file drop and URL shortener. Every paste lives at three BIP39 words, such as `/happy-apple-banana`. One static binary, SQLite, no telemetry.
 
 - Text, files and short links, with syntax highlighting, QR codes and a REST API.
-- Privacy levels: public, unlisted, read-only, private (encrypted on the server) and secret (encrypted in your browser, so the server never sees the key).
+- Privacy levels: public, unlisted and read-only (not encrypted; read-only cannot be changed or deleted by its readers), private (encrypted on the server) and secret (encrypted in your browser, so the server never sees the key).
 - Expiry, burn after reading, optional editing and one optional admin.
 
 BitVault is a maintained fork of [Microbin](https://github.com/szabodanika/microbin). Version 2026.11.0 is a rewrite with no compatibility with 1.6.0 data, URLs, configuration or API; see the [changelog](CHANGELOG.md).

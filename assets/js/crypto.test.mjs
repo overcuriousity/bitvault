@@ -177,3 +177,27 @@ test("writes interop fixtures", { skip: existsSync(JS_FIXTURE) && process.env.BI
   mkdirSync(dir, { recursive: true });
   writeFileSync(JS_FIXTURE, `${JSON.stringify(fixture, null, 2)}\n`);
 });
+
+test("the parts the page lists decrypt a container with other tools", async () => {
+  const { describe } = await import("./crypto.js");
+  const { cipherFacts } = await import("./secret.js");
+  const { pbkdf2Sync, createDecipheriv } = await import("node:crypto");
+  const plain = new TextEncoder().encode(JSON.stringify({ text: "héllo, cipher", files: ["a.txt"] }));
+  const container = await seal("correct horse", plain);
+  const facts = cipherFacts(container);
+  // As another tool would: PBKDF2-HMAC-SHA256 to 64 bytes, the first 32 as the AES-256-GCM key.
+  const derived = pbkdf2Sync("correct horse", Buffer.from(facts.salt, "hex"), Number(facts.iterations), 64, "sha256");
+  const decipher = createDecipheriv("aes-256-gcm", derived.subarray(0, 32), Buffer.from(facts.iv, "hex"));
+  decipher.setAAD(Buffer.from(facts.aad, "hex"));
+  decipher.setAuthTag(Buffer.from(facts.tag, "hex"));
+  const out = Buffer.concat([decipher.update(Buffer.from(facts.ciphertext, "base64")), decipher.final()]);
+  assert.deepEqual(new Uint8Array(out), plain);
+  assert.equal(facts.iterations, "600000");
+  assert.equal(facts.aad.length, 66);
+
+  // More than one chunk has an IV and a tag per chunk, so it is not shown as one ciphertext.
+  const long = await seal("pw", new Uint8Array(65537));
+  assert.equal(describe(long), null);
+  assert.equal(cipherFacts(long), null);
+  assert.equal(cipherFacts(new Uint8Array(10)), null);
+});

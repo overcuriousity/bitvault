@@ -107,6 +107,27 @@ function parseHeader(container) {
   };
 }
 
+/**
+ * The parts of a container that another tool needs to decrypt it: PBKDF2-HMAC-SHA256 over the
+ * password with `salt` and `iterations` gives 64 bytes, whose first 32 are the AES-256-GCM key;
+ * `iv`, `aad` (the whole header) and `tag` go with `ciphertext`. Null for a container of more
+ * than one chunk, which has an IV and a tag per chunk.
+ */
+export function describe(container) {
+  const bytes = container instanceof Uint8Array ? container : new Uint8Array(container);
+  const { header, iterations, salt, prefix } = parseHeader(bytes);
+  const body = bytes.subarray(HEADER_LEN);
+  if (body.length > CT_CHUNK_LEN) return null;
+  return {
+    iterations,
+    salt,
+    iv: nonce(prefix, 0, true),
+    aad: header,
+    ciphertext: body.subarray(0, body.length - TAG_LEN),
+    tag: body.subarray(body.length - TAG_LEN),
+  };
+}
+
 // Opens a container. A failed tag (a wrong password, or altered bytes) throws `WrongPassword`.
 export async function open(password, container) {
   const bytes = container instanceof Uint8Array ? container : new Uint8Array(container);

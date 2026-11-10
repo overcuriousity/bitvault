@@ -113,7 +113,7 @@ fn privacy_and_kind_round_trip_and_report_their_rules() {
     assert!(Privacy::Public.listed() && !Privacy::Unlisted.listed());
     assert!(!Privacy::Public.needs_password() && !Privacy::Unlisted.needs_password());
     assert!(
-        Privacy::Readonly.needs_password() && Privacy::Private.needs_password() && Privacy::Secret.needs_password()
+        !Privacy::Readonly.needs_password() && Privacy::Private.needs_password() && Privacy::Secret.needs_password()
     );
     assert_eq!(Kind::parse("url"), Some(Kind::Url));
     assert_eq!(Kind::parse(Kind::Text.as_str()), Some(Kind::Text));

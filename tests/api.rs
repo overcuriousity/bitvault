@@ -297,14 +297,20 @@ async fn delete_follows_the_privacy_rules() {
     assert_eq!(delete(&app, &format!("/api/v1/pastes/{public}"), &[]).await.status(), StatusCode::NO_CONTENT);
     assert_eq!(get(&app, &format!("/api/v1/pastes/{public}"), &[]).await.status(), StatusCode::NOT_FOUND);
 
-    let readonly = create(&app, json!({"content": "x", "privacy": "readonly", "password": "pw"})).await;
+    // Read-only takes no password, and no password removes it.
+    let readonly = create(&app, json!({"content": "x", "privacy": "readonly"})).await;
     let uri = format!("/api/v1/pastes/{readonly}");
+    assert_eq!(delete(&app, &uri, &[("x-paste-password", "pw")]).await.status(), StatusCode::FORBIDDEN);
+    assert_eq!(get(&app, &uri, &[]).await.status(), StatusCode::OK);
+
+    let private = create(&app, json!({"content": "x", "privacy": "private", "password": "pw"})).await;
+    let uri = format!("/api/v1/pastes/{private}");
     let res = delete(&app, &uri, &[]).await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
     assert_eq!(error_code(res).await, "FORBIDDEN");
     assert_eq!(delete(&app, &uri, &[("x-paste-password", "wrong")]).await.status(), StatusCode::FORBIDDEN);
     assert_eq!(delete(&app, &uri, &[("x-paste-password", "pw")]).await.status(), StatusCode::NO_CONTENT);
-    assert_eq!(get(&app, &uri, &[]).await.status(), StatusCode::NOT_FOUND);
+    assert_eq!(get(&app, &uri, &[("x-paste-password", "pw")]).await.status(), StatusCode::NOT_FOUND);
 
     let container = crypto::seal_alg2_for_tests(SECRET_PASSWORD, &[9; 16], PBKDF2_ITERATIONS, br#"{"text":"s"}"#);
     let secret = paste::create(&app.st, secret_paste(container), None, domain::now()).await.unwrap().words();
@@ -376,13 +382,20 @@ async fn patch_edits_when_enabled() {
     assert_eq!(v["content"], "after");
     assert_eq!(v["syntax"], "rs");
 
-    let readonly =
-        create(&app, json!({"content": "before", "privacy": "readonly", "password": "pw", "editable": true})).await;
-    let uri = format!("/api/v1/pastes/{readonly}");
+    let private =
+        create(&app, json!({"content": "before", "privacy": "private", "password": "pw", "editable": true})).await;
+    let uri = format!("/api/v1/pastes/{private}");
     let res = send_json(&app, "PATCH", &uri, &json!({"content": "after"}), &[]).await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
     let res = send_json(&app, "PATCH", &uri, &json!({"content": "after"}), &[("x-paste-password", "pw")]).await;
     assert_eq!(res.status(), StatusCode::OK);
+
+    // A read-only paste is never changed, whatever it was created with.
+    let readonly = create(&app, json!({"content": "before", "privacy": "readonly", "editable": true})).await;
+    let uri = format!("/api/v1/pastes/{readonly}");
+    let res = send_json(&app, "PATCH", &uri, &json!({"content": "after"}), &[("x-paste-password", "pw")]).await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    assert_eq!(json_of(get(&app, &uri, &[]).await).await["content"], "before");
 
     let off = support::app().await;
     let words = create(&off, json!({"content": "before", "privacy": "public", "editable": true})).await;
@@ -499,9 +512,9 @@ async fn delete_reads_only_the_proof_for_the_paste_level() {
     let public = create(&app, json!({"content": "x", "privacy": "public"})).await;
     let res = delete(&app, &format!("/api/v1/pastes/{public}"), &[("x-paste-verifier", "not hex")]).await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
-    let readonly = create(&app, json!({"content": "x", "privacy": "readonly", "password": "pw"})).await;
+    let private = create(&app, json!({"content": "x", "privacy": "private", "password": "pw"})).await;
     let headers = [("x-paste-verifier", "abc"), ("x-paste-password", "pw")];
-    assert_eq!(delete(&app, &format!("/api/v1/pastes/{readonly}"), &headers).await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(delete(&app, &format!("/api/v1/pastes/{private}"), &headers).await.status(), StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]

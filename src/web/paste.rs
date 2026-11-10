@@ -36,7 +36,6 @@ static HIGHLIGHT_SLOTS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Sem
 const HTML: &str = "text/html; charset=utf-8";
 const TEXT: &str = "text/plain; charset=utf-8";
 const OCTETS: &str = "application/octet-stream";
-const PASSWORD_MISMATCH: &str = "That password does not open this paste. Check it and try again.";
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -53,22 +52,32 @@ pub fn edit_routes() -> Router<AppState> {
     Router::new().route("/{words}/edit", post(edit))
 }
 
-/// How a page's delete form proves the right to delete.
+/// A page's delete form, and how it proves the right to delete. No level asks for a password
+/// here: whoever opened the paste has already given it.
 pub struct DeleteView {
     pub action: String,
-    /// A password input for read-only and private pastes, unless the admin is signed in.
-    pub password: bool,
-    /// Hex verifier salt of a secret paste; `secret.js` derives the verifier from it.
+    /// The grant from unlocking a private paste, sent along as the proof.
+    pub grant: Option<String>,
+    /// Hex verifier salt of a secret paste. The form stays hidden until `secret.js` has opened the
+    /// paste, and then derives the verifier from the password typed to open it.
     pub salt: String,
 }
 
 impl DeleteView {
-    fn new(p: &Paste, admin: bool) -> Self {
-        let secret = p.privacy == Privacy::Secret && !admin;
-        Self {
+    /// `None` when this viewer cannot delete: a read-only paste (only the admin deletes it) and
+    /// a private one that has not been unlocked.
+    fn new(p: &Paste, admin: bool, grant: Option<&str>) -> Option<Self> {
+        let view = |grant: Option<&str>, salt: String| Self {
             action: format!("/{}/delete", p.id.words()),
-            password: matches!(p.privacy, Privacy::Readonly | Privacy::Private) && !admin,
-            salt: if secret { p.verifier_salt.map(hex::encode).unwrap_or_default() } else { String::new() },
+            grant: grant.map(str::to_owned),
+            salt,
+        };
+        match p.privacy {
+            _ if admin => Some(view(None, String::new())),
+            Privacy::Public | Privacy::Unlisted => Some(view(None, String::new())),
+            Privacy::Readonly => None,
+            Privacy::Private => grant.map(|g| view(Some(g), String::new())),
+            Privacy::Secret => Some(view(None, p.verifier_salt.map(hex::encode).unwrap_or_default())),
         }
     }
 
@@ -127,15 +136,21 @@ struct PasteView {
     facts: Vec<Fact>,
     burned: bool,
     secret: bool,
+    /// The paste has a burn limit, so `secret.js` fetches its ciphertext only when asked to open it.
+    burns: bool,
+    /// The values `secret.js` lists for decrypting a secret paste elsewhere, as (label, part).
+    cipher_rows: [(&'static str, &'static str); 5],
     /// A secret paste over plain HTTP, where the browser cannot decrypt it: a notice instead of
     /// the open form, and no secret.js.
     https_only: bool,
     sealed: bool,
+    /// Where a sealed paste's password form posts.
+    unlock_action: String,
     raw_href: Option<String>,
     qr: Option<String>,
     translate: Option<String>,
     edit_href: Option<String>,
-    delete: DeleteView,
+    delete: Option<DeleteView>,
     /// Escaped or highlighted markup; `None` for a secret paste, which `secret.js` fills.
     content: Option<String>,
     highlighted: bool,
@@ -174,19 +189,9 @@ struct EditPage {
     words: String,
     content: String,
     syntax_options: Vec<(String, String, bool)>,
-    password: bool,
-    /// The notice is about the password, so that field takes the focus.
-    password_error: bool,
+    /// The grant from unlocking a private paste, which the save sends back as its proof.
+    grant: Option<String>,
     notice: Option<String>,
-}
-
-#[derive(Template)]
-#[template(path = "delete.html")]
-struct DeletePage {
-    words: String,
-    notice: String,
-    delete: DeleteView,
-    trash: String,
 }
 
 /// Highlighted markup when highlighting is on, the text is small enough and the syntax is known
@@ -299,13 +304,23 @@ fn paste_view(
         facts,
         burned,
         secret,
+        burns: p.burn_after_reads > 0,
+        cipher_rows: [
+            ("Iterations", "iterations"),
+            ("Salt", "salt"),
+            ("IV", "iv"),
+            ("Associated data", "aad"),
+            ("Tag", "tag"),
+        ],
         https_only: secret && st.dep.plain_http,
         sealed,
+        unlock_action: format!("/{words}/unlock"),
         raw_href,
         qr: if app.qr && !burned { qr::svg(&full).ok() } else { None },
         translate,
         edit_href,
-        delete: DeleteView::new(p, admin),
+        // A secret paste's delete needs secret.js, which plain HTTP does not load.
+        delete: DeleteView::new(p, admin, grant).filter(|d| !burned && !(d.secret() && st.dep.plain_http)),
         content,
         highlighted,
         copy_text,
@@ -575,23 +590,27 @@ fn editable(st: &AppState, p: &Paste) -> Result<(), Error> {
     if paste::editable(st, p) { Ok(()) } else { Err(Error::NotFound) }
 }
 
+/// What the edit form holds: the text and syntax, and a private paste's grant.
+struct Draft<'a> {
+    content: String,
+    syntax: Option<&'a str>,
+    grant: Option<String>,
+}
+
 fn edit_page(
     st: &AppState,
     admin: bool,
     p: &Paste,
-    content: String,
-    syntax: Option<&str>,
+    draft: Draft<'_>,
     notice: Option<String>,
     status: StatusCode,
 ) -> Result<Response, Error> {
     let words = p.id.words();
     let view = EditPage {
         words: words.clone(),
-        content,
-        syntax_options: super::home::syntax_options(&st.cfg.app, syntax),
-        password: matches!(p.privacy, Privacy::Readonly | Privacy::Private),
-        password_error: p.privacy.needs_password()
-            && matches!(status, StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS),
+        content: draft.content,
+        syntax_options: super::home::syntax_options(&st.cfg.app, draft.syntax),
+        grant: draft.grant,
         notice,
     };
     let body = render(&view)?;
@@ -615,8 +634,9 @@ async fn edit_form(
     let now = domain::now();
     let p = paste::meta(&st, id, now).await?;
     editable(&st, &p)?;
-    let access = match (p.privacy, q.g) {
-        (Privacy::Private, Some(g)) => Access::Grant(g),
+    let grant = q.g.filter(|_| p.privacy == Privacy::Private);
+    let access = match (p.privacy, &grant) {
+        (Privacy::Private, Some(g)) => Access::Grant(g.clone()),
         (Privacy::Private, None) => return Ok(Redirect::to(&format!("/{}", id.words())).into_response()),
         _ => Access::Anonymous,
     };
@@ -631,7 +651,8 @@ async fn edit_form(
         Body::Text(t) | Body::Url(t) => t,
         Body::Cipher(_) => return Err(Error::NotFound),
     };
-    edit_page(&st, admin, &opened.paste, content, opened.paste.syntax.as_deref(), None, StatusCode::OK)
+    let draft = Draft { content, syntax: opened.paste.syntax.as_deref(), grant };
+    edit_page(&st, admin, &opened.paste, draft, None, StatusCode::OK)
 }
 
 #[derive(Deserialize)]
@@ -640,11 +661,13 @@ struct EditForm {
     content: String,
     #[serde(default)]
     syntax: String,
+    /// The grant from unlocking a private paste.
     #[serde(default)]
-    password: String,
+    g: String,
 }
 
 /// `POST /{words}/edit`: saves and returns to the paste, or shows the form again with a notice.
+/// A private paste is saved with the grant its unlocked page handed to the form.
 async fn edit(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
@@ -657,17 +680,18 @@ async fn edit(
     let p = paste::meta(&st, id, now).await?;
     editable(&st, &p)?;
     let syntax = super::home::parse_syntax(&form.syntax)?;
-    let proved = !form.password.is_empty();
-    let access = if proved { Access::Password(form.password) } else { Access::Anonymous };
+    let grant = Some(form.g).filter(|g| !g.is_empty());
+    let access = grant.clone().map_or(Access::Anonymous, Access::Grant);
     match paste::edit(&st, id, access, ip, form.content.clone(), syntax.clone(), now).await {
         Ok(()) => Ok(Redirect::to(&format!("/{}", id.words())).into_response()),
-        Err(e @ (Error::Forbidden | Error::TooManyAttempts | Error::Invalid(_))) => {
+        // The text typed stays on the page, so it can be copied before opening the paste again.
+        Err(e @ (Error::Forbidden | Error::GrantExpired | Error::Invalid(_))) => {
             let message = match &e {
-                Error::Forbidden if p.privacy.needs_password() && proved => PASSWORD_MISMATCH.to_owned(),
-                Error::Forbidden if p.privacy.needs_password() => "Enter the password to change this paste.".to_owned(),
-                other => other.to_string(),
+                Error::Invalid(_) => e.to_string(),
+                _ => "Open the paste with its password again, then change it.".to_owned(),
             };
-            edit_page(&st, admin, &p, form.content, syntax.as_deref(), Some(message), e.status())
+            let draft = Draft { content: form.content, syntax: syntax.as_deref(), grant };
+            edit_page(&st, admin, &p, draft, Some(message), e.status())
         }
         Err(e) => Err(e),
     }
@@ -675,8 +699,9 @@ async fn edit(
 
 #[derive(Deserialize)]
 struct DeleteForm {
+    /// The grant from unlocking a private paste.
     #[serde(default)]
-    password: String,
+    g: String,
     /// Hex `HMAC-SHA256(verifier key, "bitvault-delete")` from `secret.js`.
     #[serde(default)]
     verifier: String,
@@ -692,7 +717,7 @@ fn verifier(hex_value: &str) -> Result<[u8; 32], Error> {
 }
 
 /// `POST /{words}/delete`: deletes at once and returns to `/` with a notice. The admin needs no
-/// password; a wrong one shows the delete form again.
+/// proof; a private paste takes the grant from its unlocked page, a secret one its verifier.
 async fn delete(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
@@ -702,13 +727,13 @@ async fn delete(
 ) -> Result<Response, Error> {
     let id = paste_id(&words)?;
     let now = domain::now();
-    let proved = !form.password.is_empty() || !form.verifier.is_empty();
+    let by_verifier = !form.verifier.is_empty();
     let auth = if admin {
         DeleteAuth::Admin
-    } else if !form.verifier.is_empty() {
+    } else if by_verifier {
         DeleteAuth::Verifier(verifier(&form.verifier)?)
-    } else if !form.password.is_empty() {
-        DeleteAuth::Password(form.password)
+    } else if !form.g.is_empty() {
+        DeleteAuth::Grant(form.g)
     } else {
         DeleteAuth::None
     };
@@ -717,24 +742,12 @@ async fn delete(
             let back = if admin && form.next == "admin" { "/admin" } else { "/" };
             Ok(Redirect::to(&format!("{back}?deleted={}", id.words())).into_response())
         }
-        Err(e @ (Error::Forbidden | Error::TooManyAttempts)) => {
-            let p = paste::meta(&st, id, now).await?;
-            let notice = match e {
-                Error::Forbidden if proved => PASSWORD_MISMATCH.to_owned(),
-                Error::Forbidden => "Enter the password to delete this paste.".to_owned(),
-                ref other => other.to_string(),
-            };
-            let words = id.words();
-            let view = DeletePage {
-                words: words.clone(),
-                notice,
-                delete: DeleteView::new(&p, admin),
-                trash: icon("trash-2", IconSize::Tool),
-            };
-            let body = render(&view)?;
-            let title = format!("Delete {words}");
-            Ok((e.status(), page_with(&st, admin, "", &title, body, Extras::default())?).into_response())
+        // The grant ran out while the page stood open: the password opens the paste again.
+        Err(e @ Error::GrantExpired) => {
+            let notice = "Open the paste with its password again, then delete it.".to_owned();
+            unlock_page(&st, admin, id.words(), Some(notice), e.status())
         }
+        Err(Error::Forbidden) if by_verifier => Err(Error::WrongPassword),
         Err(e) => Err(e),
     }
 }

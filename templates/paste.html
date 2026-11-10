@@ -5,7 +5,7 @@
 {% import "components/field.html" as field %}
 {% import "components/icon_button.html" as icon_button %}
 {% import "components/notice.html" as notice %}
-<article class="paste-view"{% if secret %} data-secret{% endif %}>
+<article class="paste-view"{% if secret %} data-secret{% endif %}{% if secret && burns %} data-burns{% endif %}>
 {%- if created %}
 {% call notice::notice("success", "Paste created.") %}{% endcall %}
 {%- endif %}
@@ -57,9 +57,34 @@
   </div>
 </form>
 <noscript>{% call notice::notice("info", "This paste is decrypted in the browser. Turn on JavaScript to open it.") %}{% endcall %}</noscript>
+{#- secret.js fills this with the stored ciphertext and what it takes to decrypt it elsewhere. #}
+<section class="bv-cipher" id="secret-cipher" aria-labelledby="cipher-heading" hidden>
+  <div class="bv-files__head bv-cipher__head">
+    <h2 id="cipher-heading">Ciphertext</h2>
+    {%- call copy::copy("ciphertext", "", self.copy_icons()) %}{% endcall %}
+  </div>
+  <pre class="paste-text bv-cipher__text" id="cipher-text"></pre>
+  <details class="bv-cipher__how">
+    <summary>Decrypt it elsewhere</summary>
+    <dl class="oc-facts">
+      <dt>Cipher</dt><dd><span class="oc-value">AES-256-GCM, Base64 above</span></dd>
+      <dt>Key</dt><dd><span class="oc-value">PBKDF2-HMAC-SHA256, first 32 of 64 bytes</span></dd>
+      {%- for (term, part) in cipher_rows %}
+      <dt>{{ term }}</dt><dd><span class="oc-mono bv-cipher__value" data-bv-cipher="{{ part }}"></span>{% call copy::copy(term, "", self.copy_icons()) %}{% endcall %}</dd>
+      {%- endfor %}
+    </dl>
+  </details>
+</section>
 <pre class="paste-text" id="paste-text" hidden><code></code></pre>
 {%- else if sealed %}
-{% call notice::notice("info", "Encrypted. Open it with its password.") %}{% endcall %}
+{#- The creator of a private paste meets the same question as its readers: one password opens it,
+    and the opened page can delete it. #}
+<form class="oc-form bv-unlock" method="post" action="{{ unlock_action }}">
+  {% call field::password("unlock-password", "password", "Password", "current-password") %}{% endcall %}
+  <div class="oc-form__actions">
+    {% call button::submit("primary", "Open paste") %}{% endcall %}
+  </div>
+</form>
 {%- else if let Some(url) = target %}
 <section class="bv-target" aria-label="Target">
   <p class="bv-address"><span class="oc-mono">{{ url }}</span>{% call copy::copy("URL", url, self.copy_icons()) %}{% endcall %}</p>
@@ -104,9 +129,8 @@
   {%- endfor %}
 </section>
 {%- endif %}
-{#- A secret paste's delete needs secret.js, which plain HTTP does not load; the admin needs no proof. #}
-{%- if !burned && !(https_only && delete.secret()) %}
-{% call delete_form::form(delete, self.icon("trash-2")) %}{% endcall %}
+{%- if let Some(d) = delete %}
+{% call delete_form::form(d, self.icon("trash-2")) %}{% endcall %}
 {%- endif %}
 {%- if let Some(svg) = qr %}
 {% call dialog::dialog("qr-dialog", "QR code", svg) %}{% endcall %}

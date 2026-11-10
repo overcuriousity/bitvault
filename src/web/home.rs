@@ -73,9 +73,9 @@ struct Home {
 }
 
 const PRIVACY_GROUPS: [(&str, &[Privacy]); 3] = [
-    ("No password", &[Privacy::Public, Privacy::Unlisted]),
-    ("Password", &[Privacy::Readonly, Privacy::Private]),
-    ("Encrypted in your browser", &[Privacy::Secret]),
+    ("Not encrypted", &[Privacy::Public, Privacy::Unlisted, Privacy::Readonly]),
+    ("Encrypted on the server", &[Privacy::Private]),
+    ("End-to-end encrypted", &[Privacy::Secret]),
 ];
 
 fn sentence_case(s: &str) -> String {

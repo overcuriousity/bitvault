@@ -153,7 +153,6 @@ async fn a_private_paste_needs_its_password() {
     assert_eq!(stored.content_len, content.len() as u64);
     assert!(!content.windows(plain.len()).any(|w| w == plain.as_bytes()));
     assert!(stored.wrapped_key.is_some());
-    assert!(stored.password_hash.is_none());
 }
 
 #[tokio::test]
@@ -187,10 +186,9 @@ async fn wrong_passwords_are_rate_limited_but_right_ones_are_not() {
 async fn right_passwords_used_again_and_again_are_never_limited() {
     let app = support::app_with("[app]\neditable = true\n").await;
     let private = create(&app.st, NewPaste { editable: true, ..with_password("p", Privacy::Private, "pw") }).await;
-    let readonly = create(&app.st, NewPaste { editable: true, ..with_password("r", Privacy::Readonly, "pw") }).await;
     for _ in 0..8 {
         read(&app.st, private, Access::Password("pw".into())).await.unwrap();
-        paste::edit(&app.st, readonly, Access::Password("pw".into()), IP, "r2".into(), None, NOW).await.unwrap();
+        paste::edit(&app.st, private, Access::Password("pw".into()), IP, "p2".into(), None, NOW).await.unwrap();
     }
     paste::delete(&app.st, private, DeleteAuth::Password("pw".into()), IP, NOW).await.unwrap();
 }
@@ -198,31 +196,26 @@ async fn right_passwords_used_again_and_again_are_never_limited() {
 #[tokio::test]
 async fn wrong_edit_passwords_are_rate_limited() {
     let app = support::app_with("[app]\neditable = true\n").await;
-    for privacy in [Privacy::Readonly, Privacy::Private] {
-        let id = create(&app.st, NewPaste { editable: true, ..with_password("v1", privacy, "pw") }).await;
-        let ip = if privacy == Privacy::Readonly { IP } else { OTHER_IP };
-        for _ in 0..5 {
-            let res = paste::edit(&app.st, id, Access::Password("wrong".into()), ip, "v2".into(), None, NOW).await;
-            assert!(matches!(res, Err(Error::Forbidden)), "{res:?}");
-        }
-        let res = paste::edit(&app.st, id, Access::Password("pw".into()), ip, "v2".into(), None, NOW).await;
-        assert!(matches!(res, Err(Error::TooManyAttempts)), "{privacy:?}: {res:?}");
+    let id = create(&app.st, NewPaste { editable: true, ..with_password("v1", Privacy::Private, "pw") }).await;
+    for _ in 0..5 {
+        let res = paste::edit(&app.st, id, Access::Password("wrong".into()), IP, "v2".into(), None, NOW).await;
+        assert!(matches!(res, Err(Error::Forbidden)), "{res:?}");
     }
+    let res = paste::edit(&app.st, id, Access::Password("pw".into()), IP, "v2".into(), None, NOW).await;
+    assert!(matches!(res, Err(Error::TooManyAttempts)), "{res:?}");
 }
 
 #[tokio::test]
 async fn wrong_delete_passwords_are_rate_limited() {
     let app = support::app().await;
-    for (privacy, ip) in [(Privacy::Readonly, IP), (Privacy::Private, OTHER_IP)] {
-        let id = create(&app.st, with_password("v1", privacy, "pw")).await;
-        for _ in 0..5 {
-            let res = paste::delete(&app.st, id, DeleteAuth::Password("wrong".into()), ip, NOW).await;
-            assert!(matches!(res, Err(Error::Forbidden)), "{res:?}");
-        }
-        let res = paste::delete(&app.st, id, DeleteAuth::Password("pw".into()), ip, NOW).await;
-        assert!(matches!(res, Err(Error::TooManyAttempts)), "{privacy:?}: {res:?}");
-        paste::meta(&app.st, id, NOW).await.unwrap();
+    let id = create(&app.st, with_password("v1", Privacy::Private, "pw")).await;
+    for _ in 0..5 {
+        let res = paste::delete(&app.st, id, DeleteAuth::Password("wrong".into()), IP, NOW).await;
+        assert!(matches!(res, Err(Error::Forbidden)), "{res:?}");
     }
+    let res = paste::delete(&app.st, id, DeleteAuth::Password("pw".into()), IP, NOW).await;
+    assert!(matches!(res, Err(Error::TooManyAttempts)), "{res:?}");
+    paste::meta(&app.st, id, NOW).await.unwrap();
 }
 
 #[tokio::test]
@@ -280,26 +273,50 @@ async fn a_private_paste_opens_with_its_password_in_either_unicode_form() {
 }
 
 #[tokio::test]
-async fn a_readonly_paste_takes_its_password_in_either_unicode_form() {
+async fn a_readonly_paste_needs_no_password_and_only_the_admin_removes_it() {
     let app = support::app_with("[app]\neditable = true\n").await;
-    let id = create(&app.st, NewPaste { editable: true, ..with_password("v1", Privacy::Readonly, NFC_PASSWORD) }).await;
-    paste::edit(&app.st, id, Access::Password(NFD_PASSWORD.into()), IP, "v2".into(), None, NOW).await.unwrap();
-    paste::delete(&app.st, id, DeleteAuth::Password(NFD_PASSWORD.into()), IP, NOW).await.unwrap();
+    // A password sent along is ignored, and so is the wish to edit.
+    for new in [
+        new("read me", Privacy::Readonly),
+        NewPaste { editable: true, ..with_password("read me", Privacy::Readonly, "pw") },
+    ] {
+        let id = create(&app.st, new).await;
+        assert_eq!(text(&read(&app.st, id, Access::Anonymous).await.unwrap().body), "read me");
+        let stored = paste::meta(&app.st, id, NOW).await.unwrap();
+        assert!(!stored.editable && !paste::editable(&app.st, &stored));
+        for access in [Access::Anonymous, Access::Password("pw".into()), Access::Admin] {
+            let res = paste::edit(&app.st, id, access, IP, "changed".into(), None, NOW).await;
+            assert!(matches!(res, Err(Error::Forbidden)), "{res:?}");
+        }
+        for auth in [DeleteAuth::None, DeleteAuth::Password("pw".into()), DeleteAuth::Grant("x".into())] {
+            let res = paste::delete(&app.st, id, auth, IP, NOW).await;
+            assert!(matches!(res, Err(Error::Forbidden)), "{res:?}");
+        }
+        paste::delete(&app.st, id, DeleteAuth::Admin, IP, NOW).await.unwrap();
+        assert!(matches!(read(&app.st, id, Access::Anonymous).await, Err(Error::NotFound)));
+    }
 }
 
 #[tokio::test]
-async fn a_readonly_paste_is_readable_by_anyone_but_deletable_only_with_its_password() {
-    let app = support::app().await;
-    let id = create(&app.st, with_password("read me", Privacy::Readonly, "pw")).await;
-    assert_eq!(text(&read(&app.st, id, Access::Anonymous).await.unwrap().body), "read me");
-    assert!(paste::meta(&app.st, id, NOW).await.unwrap().password_hash.unwrap().starts_with("$argon2id$"));
-    assert!(matches!(paste::delete(&app.st, id, DeleteAuth::None, IP, NOW).await, Err(Error::Forbidden)));
-    assert!(matches!(
-        paste::delete(&app.st, id, DeleteAuth::Password("wrong".into()), IP, NOW).await,
-        Err(Error::Forbidden)
-    ));
-    paste::delete(&app.st, id, DeleteAuth::Password("pw".into()), IP, NOW).await.unwrap();
-    assert!(matches!(read(&app.st, id, Access::Anonymous).await, Err(Error::NotFound)));
+async fn the_grant_from_unlocking_a_private_paste_changes_and_deletes_it() {
+    let app = support::app_with("[app]\neditable = true\n").await;
+    let id = create(&app.st, NewPaste { editable: true, ..with_password("v1", Privacy::Private, "pw") }).await;
+    let other = create(&app.st, NewPaste { editable: true, ..with_password("o", Privacy::Private, "pw") }).await;
+    let grant = read(&app.st, id, Access::Password("pw".into())).await.unwrap().grant.unwrap();
+    paste::edit(&app.st, id, Access::Grant(grant.clone()), IP, "v2".into(), None, NOW).await.unwrap();
+    assert_eq!(text(&read(&app.st, id, Access::Password("pw".into())).await.unwrap().body), "v2");
+    // Another paste's grant, a made-up one and an expired one prove nothing.
+    for (target, token, now) in
+        [(other, grant.clone(), NOW), (id, "garbage".to_owned(), NOW), (id, grant.clone(), NOW + 601)]
+    {
+        let res = paste::edit(&app.st, target, Access::Grant(token.clone()), IP, "x".into(), None, now).await;
+        assert!(matches!(res, Err(Error::GrantExpired)), "{res:?}");
+        let res = paste::delete(&app.st, target, DeleteAuth::Grant(token), IP, now).await;
+        assert!(matches!(res, Err(Error::GrantExpired)), "{res:?}");
+    }
+    paste::delete(&app.st, id, DeleteAuth::Grant(grant), IP, NOW).await.unwrap();
+    assert!(matches!(paste::meta(&app.st, id, NOW).await, Err(Error::NotFound)));
+    paste::meta(&app.st, other, NOW).await.unwrap();
 }
 
 #[tokio::test]
@@ -341,7 +358,7 @@ async fn the_admin_can_delete_any_paste() {
     let app = support::app().await;
     let private = create(&app.st, with_password("x", Privacy::Private, "pw")).await;
     let secret = create(&app.st, secret_paste(PBKDF2_ITERATIONS)).await;
-    let readonly = create(&app.st, with_password("x", Privacy::Readonly, "pw")).await;
+    let readonly = create(&app.st, new("x", Privacy::Readonly)).await;
     for id in [private, secret, readonly] {
         paste::delete(&app.st, id, DeleteAuth::Admin, IP, NOW).await.unwrap();
         assert!(matches!(paste::meta(&app.st, id, NOW).await, Err(Error::NotFound)));
@@ -548,13 +565,11 @@ async fn expiry_and_privacy_outside_the_offered_choices_are_refused() {
 }
 
 #[tokio::test]
-async fn password_levels_need_a_password_and_secret_needs_its_container() {
+async fn private_needs_a_password_and_secret_needs_its_container() {
     let app = support::app().await;
-    for privacy in [Privacy::Readonly, Privacy::Private] {
-        assert!(matches!(paste::create(&app.st, new("x", privacy), None, NOW).await, Err(Error::Invalid(_))));
-        let empty = with_password("x", privacy, "");
-        assert!(matches!(paste::create(&app.st, empty, None, NOW).await, Err(Error::Invalid(_))));
-    }
+    assert!(matches!(paste::create(&app.st, new("x", Privacy::Private), None, NOW).await, Err(Error::Invalid(_))));
+    let empty = with_password("x", Privacy::Private, "");
+    assert!(matches!(paste::create(&app.st, empty, None, NOW).await, Err(Error::Invalid(_))));
     assert!(matches!(paste::create(&app.st, new("x", Privacy::Secret), None, NOW).await, Err(Error::Invalid(_))));
     assert!(matches!(paste::create(&app.st, new("  \n", Privacy::Public), None, NOW).await, Err(Error::Invalid(_))));
 }
@@ -601,22 +616,17 @@ async fn editing_is_refused_unless_enabled_in_config_and_on_the_paste() {
 }
 
 #[tokio::test]
-async fn editing_a_readonly_or_private_paste_needs_its_password() {
+async fn editing_a_private_paste_needs_its_password() {
     let app = support::app_with("[app]\neditable = true\n").await;
-    for privacy in [Privacy::Readonly, Privacy::Private] {
-        let id = create(&app.st, NewPaste { editable: true, ..with_password("v1", privacy, "pw") }).await;
-        let res = paste::edit(&app.st, id, Access::Anonymous, IP, "v2".into(), None, NOW).await;
-        assert!(matches!(res, Err(Error::Forbidden)));
-        let res = paste::edit(&app.st, id, Access::Password("wrong".into()), IP, "v2".into(), None, NOW).await;
-        assert!(matches!(res, Err(Error::Forbidden)));
-        paste::edit(&app.st, id, Access::Password("pw".into()), IP, "v2".into(), None, NOW).await.unwrap();
-        let access = if privacy == Privacy::Private { Access::Password("pw".into()) } else { Access::Anonymous };
-        let opened = read_at(&app.st, id, access, OTHER_IP, NOW).await.unwrap();
-        assert_eq!(text(&opened.body), "v2");
-        if privacy == Privacy::Private {
-            assert!(!stored_content(&app.st, id).await.windows(2).any(|w| w == b"v2"));
-        }
-    }
+    let id = create(&app.st, NewPaste { editable: true, ..with_password("v1", Privacy::Private, "pw") }).await;
+    let res = paste::edit(&app.st, id, Access::Anonymous, IP, "v2".into(), None, NOW).await;
+    assert!(matches!(res, Err(Error::Forbidden)));
+    let res = paste::edit(&app.st, id, Access::Password("wrong".into()), IP, "v2".into(), None, NOW).await;
+    assert!(matches!(res, Err(Error::Forbidden)));
+    paste::edit(&app.st, id, Access::Password("pw".into()), IP, "v2".into(), None, NOW).await.unwrap();
+    let opened = read_at(&app.st, id, Access::Password("pw".into()), OTHER_IP, NOW).await.unwrap();
+    assert_eq!(text(&opened.body), "v2");
+    assert!(!stored_content(&app.st, id).await.windows(2).any(|w| w == b"v2"));
 }
 
 #[tokio::test]
@@ -672,10 +682,12 @@ async fn the_admin_list_holds_every_live_paste_but_no_burned_ones() {
 #[tokio::test]
 async fn a_paste_debug_print_hides_its_content_and_secrets() {
     let app = support::app().await;
-    let id = create(&app.st, with_password("very secret words", Privacy::Readonly, "pw")).await;
-    let printed = format!("{:?}", paste::meta(&app.st, id, NOW).await.unwrap());
+    let id = create(&app.st, with_password("very secret words", Privacy::Private, "pw")).await;
+    let stored = paste::meta(&app.st, id, NOW).await.unwrap();
+    let printed = format!("{stored:?}");
     assert!(!printed.contains("very secret words"));
-    assert!(!printed.contains("argon2id"));
+    assert!(printed.contains("wrapped_key: \"***\""), "{printed}");
+    assert!(!printed.contains(&format!("{:?}", stored.wrapped_key.unwrap())), "{printed}");
 }
 
 #[tokio::test]
@@ -697,8 +709,7 @@ async fn an_expiry_that_is_not_offered_says_so_even_when_the_maximum_is_never() 
 #[tokio::test]
 async fn the_creator_view_shows_plaintext_content_without_counting_a_read() {
     let app = support::app().await;
-    let text_id =
-        create(&app.st, NewPaste { burn_after_reads: 1, ..with_password("once", Privacy::Readonly, "pw") }).await;
+    let text_id = create(&app.st, NewPaste { burn_after_reads: 1, ..new("once", Privacy::Readonly) }).await;
     let url_id = create(&app.st, new("https://example.com/x", Privacy::Public)).await;
     for _ in 0..2 {
         let (p, body) = paste::creator_view(&app.st, text_id, NOW).await.unwrap();

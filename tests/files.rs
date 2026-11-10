@@ -408,10 +408,9 @@ async fn the_create_form_stores_every_field() {
     let p = paste::meta(&app.st, id, bitvault::domain::now()).await.unwrap();
     assert_eq!(p.privacy, Privacy::Readonly);
     assert_eq!(p.syntax.as_deref(), Some("rs"));
-    assert!(p.editable);
+    assert!(!p.editable, "a read-only paste is never editable");
     assert_eq!(p.burn_after_reads, 3);
     assert_eq!(p.expires_at.map(|e| e - p.created_at), Some(3600));
-    assert!(p.password_hash.is_some());
 
     let res = app.post_multipart("/", &[("content", None, b"x"), ("syntax", None, b"no-such-language")]).await;
     assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);

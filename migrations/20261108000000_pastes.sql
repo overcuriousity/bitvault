@@ -5,7 +5,6 @@ CREATE TABLE pastes (
   content          BLOB NOT NULL,                -- UTF-8 text, or a crypto container (§5)
   syntax           TEXT,                         -- syntect token, NULL = plain
   editable         INTEGER NOT NULL DEFAULT 0,
-  password_hash    TEXT,                         -- readonly: argon2id PHC string
   wrapped_key      BLOB,                         -- private: DEK wrapped by the password KEK (§5)
   verifier_hash    BLOB,                         -- secret: salt(16) ‖ SHA-256 of the browser-derived verifier (§5)
   burn_after_reads INTEGER NOT NULL DEFAULT 0,   -- 0 = off

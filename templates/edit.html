@@ -8,14 +8,11 @@
 <form class="oc-form bv-edit" method="post" action="/{{ words }}/edit">
   <div class="oc-field">
     <label for="content">Content</label>
-    <textarea class="oc-input bv-mono" id="content" name="content" rows="16" spellcheck="false" autocomplete="off"{% if !password_error %} autofocus{% endif %}>{{ content }}</textarea>
+    <textarea class="oc-input bv-mono" id="content" name="content" rows="16" spellcheck="false" autocomplete="off" autofocus>{{ content }}</textarea>
   </div>
   {% call select::select("syntax", "syntax", "Syntax", syntax_options) %}{% endcall %}
-  {%- if password %}
-  <div class="oc-field">
-    <label for="edit-password">Password</label>
-    <input class="oc-input" id="edit-password" name="password" type="password" autocomplete="current-password"{% if password_error %} autofocus{% endif %}>
-  </div>
+  {%- if let Some(g) = grant %}
+  <input type="hidden" name="g" value="{{ g }}">
   {%- endif %}
   <div class="oc-form__actions">
     {% call button::submit("primary", "Save changes") %}{% endcall %}

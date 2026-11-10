@@ -46,7 +46,7 @@ impl Privacy {
     }
 
     pub fn needs_password(self) -> bool {
-        matches!(self, Self::Readonly | Self::Private | Self::Secret)
+        matches!(self, Self::Private | Self::Secret)
     }
 }
 

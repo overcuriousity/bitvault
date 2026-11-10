@@ -84,7 +84,7 @@ async fn every_rendered_page_and_fragment_is_clean() {
 
     let mut app = gate_app("").await;
     let public = create(&app, NewPaste { editable: true, ..new("hello there", Privacy::Public) }).await;
-    let readonly = create(&app, NewPaste { password: Some("pw".into()), ..new("kept", Privacy::Readonly) }).await;
+    let readonly = create(&app, new("kept", Privacy::Readonly)).await;
     let url = create(&app, new(TARGET, Privacy::Unlisted)).await;
     let private = create(&app, NewPaste { password: Some("pw".into()), ..new("locked", Privacy::Private) }).await;
     let secret = create(&app, secret()).await;
@@ -131,8 +131,8 @@ async fn every_rendered_page_and_fragment_is_clean() {
     let html = body_text(res).await;
     assert!(html.contains("hello"), "hostile paste must render its text");
     assert_clean_html(&html);
-    let wrong = app.post_form(&format!("/{readonly}/delete"), "password=wrong").await;
-    check("delete page", wrong, StatusCode::FORBIDDEN).await;
+    let refused = app.post_form(&format!("/{private}/delete"), "g=expired").await;
+    check("unlock page after a refused delete", refused, StatusCode::FORBIDDEN).await;
     check("edit page", app.get(&format!("/{public}/edit")).await, StatusCode::OK).await;
 
     check("admin sign-in", app.get("/admin/sign-in").await, StatusCode::OK).await;

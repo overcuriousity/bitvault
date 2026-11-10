@@ -1,6 +1,6 @@
 // The secret paste page: fetches the content container once, opens it with the password typed
 // here, and decrypts files on download. The password never leaves this page.
-import { CHUNK_LEN, HEADER_LEN, fromHex, open, toHex, verifier } from "./crypto.js";
+import { CHUNK_LEN, HEADER_LEN, describe, fromHex, open, toHex, verifier } from "./crypto.js";
 import { fillLines } from "./lines.js";
 import { serverMessage, showNotice } from "./notice.js";
 
@@ -32,6 +32,36 @@ export function parseEnvelope(bytes) {
     throw new Error("not a bitvault envelope");
   }
   return { text: value.text, files };
+}
+
+/** Base64 of `bytes`, built in pieces so a long text does not overflow the argument list. */
+export function toBase64(bytes) {
+  let binary = "";
+  for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  return btoa(binary);
+}
+
+/**
+ * What the page shows of a container before it is opened: the ciphertext in Base64 and, in hex,
+ * the values another tool needs beside the password. Null when the container cannot be shown as
+ * one ciphertext.
+ */
+export function cipherFacts(container) {
+  let parts;
+  try {
+    parts = describe(container);
+  } catch {
+    return null;
+  }
+  if (!parts) return null;
+  return {
+    ciphertext: toBase64(parts.ciphertext),
+    iterations: String(parts.iterations),
+    salt: toHex(parts.salt),
+    iv: toHex(parts.iv),
+    aad: toHex(parts.aad),
+    tag: toHex(parts.tag),
+  };
 }
 
 function pastePath() {
@@ -108,7 +138,45 @@ function bind(view) {
   const input = view.querySelector("#secret-password");
   const target = view.querySelector("pre.paste-text");
   const filesSection = view.querySelector(".bv-files");
+  const cipher = view.querySelector("#secret-cipher");
+  const remove = view.querySelector("form.bv-delete[data-verifier-salt]");
   const state = { container: null, grant: null, password: null, names: [], opened: new Map() };
+
+  // The ciphertext as stored, with what it takes to decrypt it elsewhere.
+  function showCipher() {
+    if (!cipher) return;
+    const facts = cipherFacts(state.container);
+    const text = cipher.querySelector("#cipher-text");
+    const how = cipher.querySelector(".bv-cipher__how");
+    if (text) text.textContent = facts ? facts.ciphertext : "Too long to show here.";
+    const copy = cipher.querySelector(".bv-cipher__head .oc-copy");
+    if (copy) {
+      copy.hidden = !facts;
+      copy.dataset.ocCopy = facts?.ciphertext ?? "";
+    }
+    if (how) how.hidden = !facts;
+    for (const value of cipher.querySelectorAll("[data-bv-cipher]")) {
+      const hex = facts?.[value.dataset.bvCipher] ?? "";
+      value.textContent = hex;
+      const button = value.parentElement?.querySelector(".oc-copy");
+      if (button) button.dataset.ocCopy = hex;
+    }
+    cipher.hidden = false;
+  }
+
+  // Fetched once: the fetch is the read, and a burning read cannot be repeated.
+  async function load() {
+    if (state.container) return true;
+    const res = await fetch(`${pastePath()}/raw`, { cache: "no-store", headers: { "HX-Request": "true" } });
+    if (!res.ok) {
+      showNotice(region, "danger", await serverMessage(res, "This paste could not be loaded. Reload the page."));
+      return false;
+    }
+    state.grant = res.headers.get("x-bitvault-grant");
+    state.container = new Uint8Array(await res.arrayBuffer());
+    showCipher();
+    return true;
+  }
 
   const fileUrl = (position) => {
     const g = state.grant ? `?g=${encodeURIComponent(state.grant)}` : "";
@@ -175,16 +243,7 @@ function bind(view) {
     }
     setBusy(form, true);
     try {
-      // Fetched once: the fetch is the read, and a burning read cannot be repeated.
-      if (!state.container) {
-        const res = await fetch(`${pastePath()}/raw`, { cache: "no-store", headers: { "HX-Request": "true" } });
-        if (!res.ok) {
-          showNotice(region, "danger", await serverMessage(res, "This paste could not be loaded. Reload the page."));
-          return;
-        }
-        state.grant = res.headers.get("x-bitvault-grant");
-        state.container = new Uint8Array(await res.arrayBuffer());
-      }
+      if (!(await load())) return;
       const { text, files } = parseEnvelope(await open(password, state.container));
       state.password = password;
       state.names = files;
@@ -192,6 +251,7 @@ function bind(view) {
       target.hidden = false;
       showCopyText(view);
       form.hidden = true;
+      if (cipher) cipher.hidden = true;
       if (state.grant) {
         showNotice(
           region,
@@ -201,6 +261,8 @@ function bind(view) {
         view.querySelector("form.bv-delete")?.setAttribute("hidden", "");
       } else {
         showNotice(region, "success", "Opened in your browser.");
+        // Whoever opened the paste may delete it, with the password already typed.
+        if (remove) remove.hidden = false;
       }
       labelFiles();
       preview();
@@ -235,15 +297,10 @@ function bind(view) {
     }
   });
 
-  const remove = view.querySelector("form.bv-delete[data-verifier-salt]");
   remove?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const password = remove.querySelector("#delete-password")?.value || state.password || "";
-    if (!password) {
-      showNotice(region, "danger", "Enter the password to delete this paste.");
-      remove.querySelector("#delete-password")?.focus();
-      return;
-    }
+    const password = state.password;
+    if (!password) return;
     setBusy(remove, true);
     try {
       const proof = toHex(await verifier(password, fromHex(remove.dataset.verifierSalt)));
@@ -263,6 +320,10 @@ function bind(view) {
       setBusy(remove, false);
     }
   });
+
+  // The ciphertext is shown at once, unless reading it could burn the paste: then it waits for
+  // the reader to ask for the paste.
+  if (!view.hasAttribute("data-burns")) load().catch(() => {});
 }
 
 if (typeof document !== "undefined") {

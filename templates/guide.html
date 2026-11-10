@@ -27,21 +27,22 @@
 {%- endif %}
 {%- if self.offers("readonly") %}
 <h3>Read-only</h3>
-<p>Anyone with the address can see the paste, but {% if editable %}changing or {% endif %}deleting it needs its password.</p>
+<p>Anyone with the address can see the paste, and nobody can change or delete it; it goes when it expires. It is not encrypted and has no password. Only the administrator can remove it.</p>
 {%- endif %}
 {%- if self.offers("private") %}
 <h3>Private</h3>
-<p>The text and every file are encrypted on the server, with a key that only the password unlocks. Opening, {% if editable %}changing {% endif %}and deleting the paste all need the password. File names are not shown until the paste is open.</p>
+<p>The text and every file are encrypted on the server, with a key that only the password unlocks. Opening the paste needs the password, and the opened page can {% if editable %}change and {% endif %}delete it without asking again. File names are not shown until the paste is open.</p>
 <p>After you open a private paste, its download links work for ten minutes. Open it again for new links.</p>
 {%- endif %}
 {%- if self.offers("secret") %}
 <h3>Secret</h3>
-<p>Your browser encrypts the text, the file names and the files before anything is sent, and the password never leaves your device. Opening and deleting happen in your browser as well, so secret pastes need JavaScript, and they cannot be changed.</p>
+<p>Your browser encrypts the text, the file names and the files before anything is sent, and the password never leaves your device. Opening and deleting happen in your browser as well, so secret pastes need JavaScript, and they cannot be changed. Once opened, the page can delete the paste.</p>
+<p>Before you open it, the page shows the ciphertext as stored. Decrypt it elsewhere lists what another tool needs beside the password: the key is the first 32 of 64 bytes from PBKDF2-HMAC-SHA256 over the password with the salt and iteration count shown, and AES-256-GCM takes the IV, the associated data and the tag. The result is JSON with the text and the file names. A paste that burns after reads shows its ciphertext only once you ask to open it, and text beyond about 64 KiB is not shown this way.</p>
 {%- endif %}
 
-{%- if self.offers("readonly") || self.offers("private") || self.offers("secret") %}
+{%- if self.offers("private") || self.offers("secret") %}
 <h2 id="password">Password</h2>
-<p>Read-only, private and secret pastes are protected by a password. Nobody can recover a forgotten one, not even the administrator.</p>
+<p>Private and secret pastes are encrypted under a password. Nobody can recover a forgotten one, not even the administrator.</p>
 {%- endif %}
 
 <h2 id="expiry">Expiry</h2>
@@ -65,11 +66,11 @@
 
 {%- if editable %}
 <h2 id="editing">Change a paste</h2>
-<p>Allow editing is pre-checked on this server. Untick it to keep a paste fixed. Read-only and private pastes still need their password to change.</p>
+<p>Allow editing is pre-checked on this server. Untick it to keep a paste fixed. A private paste is changed from its opened page. Read-only and secret pastes cannot be changed.</p>
 {%- endif %}
 
 <h2>Delete a paste</h2>
-<p>Delete takes effect at once and cannot be undone. Read-only and private pastes need their password, and secret pastes are deleted with the password in your browser.</p>
+<p>Delete takes effect at once and cannot be undone. Private and secret pastes are deleted from their opened page, so whoever has the password can delete them. A read-only paste cannot be deleted; it goes when it expires.</p>
 
 {%- if admin %}
 <h2>Administrator</h2>

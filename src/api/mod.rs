@@ -50,8 +50,8 @@ route allows 120 a minute with a burst of 30. Wrong passwords and verifiers coun
 minute with a burst of 5. Lookups of words that match no paste (404) count separately too, 20 a \
 minute with a burst of 10; once they run out, every paste lookup from that address gets 429.
 
-Passwords travel in headers, never in URLs: `X-Paste-Password` opens, edits and deletes read-only and \
-private pastes; `X-Paste-Verifier` (64 hex characters, derived in the browser) deletes a secret paste; \
+Passwords travel in headers, never in URLs: `X-Paste-Password` opens, edits and deletes private \
+pastes; `X-Paste-Verifier` (64 hex characters, derived in the browser) deletes a secret paste; \
 `X-Paste-Grant` carries the `grant` from a paste read to its file downloads; `X-Uploader-Password` is needed to create when the server sets an uploader password.
 
 Errors are JSON `{\"error\": {\"code\": \"...\", \"message\": \"...\"}}`, where `message` is one \
@@ -290,7 +290,7 @@ pub struct CreateRequest {
     /// Lets readers edit it, when the server allows editing. Absent means the server's `editable`
     /// setting.
     pub editable: Option<bool>,
-    /// Required for `readonly` and `private`.
+    /// Required for `private`.
     pub password: Option<String>,
 }
 
@@ -642,7 +642,7 @@ pub struct EditResponse {
 /// Edit a paste's content and syntax.
 ///
 /// Needs editing switched on for the server and the paste. Public and unlisted pastes take
-/// anyone's edit; read-only and private pastes need `X-Paste-Password`. Secret pastes are never
+/// anyone's edit; private pastes need `X-Paste-Password`. Read-only and secret pastes are never
 /// editable.
 #[utoipa::path(
     patch,
@@ -650,7 +650,7 @@ pub struct EditResponse {
     tag = "pastes",
     params(
         ("words" = String, Path, description = "The three-word address."),
-        ("X-Paste-Password" = Option<String>, Header, description = "Required for read-only and private pastes."),
+        ("X-Paste-Password" = Option<String>, Header, description = "Required for private pastes."),
     ),
     request_body = EditRequest,
     responses(
@@ -682,15 +682,15 @@ async fn update_paste(
 
 /// Delete a paste and its files, at once and for good.
 ///
-/// Public and unlisted pastes need nothing; read-only and private pastes need
-/// `X-Paste-Password`; secret pastes need `X-Paste-Verifier`.
+/// Public and unlisted pastes need nothing; private pastes need `X-Paste-Password`; secret pastes
+/// need `X-Paste-Verifier`. A read-only paste is deleted only by the administrator, on the web.
 #[utoipa::path(
     delete,
     path = "/api/v1/pastes/{words}",
     tag = "pastes",
     params(
         ("words" = String, Path, description = "The three-word address."),
-        ("X-Paste-Password" = Option<String>, Header, description = "For read-only and private pastes."),
+        ("X-Paste-Password" = Option<String>, Header, description = "For private pastes."),
         ("X-Paste-Verifier" = Option<String>, Header, description = "For secret pastes: 64 hex characters, HMAC-SHA256 of `bitvault-delete` under the password-derived verifier key."),
     ),
     responses(

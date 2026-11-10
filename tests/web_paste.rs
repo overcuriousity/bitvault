@@ -287,11 +287,34 @@ async fn a_burning_secret_raw_response_carries_a_grant_header() {
 }
 
 #[tokio::test]
-async fn the_secret_page_exposes_the_verifier_salt_for_delete() {
+async fn the_secret_page_keeps_its_delete_hidden_until_the_paste_is_opened() {
     let app = app().await;
     let w = create(&app, secret(0)).await;
     let html = body_text(app.get(&format!("/{w}")).await).await;
-    assert!(html.contains(&format!("data-verifier-salt=\"{}\"", hex::encode(VERIFIER_SALT))));
+    // secret.js shows the form once the password has opened the paste, and derives the proof from it.
+    let form = format!(
+        "<form class=\"bv-delete\" method=\"post\" action=\"/{w}/delete\" data-verifier-salt=\"{}\" hidden>",
+        hex::encode(VERIFIER_SALT)
+    );
+    assert!(html.contains(&form), "{html}");
+    assert!(!html.contains("Password to delete") && !html.contains("id=\"delete-password\""), "{html}");
+}
+
+#[tokio::test]
+async fn the_secret_page_has_a_place_for_its_ciphertext_and_what_decrypts_it() {
+    let app = app().await;
+    let html = body_text(app.get(&format!("/{}", create(&app, secret(0)).await)).await).await;
+    assert!(html.contains("<article class=\"paste-view\" data-secret>"), "{html}");
+    assert!(html.contains("id=\"secret-cipher\" aria-labelledby=\"cipher-heading\" hidden>"), "{html}");
+    assert!(html.contains("<pre class=\"paste-text bv-cipher__text\" id=\"cipher-text\"></pre>"), "{html}");
+    for part in ["iterations", "salt", "iv", "aad", "tag"] {
+        assert!(html.contains(&format!("data-bv-cipher=\"{part}\"")), "{part}: {html}");
+    }
+    // Fetching the ciphertext is a read, so a paste that burns waits until it is asked for.
+    let burning = body_text(app.get(&format!("/{}", create(&app, secret(1)).await)).await).await;
+    assert!(burning.contains("<article class=\"paste-view\" data-secret data-burns>"), "{burning}");
+    let public = body_text(app.get(&format!("/{}", create(&app, new("x", Privacy::Public)).await)).await).await;
+    assert!(!public.contains("secret-cipher"), "{public}");
 }
 
 #[tokio::test]
@@ -322,37 +345,71 @@ async fn delete_is_a_post_and_takes_effect_immediately() {
     assert_eq!(app.get(&format!("/{w}")).await.status(), StatusCode::NOT_FOUND);
 }
 
-#[tokio::test]
-async fn deleting_a_readonly_or_private_paste_from_its_page_takes_the_password() {
-    let app = app().await;
-    for privacy in [Privacy::Readonly, Privacy::Private] {
-        let w = create(&app, with_password("guarded", privacy, "pw")).await;
-        let res = app.post_form(&format!("/{w}/delete"), "password=wrong").await;
-        assert_eq!(res.status(), StatusCode::FORBIDDEN);
-        let html = body_text(res).await;
-        assert!(html.contains("That password does not open this paste. Check it and try again."));
-        assert!(html.contains(&format!("action=\"/{w}/delete\"")));
-        let res = app.post_form(&format!("/{w}/delete"), "password=pw").await;
-        assert_eq!(res.status(), StatusCode::SEE_OTHER);
-        assert_eq!(app.get(&format!("/{w}")).await.status(), StatusCode::NOT_FOUND);
-    }
+/// The grant an unlocked private page hands to its delete and edit forms, ready for a form body.
+fn form_grant(html: &str) -> String {
+    let field = "name=\"g\" value=\"";
+    let at = html.find(field).unwrap_or_else(|| panic!("no grant field: {html}")) + field.len();
+    // Encoded as a browser sends a form field.
+    let grant = &html[at..at + html[at..].find('"').unwrap()];
+    url::form_urlencoded::byte_serialize(grant.as_bytes()).collect()
 }
 
 #[tokio::test]
-async fn editing_a_readonly_paste_through_the_form_requires_its_password() {
+async fn opening_a_private_paste_is_what_lets_its_page_delete_it() {
+    let app = app().await;
+    let w = create(&app, with_password("guarded", Privacy::Private, "pw")).await;
+    // Unopened, there is nothing to delete with, and no second password to ask for.
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    assert!(!html.contains("bv-delete") && !html.contains("Password to delete"), "{html}");
+    assert_eq!(app.post_form(&format!("/{w}/delete"), "").await.status(), StatusCode::FORBIDDEN);
+    assert_eq!(app.post_form(&format!("/{w}/delete"), "password=pw").await.status(), StatusCode::FORBIDDEN);
+    let res = app.post_form(&format!("/{w}/delete"), "g=made-up").await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let html = body_text(res).await;
+    assert!(html.contains("Open the paste with its password again, then delete it."), "{html}");
+    assert!(html.contains(&format!("action=\"/{w}/unlock\"")), "{html}");
+
+    let html = body_text(app.post_form(&format!("/{w}/unlock"), "password=pw").await).await;
+    assert!(html.contains("guarded") && html.contains(&format!("action=\"/{w}/delete\"")), "{html}");
+    assert!(!html.contains("type=\"password\""), "the opened page asks for no password: {html}");
+    let res = app.post_form(&format!("/{w}/delete"), &format!("g={}", form_grant(&html))).await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(app.get(&format!("/{w}")).await.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_readonly_paste_page_offers_no_delete_and_no_edit() {
     let app = app_with("[app]\neditable = true\n").await;
-    let w = create(&app, NewPaste { editable: true, ..with_password("before", Privacy::Readonly, "pw") }).await;
-    let res = app.get(&format!("/{w}/edit")).await;
+    let w = create(&app, NewPaste { editable: true, ..new("kept as written", Privacy::Readonly) }).await;
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    assert!(html.contains("kept as written"), "{html}");
+    assert!(!html.contains("bv-delete") && !html.contains(&format!("/{w}/edit")), "{html}");
+    assert_eq!(app.post_form(&format!("/{w}/delete"), "").await.status(), StatusCode::FORBIDDEN);
+    assert_eq!(app.get(&format!("/{w}/edit")).await.status(), StatusCode::NOT_FOUND);
+    assert_eq!(app.post_form(&format!("/{w}/edit"), "content=x&syntax=plain").await.status(), StatusCode::NOT_FOUND);
+    assert!(body_text(app.get(&format!("/{w}")).await).await.contains("kept as written"));
+}
+
+#[tokio::test]
+async fn an_opened_private_paste_is_edited_without_asking_for_the_password_again() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let w = create(&app, NewPaste { editable: true, ..with_password("before", Privacy::Private, "pw") }).await;
+    let opened = body_text(app.post_form(&format!("/{w}/unlock"), "password=pw").await).await;
+    let res = app.get(&grant_link(&opened, "/edit")).await;
     assert_eq!(res.status(), StatusCode::OK);
     let html = body_text(res).await;
-    assert!(html.contains("before") && html.contains("name=\"password\""));
-    let res = app.post_form(&format!("/{w}/edit"), "content=after&syntax=plain&password=wrong").await;
+    assert!(html.contains("before") && !html.contains("type=\"password\""), "{html}");
+    let grant = form_grant(&html);
+    // Without the grant nothing is saved, and the text typed stays on the page.
+    let res = app.post_form(&format!("/{w}/edit"), "content=typed+text&syntax=plain").await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
-    assert!(body_text(res).await.contains("That password does not open this paste. Check it and try again."));
-    let res = app.post_form(&format!("/{w}/edit"), "content=after&syntax=plain&password=pw").await;
+    let html = body_text(res).await;
+    assert!(html.contains("Open the paste with its password again, then change it."), "{html}");
+    assert!(html.contains("typed text"), "{html}");
+    let res = app.post_form(&format!("/{w}/edit"), &format!("content=after&syntax=plain&g={grant}")).await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     assert_eq!(res.headers()[header::LOCATION], format!("/{w}").as_str());
-    assert!(body_text(app.get(&format!("/{w}")).await).await.contains("after"));
+    assert!(body_text(app.post_form(&format!("/{w}/unlock"), "password=pw").await).await.contains("after"));
 }
 
 #[tokio::test]
@@ -550,19 +607,6 @@ async fn pages_that_show_paste_content_are_never_cached() {
     no_store(&app.get(&grant_link(&html, "/edit")).await, "private edit form");
     let secret = create(&app, secret(0)).await;
     no_store(&app.get(&format!("/{secret}")).await, "secret shell");
-}
-
-#[tokio::test]
-async fn editing_without_a_password_asks_for_one() {
-    let app = app_with("[app]\neditable = true\n").await;
-    for privacy in [Privacy::Readonly, Privacy::Private] {
-        let w = create(&app, NewPaste { editable: true, ..with_password("before", privacy, "pw") }).await;
-        let res = app.post_form(&format!("/{w}/edit"), "content=after&syntax=plain&password=").await;
-        assert_eq!(res.status(), StatusCode::FORBIDDEN);
-        let html = body_text(res).await;
-        assert!(html.contains("Enter the password to change this paste."), "{privacy:?}");
-        assert!(!html.contains("That password does not open this paste."));
-    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
@@ -851,15 +895,21 @@ async fn the_creator_view_of_a_private_paste_shows_no_content() {
     let res = app.get_with_cookie(&format!("/{w}"), &cookie).await;
     assert_eq!(res.status(), StatusCode::OK);
     let html = body_text(res).await;
-    assert!(html.contains("Paste created.") && html.contains("Encrypted. Open it with its password."), "{html}");
+    // The creator meets the same question as a reader: one password field, which opens the paste.
+    assert!(html.contains("Paste created.") && html.contains(&format!("action=\"/{w}/unlock\"")), "{html}");
+    assert_eq!(html.matches("type=\"password\"").count(), 1, "{html}");
+    assert!(html.contains("Copy link"), "the creator can still share it: {html}");
     assert!(!html.contains("quietly kept text"));
     assert!(!html.contains("salary-report"));
     for hidden in ["/raw", "/file/", "/zip"] {
         assert!(!html.contains(&format!("/{w}{hidden}")), "no {hidden} link without the password");
     }
     assert!(grant_links(&html).is_empty());
-    assert!(html.contains(&format!("action=\"/{w}/delete\"")), "the creator can still delete it");
+    assert!(!html.contains("bv-delete"), "deleting comes with opening: {html}");
     assert_eq!(read_count(&app, &w).await, 0);
+    // The form on that page opens the paste, and the opened page can delete it.
+    let opened = body_text(app.post_form(&format!("/{w}/unlock"), "password=pw").await).await;
+    assert!(opened.contains("quietly kept text") && opened.contains(&format!("action=\"/{w}/delete\"")), "{opened}");
 }
 
 #[tokio::test]
@@ -1086,14 +1136,11 @@ async fn the_qr_code_has_a_light_ground_and_dark_modules() {
 }
 
 #[tokio::test]
-async fn the_edit_form_focuses_the_text_and_after_a_password_error_the_password() {
+async fn the_edit_form_focuses_the_text() {
     let app = app_with("[app]\neditable = true\n").await;
-    let w = create(&app, NewPaste { editable: true, ..with_password("before", Privacy::Readonly, "pw") }).await;
+    let w = create(&app, NewPaste { editable: true, ..new("before", Privacy::Unlisted) }).await;
     let html = body_text(app.get(&format!("/{w}/edit")).await).await;
     assert!(html.contains("autocomplete=\"off\" autofocus>"), "{html}");
-    assert_eq!(html.matches("autofocus").count(), 1);
-    let html = body_text(app.post_form(&format!("/{w}/edit"), "content=after&syntax=plain&password=wrong").await).await;
-    assert!(html.contains("autocomplete=\"current-password\" autofocus>"), "{html}");
     assert_eq!(html.matches("autofocus").count(), 1);
 }
 

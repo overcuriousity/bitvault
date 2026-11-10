@@ -84,17 +84,16 @@ async fn the_admin_sees_every_paste_and_can_delete_a_private_one() {
     let mut app = app_with(ADMIN_CONFIG).await;
     let public = create(&app, new("a", Privacy::Public, None)).await;
     let private = create(&app, new("private words", Privacy::Private, Some("pw"))).await;
-    let readonly = create(&app, new("guarded", Privacy::Readonly, Some("pw"))).await;
+    let readonly = create(&app, new("guarded", Privacy::Readonly, None)).await;
     app.sign_in_admin().await;
     let res = app.get("/admin").await;
     assert_eq!(res.status(), StatusCode::OK);
     let html = body_text(res).await;
     assert!(html.contains(&public) && html.contains(&private));
     assert!(!html.contains("private words"));
-    // Signed in, the delete form on a read-only paste's page needs no password.
+    // Only the admin's page of a read-only paste has a delete form.
     let page = body_text(app.get(&format!("/{readonly}")).await).await;
-    let form = &page[page.find(&format!("action=\"/{readonly}/delete\"")).unwrap()..];
-    assert!(!form[..form.find("</form>").unwrap()].contains("name=\"password\""));
+    assert!(page.contains(&format!("action=\"/{readonly}/delete\"")), "{page}");
     let res = app.post_form(&format!("/{private}/delete"), "next=admin").await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     assert_eq!(res.headers()[header::LOCATION].to_str().unwrap().split('?').next(), Some("/admin"));
@@ -121,7 +120,7 @@ async fn a_forged_session_cookie_is_not_a_session() {
     let res = app.get("/admin").await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     assert!(res.headers().get(header::CACHE_CONTROL).is_none());
-    let w = create(&app, new("guarded", Privacy::Readonly, Some("pw"))).await;
+    let w = create(&app, new("guarded", Privacy::Readonly, None)).await;
     assert_eq!(app.post_form(&format!("/{w}/delete"), "").await.status(), StatusCode::FORBIDDEN);
 }
 
@@ -276,7 +275,7 @@ async fn native_post(app: &App, uri: &str, origin: &str, form: &str) -> axum::ht
 #[tokio::test]
 async fn over_plain_http_signed_in_native_posts_with_their_origin_succeed() {
     let mut app = plain_admin_app().await;
-    let w = create(&app, new("guarded", Privacy::Readonly, Some("pw"))).await;
+    let w = create(&app, new("guarded", Privacy::Readonly, None)).await;
     app.sign_in_admin().await;
     let origin = app.origin.1.clone();
     let res = native_post(&app, &format!("/{w}/delete"), &origin, "next=admin").await;
@@ -292,7 +291,7 @@ async fn over_plain_http_signed_in_native_posts_with_their_origin_succeed() {
 #[tokio::test]
 async fn over_plain_http_a_signed_in_post_with_a_null_origin_is_refused() {
     let mut app = plain_admin_app().await;
-    let w = create(&app, new("guarded", Privacy::Readonly, Some("pw"))).await;
+    let w = create(&app, new("guarded", Privacy::Readonly, None)).await;
     app.sign_in_admin().await;
     let res = native_post(&app, &format!("/{w}/delete"), "null", "next=admin").await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
