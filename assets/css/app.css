@@ -49,6 +49,7 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
   .oc-field select:not(.oc-select-native) { min-height: var(--target-touch); font-size: 16px; }
   .bv-check { min-height: var(--target-touch); }
   .bv-create .bv-options > summary { padding-block: var(--space-3); }
+  .bv-settings summary { padding-block: var(--space-3); }
   .bv-check input { width: 1.5rem; height: 1.5rem; }
   .bv-admin-table td a { display: flex; align-items: center; min-height: var(--target-touch); }
   .bv-pager a { display: inline-flex; align-items: center; min-height: var(--target-touch); }
