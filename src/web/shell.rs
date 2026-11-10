@@ -40,10 +40,11 @@ pub const KIT_CSS: [&str; 7] = [
     "vendor/oc/css/profile-everyday.css",
 ];
 
-pub const MODULES: [&str; 8] = [
+pub const MODULES: [&str; 9] = [
     "js/prefs.js",
     "js/pwa.js",
     "vendor/oc/js/copy.js",
+    "js/copyfallback.js",
     "vendor/oc/js/notices.js",
     "vendor/oc/js/menu.js",
     "vendor/oc/js/dialog.js",

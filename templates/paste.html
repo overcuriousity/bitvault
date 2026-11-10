@@ -19,26 +19,30 @@
 {%- if burned %}
 {% call notice::notice("warning", "That was the last read, so this paste is gone. Its files stay available on this page for ten minutes.") %}{% endcall %}
 {%- endif %}
-{%- if !burned %}
+{%- if !burned || copy_text %}
 <div class="bv-actions" role="toolbar" aria-label="Paste actions">
-  <button type="button" class="oc-btn" data-oc-copy="{{ full_url }}">{{ self.icon("link")|safe }}Copy link</button>
+  {%- if !burned %}
+  <button type="button" class="oc-btn" data-oc-copy="{{ full_url }}" data-bv-needs-js hidden>{{ self.icon("link")|safe }}Copy link</button>
   <button type="button" class="oc-btn" data-bv-share="{{ full_url }}" hidden>{{ self.icon("share-2")|safe }}Share</button>
   {%- if qr.is_some() %}
-  <button type="button" class="oc-btn" data-oc-dialog-open="qr-dialog">{{ self.icon("qr-code")|safe }}QR code</button>
+  <button type="button" class="oc-btn" data-oc-dialog-open="qr-dialog" data-bv-needs-js hidden>{{ self.icon("qr-code")|safe }}QR code</button>
   {%- endif %}
   {%- if let Some(href) = raw_href %}
   <a class="oc-btn" href="{{ href }}">{{ self.icon("file")|safe }}Raw</a>
   {%- endif %}
+  {%- endif %}
   {%- if copy_text %}
-  <button type="button" class="oc-btn" data-bv-copy-target="paste-text">{{ self.icon("copy")|safe }}Copy text</button>
+  <button type="button" class="oc-btn" data-bv-copy-target="paste-text" data-bv-needs-js hidden>{{ self.icon("copy")|safe }}Copy text</button>
   {%- else if secret && !https_only %}
   <button type="button" class="oc-btn" data-bv-copy-target="paste-text" hidden>{{ self.icon("copy")|safe }}Copy text</button>
   {%- endif %}
+  {%- if !burned %}
   {%- if let Some(href) = translate %}
   <a class="oc-btn" href="{{ href }}">{{ self.icon("languages")|safe }}Translate</a>
   {%- endif %}
   {%- if let Some(href) = edit_href %}
   <a class="oc-btn" href="{{ href }}">{{ self.icon("pencil")|safe }}Edit</a>
+  {%- endif %}
   {%- endif %}
 </div>
 {%- endif %}
@@ -92,7 +96,7 @@
 </section>
 {%- endif %}
 <dl class="oc-facts bv-meta">
-  <dt>Address</dt><dd><span class="oc-mono bv-address-text">{{ full_url }}</span>{% call copy::copy("address", full_url, self.copy_icons()) %}{% endcall %}</dd>
+  <dt>Address</dt><dd><span class="oc-mono bv-address-text">{{ full_url }}</span></dd>
   {%- if let Some(short) = short_url %}
   <dt>Short address</dt><dd><span class="oc-mono bv-address-text">{{ short }}</span>{% call copy::copy("short address", short, self.copy_icons()) %}{% endcall %}</dd>
   {%- endif %}

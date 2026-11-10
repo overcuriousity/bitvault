@@ -939,7 +939,6 @@ async fn the_paste_page_puts_the_content_first_and_delete_last() {
     ];
     let at: Vec<usize> = order.iter().map(|n| position(&html, n)).collect();
     assert!(at.windows(2).all(|w| w[0] < w[1]), "{order:?} found at {at:?}");
-    assert!(!html[position(&html, "role=\"toolbar\"")..].contains("<form class=\"bv-delete\"") || at[5] > at[4]);
 }
 
 #[tokio::test]
@@ -1081,16 +1080,52 @@ async fn list_rows_show_their_expiry_and_a_copy_button_without_counting_a_read()
 
 #[tokio::test]
 async fn the_guide_has_an_anchor_for_every_help_link_on_the_create_form() {
-    let app = app_with("[app]\neditable = true\n").await;
-    let home = body_text(app.get("/").await).await;
-    let guide = body_text(app.get("/guide").await).await;
-    let mut targets: Vec<&str> = home.split("href=\"/guide#").skip(1).map(|r| r.split('"').next().unwrap()).collect();
-    for fixed in ["privacy", "password", "expiry", "burn", "syntax", "files", "editing", "api"] {
-        targets.push(fixed);
+    for config in ["[app]\neditable = true\n", "[app]\neditable = true\nhighlight = false\n"] {
+        let app = app_with(config).await;
+        let home = body_text(app.get("/").await).await;
+        let guide = body_text(app.get("/guide").await).await;
+        let mut targets: Vec<&str> =
+            home.split("href=\"/guide#").skip(1).map(|r| r.split('"').next().unwrap()).collect();
+        for fixed in ["privacy", "password", "expiry", "burn", "syntax", "files", "editing", "api"] {
+            targets.push(fixed);
+        }
+        for id in targets {
+            assert!(guide.contains(&format!("id=\"{id}\"")), "the guide has no #{id} ({config:?})");
+        }
     }
-    for id in targets {
-        assert!(guide.contains(&format!("id=\"{id}\"")), "the guide has no #{id}");
+}
+
+#[tokio::test]
+async fn a_head_request_leaves_the_creator_token_for_the_next_get() {
+    let app = app().await;
+    let res = app.post_multipart("/", &[("content", None, b"plain words")]).await;
+    let (w, cookie) = support::created(&res);
+    let res = app.send(app.req("HEAD", &format!("/{w}")).header("cookie", &cookie).body(Body::empty()).unwrap()).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(set_cookie(&res).is_none(), "HEAD does not clear the cookie");
+    let html = body_text(app.get_with_cookie(&format!("/{w}"), &cookie).await).await;
+    assert!(html.contains("Paste created."), "the creator view is still there for the GET");
+}
+
+#[tokio::test]
+async fn a_burning_view_keeps_only_copy_text_in_its_toolbar() {
+    let app = app().await;
+    let w = create(&app, NewPaste { burn_after_reads: 1, ..new("last words", Privacy::Public) }).await;
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    let toolbar = &html[position(&html, "role=\"toolbar\"")..position(&html, "id=\"paste-text\"")];
+    assert!(toolbar.contains("data-bv-copy-target=\"paste-text\"") && toolbar.contains("Copy text"));
+    for gone in ["Copy link", "Share", "QR code", "Raw", "Edit"] {
+        assert!(!toolbar.contains(gone), "{gone} needs a paste that is still there");
     }
+}
+
+#[tokio::test]
+async fn the_toolbar_buttons_that_need_scripts_ship_hidden() {
+    let app = app().await;
+    let w = create(&app, new("hello", Privacy::Public)).await;
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    let toolbar = &html[position(&html, "role=\"toolbar\"")..position(&html, "id=\"paste-text\"")];
+    assert_eq!(toolbar.matches("data-bv-needs-js hidden").count(), 3, "{toolbar}");
 }
 
 const LAN_HOST: &str = "192.168.1.5:8080";

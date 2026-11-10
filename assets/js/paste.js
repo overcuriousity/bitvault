@@ -1,4 +1,4 @@
-// The paste page: Share where the browser has it, Copy text from the shown content, and
+// The paste page: the buttons that need scripts, Share where the browser has it, Copy text from the shown content, and
 // relative times that stay fresh. Everything here is an extra; the page works without it.
 
 const MINUTE = 60;
@@ -59,6 +59,7 @@ async function copyTarget(button) {
 export function init(root = document) {
   refreshTimes(root, Date.now());
   setInterval(() => refreshTimes(root, Date.now()), REFRESH_MS);
+  for (const needed of root.querySelectorAll("[data-bv-needs-js]")) needed.hidden = false;
   for (const share of root.querySelectorAll("[data-bv-share]")) {
     if (typeof navigator.share !== "function") continue;
     share.hidden = false;

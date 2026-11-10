@@ -278,7 +278,7 @@ fn paste_view(
         Shown::Url(target) => (None, false, Some(target)),
         Shown::Secret | Shown::Sealed => (None, false, None),
     };
-    let copy_text = !secret && !burned && content.as_ref().is_some_and(|c| !c.is_empty());
+    let copy_text = !secret && content.as_ref().is_some_and(|c| !c.is_empty());
     let files = p
         .files
         .iter()
@@ -440,12 +440,14 @@ async fn view(
     let id = paste_id(&words)?;
     let now = domain::now();
     let tokens = created_tokens(&headers);
-    let mut res = if tokens.iter().any(|t| grant::redeem_creator(&st.grant_key, &st.redeemed, t, id, now)) {
+    // A HEAD request must neither redeem nor clear the creator token the following GET needs.
+    let head = method == Method::HEAD;
+    let mut res = if !head && tokens.iter().any(|t| grant::redeem_creator(&st.grant_key, &st.redeemed, t, id, now)) {
         render_creator(&st, viewer.admin, &viewer.base, id, now).await?
     } else {
         ordinary_view(&st, &viewer, &method, id, now, wants_page(query.as_deref())).await?
     };
-    if !tokens.is_empty() {
+    if !head && !tokens.is_empty() {
         res.headers_mut().append(header::SET_COOKIE, created_cookie(&st, &id.words(), "", 0)?);
     }
     Ok(res)
