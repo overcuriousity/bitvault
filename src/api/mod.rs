@@ -23,7 +23,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::domain::paste::{self, Access, Body, DeleteAuth, Paste};
-use crate::domain::{self, Privacy, files};
+use crate::domain::{self, Privacy};
 use crate::error::Error;
 use crate::ratelimit::{self, RateLimiter};
 use crate::security::ClientIp;
@@ -169,6 +169,7 @@ fn error_for(status: StatusCode) -> Error {
         StatusCode::PAYLOAD_TOO_LARGE => Error::TooLarge,
         StatusCode::TOO_MANY_REQUESTS => Error::TooManyAttempts,
         StatusCode::METHOD_NOT_ALLOWED => invalid("This address does not take that method. See /docs for the API."),
+        StatusCode::RANGE_NOT_SATISFIABLE => invalid("That byte range is outside the file."),
         StatusCode::REQUEST_TIMEOUT => invalid("The request took too long. Try again on a faster connection."),
         s if s.is_server_error() => Error::internal(format!("an API request ended with status {s}")),
         _ => invalid("The request could not be read. Check it against /docs and try again."),
@@ -192,6 +193,12 @@ pub async fn json_errors(req: Request, next: Next) -> Response {
     }
     let mut out = ApiError(error_for(status)).into_response();
     *out.status_mut() = status;
+    // A 416 must tell the client the file's size.
+    if let Some(range) =
+        res.headers().get(header::CONTENT_RANGE).filter(|_| status == StatusCode::RANGE_NOT_SATISFIABLE)
+    {
+        out.headers_mut().insert(header::CONTENT_RANGE, range.clone());
+    }
     out
 }
 
@@ -728,8 +735,7 @@ async fn get_file(
         None => password_access(&headers)?,
     };
     let (p, dek) = paste::files_access(&st, id, access, ip, domain::now()).await?;
-    let (meta, body) = files::open(&st, id, position, dek.as_ref()).await?;
-    Ok(crate::web::files::download(&p, &meta, body)?)
+    Ok(crate::web::files::download(&st, &p, id, position, dek.as_ref(), &headers).await?)
 }
 
 // ---------------------------------------------------------------------------------------------

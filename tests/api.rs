@@ -546,3 +546,17 @@ async fn the_editable_default_follows_the_server_setting() {
     let words = json_of(res).await["words"].as_str().unwrap().to_owned();
     assert_eq!(json_of(get(&on, &format!("/api/v1/pastes/{words}"), &[]).await).await["editable"], false);
 }
+
+#[tokio::test]
+async fn the_file_route_honours_ranges_for_public_files() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let words = public_with_file(&app).await;
+    let res = get(&app, &format!("/api/v1/pastes/{words}/files/1"), &[("range", "bytes=1-3")]).await;
+    assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(res.headers()["content-range"], "bytes 1-3/5");
+    assert_eq!(res.headers()["content-length"], "3");
+    assert_eq!(bytes_of(res).await, b"yte");
+    let res = get(&app, &format!("/api/v1/pastes/{words}/files/1"), &[("range", "bytes=50-")]).await;
+    assert_eq!(res.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    assert_eq!(res.headers()["content-range"], "bytes */5");
+}

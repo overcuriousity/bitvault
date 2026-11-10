@@ -706,3 +706,145 @@ async fn downloads_and_zips_are_never_compressed_but_pages_are() {
     let page = fetch(format!("/{w}")).await;
     assert!(page.headers().get(header::CONTENT_ENCODING).is_some(), "the paste page should be compressed");
 }
+
+async fn range_get(app: &support::App, uri: &str, range: Option<&str>) -> axum::http::Response<axum::body::Body> {
+    let mut r = app.req("GET", uri);
+    if let Some(range) = range {
+        r = r.header(header::RANGE, range);
+    }
+    app.send(r.body(axum::body::Body::empty()).unwrap()).await
+}
+
+fn head(res: &axum::http::Response<axum::body::Body>, name: header::HeaderName) -> Option<&str> {
+    res.headers().get(name).and_then(|v| v.to_str().ok())
+}
+
+async fn public_file(app: &support::App, data: &[u8]) -> String {
+    let mut staging = Staging::new(&app.st.files_dir).unwrap();
+    staging.add("data.bin", "", body(data), LIMIT).await.unwrap();
+    paste::create(&app.st, new("x", Privacy::Public), Some(staging), NOW).await.unwrap().words()
+}
+
+#[tokio::test]
+async fn a_public_file_has_a_length_and_accepts_ranges() {
+    let app = support::app().await;
+    let data = bytes(1000, 5);
+    let w = public_file(&app, &data).await;
+    let res = range_get(&app, &format!("/{w}/file/1"), None).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(head(&res, header::CONTENT_LENGTH), Some("1000"));
+    assert_eq!(head(&res, header::ACCEPT_RANGES), Some("bytes"));
+    assert_eq!(head(&res, header::CACHE_CONTROL), Some("no-store"));
+    assert_eq!(collect(res.into_body()).await.unwrap(), data);
+}
+
+#[tokio::test]
+async fn single_ranges_send_exactly_the_requested_bytes() {
+    let app = support::app().await;
+    let data = bytes(1000, 6);
+    let w = public_file(&app, &data).await;
+    let uri = format!("/{w}/file/1");
+    for (range, from, to) in
+        [("bytes=0-9", 0, 9), ("bytes=-5", 995, 999), ("bytes=10-", 10, 999), ("bytes=990-5000", 990, 999)]
+    {
+        let res = range_get(&app, &uri, Some(range)).await;
+        assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT, "{range}");
+        assert_eq!(head(&res, header::CONTENT_RANGE), Some(format!("bytes {from}-{to}/1000").as_str()), "{range}");
+        assert_eq!(head(&res, header::CONTENT_LENGTH), Some((to - from + 1).to_string().as_str()), "{range}");
+        assert_eq!(collect(res.into_body()).await.unwrap(), data[from..=to], "{range}");
+    }
+}
+
+#[tokio::test]
+async fn an_unsatisfiable_range_is_416_with_the_total() {
+    let app = support::app().await;
+    let w = public_file(&app, &bytes(100, 7)).await;
+    for range in ["bytes=999999-", "bytes=100-120", "bytes=-0"] {
+        let res = range_get(&app, &format!("/{w}/file/1"), Some(range)).await;
+        assert_eq!(res.status(), StatusCode::RANGE_NOT_SATISFIABLE, "{range}");
+        assert_eq!(head(&res, header::CONTENT_RANGE), Some("bytes */100"), "{range}");
+    }
+}
+
+#[tokio::test]
+async fn multi_range_and_malformed_ranges_get_the_full_body() {
+    let app = support::app().await;
+    let data = bytes(100, 8);
+    let w = public_file(&app, &data).await;
+    for range in ["bytes=0-1,5-6", "bytes=abc", "items=0-5", "bytes=5-2", "bytes=-"] {
+        let res = range_get(&app, &format!("/{w}/file/1"), Some(range)).await;
+        assert_eq!(res.status(), StatusCode::OK, "{range}");
+        assert!(res.headers().get(header::CONTENT_RANGE).is_none(), "{range}");
+        assert_eq!(collect(res.into_body()).await.unwrap(), data, "{range}");
+    }
+}
+
+#[tokio::test]
+async fn a_partial_response_is_not_compressed_and_head_has_no_body() {
+    let app = support::app().await;
+    let w = public_file(&app, &bytes(5000, 9)).await;
+    let r = app
+        .req("GET", &format!("/{w}/file/1"))
+        .header(header::RANGE, "bytes=0-999")
+        .header(header::ACCEPT_ENCODING, "gzip");
+    let res = app.send(r.body(axum::body::Body::empty()).unwrap()).await;
+    assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+    assert!(res.headers().get(header::CONTENT_ENCODING).is_none());
+
+    let res = app.send(app.req("HEAD", &format!("/{w}/file/1")).body(axum::body::Body::empty()).unwrap()).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(head(&res, header::CONTENT_LENGTH), Some("5000"));
+    assert!(collect(res.into_body()).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn private_files_have_a_plaintext_length_and_ignore_ranges() {
+    let app = support::app().await;
+    let plain = bytes(150_000, 10);
+    let mut staging = Staging::new_private(&app.st.files_dir).unwrap();
+    staging.add("p.bin", "", body(&plain), LIMIT).await.unwrap();
+    let id = paste::create(
+        &app.st,
+        NewPaste { password: Some("pw".into()), ..new("", Privacy::Private) },
+        Some(staging),
+        domain_now(),
+    )
+    .await
+    .unwrap();
+    let opened = paste::read(&app.st, id, Access::Password("pw".into()), IP, domain_now()).await.unwrap();
+    let uri = format!("/{}/file/1?g={}", id.words(), opened.grant.unwrap());
+    let res = range_get(&app, &uri, Some("bytes=0-9")).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(head(&res, header::CONTENT_LENGTH), Some("150000"));
+    assert!(res.headers().get(header::ACCEPT_RANGES).is_none());
+    assert!(res.headers().get(header::CONTENT_RANGE).is_none());
+    assert_eq!(collect(res.into_body()).await.unwrap(), plain);
+}
+
+#[tokio::test]
+async fn a_secret_container_is_served_with_a_length_and_ranges() {
+    let app = support::app().await;
+    let file = secret_container(b"payload", PBKDF2_ITERATIONS);
+    let mut staging = Staging::new(&app.st.files_dir).unwrap();
+    staging.add_container(body(&file), LIMIT).await.unwrap();
+    let salt = [1u8; 16];
+    let n = NewPaste {
+        secret: Some(SecretParts {
+            container: secret_container(br#"{"text":"","files":["a"]}"#, PBKDF2_ITERATIONS),
+            verifier_salt: salt,
+            verifier: crypto::browser_verifier(SECRET_PASSWORD, &salt),
+        }),
+        ..new("", Privacy::Secret)
+    };
+    let w = paste::create(&app.st, n, Some(staging), domain_now()).await.unwrap().words();
+    let uri = format!("/{w}/file/1");
+    let res = range_get(&app, &uri, None).await;
+    assert_eq!(head(&res, header::CONTENT_LENGTH), Some(file.len().to_string().as_str()));
+    let res = range_get(&app, &uri, Some("bytes=2-6")).await;
+    assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(collect(res.into_body()).await.unwrap(), file[2..=6]);
+}
+
+fn domain_now() -> i64 {
+    bitvault::domain::now()
+}

@@ -15,7 +15,7 @@ use axum::body::Body;
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt, future, stream};
 use tokio::fs::File;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter, DuplexStream};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter, DuplexStream};
 use tokio::task::JoinHandle;
 use tokio_util::compat::FuturesAsyncWriteCompatExt;
 use tokio_util::io::{ReaderStream, StreamReader};
@@ -365,6 +365,21 @@ pub async fn open(st: &AppState, id: PasteId, position: u32, dek: Option<&Dek>) 
         }
     };
     Ok((meta, body))
+}
+
+/// The bytes `start..=end` of a file stored as-is (public levels and secret containers), read
+/// by seeking, so nothing before `start` or after `end` is touched. Access rules are the
+/// caller's, as for [`open`]; the caller has checked the range against the file's size.
+pub async fn open_range(st: &AppState, id: PasteId, position: u32, start: u64, end: u64) -> Result<Body, Error> {
+    let mut file = File::open(dir(st, id).join(position.to_string())).await?;
+    file.seek(io::SeekFrom::Start(start)).await?;
+    let len = end.saturating_sub(start).saturating_add(1);
+    Ok(Body::from_stream(ReaderStream::with_capacity(file.take(len), CHUNK_LEN)))
+}
+
+/// One file's metadata without opening it.
+pub async fn meta(st: &AppState, id: PasteId, position: u32) -> Result<FileMeta, Error> {
+    list(st, id).await?.into_iter().find(|f| f.position == position).ok_or(Error::NotFound)
 }
 
 /// Every file of a paste as a stored (uncompressed) zip, written while it streams out.

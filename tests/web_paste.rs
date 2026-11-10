@@ -1040,3 +1040,19 @@ fn relative_times_use_calm_units() {
     assert_eq!(relative(0, 2 * 86_400 + 4 * 3600), "in 2 d 4 h");
     assert_eq!(relative(0, 400 * 86_400), "in 1 y 35 d");
 }
+
+#[tokio::test]
+async fn a_range_request_cannot_open_a_burned_pastes_file_without_a_grant() {
+    let app = app().await;
+    let w =
+        create_with_file(&app, NewPaste { burn_after_reads: 1, ..new("once", Privacy::Public) }, "a.txt", b"abcdef")
+            .await;
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    let link = grant_link(&html, "/file/1");
+    let ranged =
+        |uri: String| app.send(app.req("GET", &uri).header(header::RANGE, "bytes=0-2").body(Body::empty()).unwrap());
+    let res = ranged(link).await;
+    assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(bytes_of(res).await, b"abc");
+    assert_eq!(ranged(format!("/{w}/file/1")).await.status(), StatusCode::NOT_FOUND);
+}
