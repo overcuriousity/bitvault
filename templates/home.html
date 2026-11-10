@@ -1,42 +1,97 @@
 {% import "components/button.html" as button %}
 {% import "components/field.html" as field %}
-{% import "components/select.html" as select %}
+{% import "components/help.html" as help %}
 {% import "components/notice.html" as notice %}
 <div class="oc-page-head"><h1>New paste</h1></div>
 {% if let Some(deleted) = deleted %}{% call notice::notice_escaped("success", deleted) %}{% endcall %}{% endif %}
-<p class="bv-lead">Share text, links and files with a three-word address.</p>
 
-<form class="oc-form bv-create" id="create-form" method="post" action="/" enctype="multipart/form-data" data-max-secret-mb="{{ max_secret_mb }}">
+<section class="bv-open" aria-labelledby="open-heading">
+  <h2 id="open-heading">Open a paste</h2>
+  <form class="oc-form" method="post" action="/open" hx-post="/open" hx-target="#open-result" hx-swap="innerHTML">
+    <div class="oc-field">
+      <label for="words">Three words</label>
+      {#- words.js fills the list on first focus; without it the field works the same, without suggestions. #}
+      <input class="oc-input" id="words" name="words" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" list="word-list" data-words-src="{{ words_src }}">
+      <datalist id="word-list"></datalist>
+    </div>
+    <div class="oc-form__actions">
+      {% call button::submit("default", "Open paste") %}{% endcall %}
+    </div>
+  </form>
+  <div id="open-result" aria-live="polite"></div>
+</section>
+
+<section class="bv-new" aria-labelledby="create-heading">
+<h2 id="create-heading">Create a paste</h2>
+<p class="bv-lead">Share text, links and files with a three-word address.</p>
+{#- Field order is a contract with the server: every text field, and so the options, before the file input. #}
+<form class="oc-form bv-create" id="create-form" method="post" action="/" enctype="multipart/form-data" data-max-file-mb="{{ max_file_mb }}" data-max-secret-mb="{{ max_secret_mb }}">
   <div class="oc-field">
     <label for="content">Content</label>
-    <textarea class="oc-input bv-mono" id="content" name="content" rows="10" spellcheck="false" autocomplete="off"></textarea>
+    <textarea class="oc-input bv-mono" id="content" name="content" rows="10" spellcheck="false" autocomplete="off" autofocus></textarea>
   </div>
-  {#- Secret starts disabled: without create.js it would post the plaintext. create.js enables it. #}
-  <div class="oc-field">
-    <label for="privacy">Privacy</label>
-    <select id="privacy" name="privacy" data-oc-menu>
-      {%- for (value, text, chosen) in privacy_options %}
-      <option value="{{ value }}"{% if chosen %} selected{% endif %}{% if value == "secret" %} disabled{% endif %}>{{ text }}</option>
-      {%- endfor %}
-    </select>
-  </div>
-  <div class="bv-password" data-for="readonly private">
-    {% call field::password("password", "password", "Password", "new-password") %}{% endcall %}
-  </div>
-  <div class="bv-password" data-for="secret">
-    {% call field::secret("secret-password", "Password", "new-password") %}{% endcall %}
-  </div>
-  {% call select::select("expiry", "expiry", "Expires after", expiry_options) %}{% endcall %}
-  {% call field::number("burn", "burn_after_reads", "Burn after reads (0 is off)", default_burn) %}{% endcall %}
-  {% call select::select("syntax", "syntax", "Syntax", syntax_options) %}{% endcall %}
-  {% if editable %}
-  <label class="bv-check"><input type="checkbox" name="editable" value="on"> Allow editing</label>
-  {% endif %}
-  {% if uploader_password %}
-  {% call field::password("uploader-password", "uploader_password", "Uploader password", "current-password") %}{% endcall %}
-  {% endif %}
+  <details class="bv-options"{% if uploader_password %} open{% endif %}>
+    <summary><span class="bv-options__title">Options</span> <span class="bv-options__summary" id="options-summary">{{ summary }}</span></summary>
+    <div class="bv-options__body">
+      {#- Secret starts disabled: without create.js it would post the plaintext. create.js enables it. #}
+      <div class="oc-field">
+        {% call help::label("privacy", "Privacy", "privacy", help_icon) %}{% endcall %}
+        <select id="privacy" name="privacy" data-oc-menu>
+          {%- for (group, options) in privacy_groups %}
+          <optgroup label="{{ group }}">
+            {%- for (value, text, chosen) in options %}
+            <option value="{{ value }}"{% if chosen %} selected{% endif %}{% if value == &"secret" %} disabled{% endif %}>{{ text }}</option>
+            {%- endfor %}
+          </optgroup>
+          {%- endfor %}
+        </select>
+      </div>
+      <div class="bv-password" data-for="readonly private">
+        <div class="oc-field">
+          {% call help::label("password", "Password", "password", help_icon) %}{% endcall %}
+          <input class="oc-input" id="password" name="password" type="password" autocomplete="new-password">
+        </div>
+      </div>
+      {#- Unnamed, so the browser never submits it. #}
+      <div class="bv-password" data-for="secret">
+        <div class="oc-field">
+          {% call help::label("secret-password", "Password", "password", help_icon) %}{% endcall %}
+          <input class="oc-input" id="secret-password" type="password" autocomplete="new-password">
+        </div>
+      </div>
+      <div class="oc-field">
+        {% call help::label("expiry", "Expires after", "expiry", help_icon) %}{% endcall %}
+        <select id="expiry" name="expiry" data-oc-menu>
+          {%- for (value, text, chosen) in expiry_options %}
+          <option value="{{ value }}"{% if chosen %} selected{% endif %}>{{ text }}</option>
+          {%- endfor %}
+        </select>
+      </div>
+      <div class="oc-field">
+        {% call help::label("burn", "Burn after reads (0 is off)", "burn", help_icon) %}{% endcall %}
+        <input class="oc-input" id="burn" name="burn_after_reads" type="number" min="0" step="1" inputmode="numeric" value="{{ default_burn }}" autocomplete="off">
+      </div>
+      <div class="oc-field">
+        {% call help::label("syntax", "Syntax", "syntax", help_icon) %}{% endcall %}
+        <select id="syntax" name="syntax" data-oc-menu>
+          {%- for (value, text, chosen) in syntax_options %}
+          <option value="{{ value }}"{% if chosen %} selected{% endif %}>{{ text }}</option>
+          {%- endfor %}
+        </select>
+      </div>
+      {%- if editable %}
+      <div class="bv-label">
+        <label class="bv-check"><input type="checkbox" name="editable" value="on" checked> Allow editing</label>
+        <a class="oc-btn oc-btn--icon oc-btn--row bv-help" href="/guide#editing" aria-label="Help: Allow editing" data-oc-tip="Help: Allow editing">{{ help_icon|safe }}</a>
+      </div>
+      {%- endif %}
+      {%- if uploader_password %}
+      {% call field::password("uploader-password", "uploader_password", "Uploader password", "current-password") %}{% endcall %}
+      {%- endif %}
+    </div>
+  </details>
   <div class="oc-field bv-files">
-    <label for="files">Files</label>
+    {% call help::label("files", "Files", "files", help_icon) %}{% endcall %}
     <input class="oc-input" id="files" name="file" type="file" multiple>
   </div>
   <div id="create-notice" aria-live="polite"></div>
@@ -44,14 +99,4 @@
     {% call button::submit("primary", "Create paste") %}{% endcall %}
   </div>
 </form>
-
-<section class="bv-open" aria-labelledby="open-heading">
-  <h2 id="open-heading">Open a paste</h2>
-  <form class="oc-form" method="post" action="/open" hx-post="/open" hx-target="#open-result" hx-swap="innerHTML">
-    {% call field::text("words", "words", "Three words", "off") %}{% endcall %}
-    <div class="oc-form__actions">
-      {% call button::submit("default", "Open paste") %}{% endcall %}
-    </div>
-  </form>
-  <div id="open-result" aria-live="polite"></div>
 </section>

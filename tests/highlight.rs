@@ -74,3 +74,25 @@ fn syntax_css_uses_only_the_probed_tokens() {
     }
     assert!(n > 0);
 }
+
+#[test]
+fn automatic_detection_recognises_common_first_lines() {
+    for (first, then) in
+        [("#!/usr/bin/env python", "print('hi')\n"), ("#!/bin/bash", "echo hi\n"), ("<?php", "echo 'hi';\n")]
+    {
+        let html = highlight::render_auto(&format!("{first}\n{then}")).unwrap_or_else(|| panic!("{first}"));
+        assert!(html.contains("class=\"hl-"), "{first}: {html}");
+    }
+}
+
+#[test]
+fn automatic_detection_leaves_prose_plain() {
+    assert!(highlight::render_auto("Dear team,\nthe meeting moved.\n").is_none());
+    assert!(highlight::render_auto("").is_none());
+}
+
+#[test]
+fn the_plain_token_never_highlights() {
+    assert!(highlight::render("#!/bin/bash\necho hi\n", highlight::PLAIN).is_none());
+    assert!(!highlight::languages().iter().any(|(t, n)| t == highlight::PLAIN || n == "Plain Text"));
+}

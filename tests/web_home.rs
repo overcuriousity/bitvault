@@ -130,3 +130,154 @@ async fn opening_a_well_formed_but_missing_paste_says_so() {
     assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert!(body_text(res).await.contains("No paste has these words. Check them and try again."));
 }
+
+#[tokio::test]
+async fn the_long_expiries_are_offered_only_when_configured() {
+    let html = body_text(app_with("[app]\nmax_expiry = \"never\"\n").await.get("/").await).await;
+    assert!(!html.contains("value=\"2years\""), "long expiries are opt-in");
+    let opted =
+        app_with("[app]\nexpiry_choices = [\"24hour\", \"2years\", \"16years\", \"never\"]\nmax_expiry = \"never\"\n")
+            .await;
+    let html = body_text(opted.get("/").await).await;
+    assert!(html.contains("<option value=\"2years\">2 years</option>"), "{html}");
+    assert!(html.contains("<option value=\"16years\">16 years</option>"));
+    let res = opted.post_multipart("/", &[("content", None, b"long"), ("expiry", None, b"16years")]).await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn the_syntax_choice_defaults_to_automatic_and_keeps_plain_apart() {
+    let app = app().await;
+    let html = body_text(app.get("/").await).await;
+    assert!(html.contains("<option value=\"auto\" selected>Automatic</option>"), "{html}");
+    assert!(html.contains("<option value=\"plain\">Plain</option>"));
+    let res = app.post_multipart("/", &[("content", None, b"a"), ("syntax", None, b"auto")]).await;
+    let (auto, _) = support::created(&res);
+    let res = app.post_multipart("/", &[("content", None, b"b"), ("syntax", None, b"plain")]).await;
+    let (plain, _) = support::created(&res);
+    let meta = |w: &str| {
+        let id = bitvault::domain::words::parse(w).unwrap();
+        bitvault::domain::paste::meta(&app.st, id, bitvault::domain::now())
+    };
+    assert_eq!(meta(&auto).await.unwrap().syntax, None);
+    assert_eq!(meta(&plain).await.unwrap().syntax.as_deref(), Some("plain"));
+
+    let off = body_text(app_with("[app]\nhighlight = false\n").await.get("/").await).await;
+    assert!(!off.contains("value=\"auto\""));
+    assert!(off.contains("<option value=\"plain\" selected>Plain</option>"));
+}
+
+#[tokio::test]
+async fn allow_editing_is_offered_checked_only_when_the_server_allows_editing() {
+    let off = body_text(app().await.get("/").await).await;
+    assert!(!off.contains("name=\"editable\""));
+    let on = app_with("[app]\neditable = true\n").await;
+    let html = body_text(on.get("/").await).await;
+    assert!(html.contains("<input type=\"checkbox\" name=\"editable\" value=\"on\" checked>"), "{html}");
+    // An unchecked box sends nothing, which must mean "not editable" on the web form.
+    let res = on.post_multipart("/", &[("content", None, b"x"), ("privacy", None, b"public")]).await;
+    let (words, _) = support::created(&res);
+    let id = bitvault::domain::words::parse(&words).unwrap();
+    assert!(!bitvault::domain::paste::meta(&on.st, id, bitvault::domain::now()).await.unwrap().editable);
+}
+
+#[tokio::test]
+async fn opening_a_paste_comes_before_the_create_form() {
+    let html = body_text(app().await.get("/").await).await;
+    let open = html.find("action=\"/open\"").unwrap();
+    let create = html.find("id=\"create-form\"").unwrap();
+    assert!(open < create);
+    assert!(html.contains("list=\"word-list\""));
+    assert!(html.contains("<datalist id=\"word-list\"></datalist>"));
+    let src = bitvault::assets::Assets::url("bip39-english.txt");
+    assert!(html.contains(&format!("data-words-src=\"{src}\"")), "{html}");
+}
+
+#[tokio::test]
+async fn an_open_prefix_of_each_word_finds_the_paste() {
+    let app = app().await;
+    let res = app.post_multipart("/", &[("content", None, b"hi")]).await;
+    let (words, _) = support::created(&res);
+    let short: Vec<String> = words.split('-').map(|w| w.chars().take(4).collect()).collect();
+    let res = app.post_form("/open", &format!("words={}", short.join("+"))).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["hx-redirect"], format!("/{words}"));
+}
+
+#[tokio::test]
+async fn privacy_levels_are_grouped_by_how_they_are_protected() {
+    let html = body_text(app().await.get("/").await).await;
+    let groups: Vec<usize> = ["No password", "Password", "Encrypted in your browser"]
+        .iter()
+        .map(|g| html.find(&format!("<optgroup label=\"{g}\">")).unwrap_or_else(|| panic!("{g}")))
+        .collect();
+    assert!(groups.windows(2).all(|w| w[0] < w[1]));
+    let at = |v: &str| html.find(&format!("value=\"{v}\"")).unwrap();
+    assert!(groups[0] < at("public") && at("unlisted") < groups[1]);
+    assert!(groups[1] < at("readonly") && at("private") < groups[2]);
+    assert!(groups[2] < at("secret"));
+    let only = body_text(app_with("[app]\nprivacy_levels = [\"public\", \"unlisted\"]\n").await.get("/").await).await;
+    assert!(only.contains("<optgroup label=\"No password\">"));
+    assert!(!only.contains("<optgroup label=\"Password\">") && !only.contains("Encrypted in your browser"));
+}
+
+#[tokio::test]
+async fn the_options_sit_in_a_summary_before_the_file_input() {
+    let html = body_text(app().await.get("/").await).await;
+    let details = html.find("<details class=\"bv-options\">").expect("closed options");
+    let end = html.find("</details>").unwrap();
+    let file = html.find("type=\"file\"").unwrap();
+    assert!(end < file);
+    for name in
+        ["name=\"privacy\"", "name=\"password\"", "name=\"expiry\"", "name=\"burn_after_reads\"", "name=\"syntax\""]
+    {
+        let at = html.find(name).unwrap();
+        assert!(details < at && at < end, "{name} belongs in the options");
+    }
+    assert!(html.find("name=\"content\"").unwrap() < details);
+    assert!(
+        html.contains("<span class=\"bv-options__summary\" id=\"options-summary\">Unlisted · 24 hours</span>"),
+        "{html}"
+    );
+    let burning = app_with("[app]\ndefault_burn_after = 3\ndefault_privacy = \"public\"\n").await;
+    let html = body_text(burning.get("/").await).await;
+    assert!(html.contains(">Public · 24 hours · Burns after 3 reads</span>"), "{html}");
+}
+
+#[tokio::test]
+async fn the_options_open_when_the_uploader_password_is_needed() {
+    let html = body_text(app_with("[app]\nuploader_password = \"x\"\neditable = true\n").await.get("/").await).await;
+    let details = html.find("<details class=\"bv-options\" open>").expect("open options");
+    let end = html.find("</details>").unwrap();
+    for name in ["name=\"uploader_password\"", "name=\"editable\""] {
+        let at = html.find(name).unwrap();
+        assert!(details < at && at < end, "{name} belongs in the options");
+    }
+}
+
+#[tokio::test]
+async fn the_content_is_focused_and_has_no_placeholder() {
+    let html = body_text(app().await.get("/").await).await;
+    let at = html.find("<textarea").unwrap();
+    let tag = &html[at..at + html[at..].find('>').unwrap()];
+    assert!(tag.contains(" autofocus"), "{tag}");
+    assert!(!tag.contains("placeholder"), "{tag}");
+    assert!(html.contains("data-max-file-mb=\"2048\"") && html.contains("data-max-secret-mb=\"256\""));
+}
+
+#[tokio::test]
+async fn labels_link_to_their_guide_sections() {
+    let html = body_text(app_with("[app]\neditable = true\n").await.get("/").await).await;
+    for (id, field) in [
+        ("privacy", "Privacy"),
+        ("password", "Password"),
+        ("expiry", "Expires after"),
+        ("burn", "Burn after reads (0 is off)"),
+        ("syntax", "Syntax"),
+        ("files", "Files"),
+        ("editing", "Allow editing"),
+    ] {
+        assert!(html.contains(&format!("href=\"/guide#{id}\" aria-label=\"Help: {field}\"")), "{id}");
+    }
+    assert!(html.contains("data-icon=\"circle-question-mark\""));
+}

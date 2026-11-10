@@ -528,3 +528,21 @@ async fn a_patch_may_carry_a_whole_escaped_paste() {
     let res = send_json(&app, "PATCH", &uri, &json!({"content": "x".repeat((1 << 20) + 1)}), &[]).await;
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
+
+#[tokio::test]
+async fn the_editable_default_follows_the_server_setting() {
+    let on = app_with("[app]\neditable = true\n").await;
+    let words = create(&on, json!({"content": "x", "privacy": "public"})).await;
+    assert_eq!(json_of(get(&on, &format!("/api/v1/pastes/{words}"), &[]).await).await["editable"], true);
+    let words = create(&on, json!({"content": "x", "privacy": "public", "editable": false})).await;
+    assert_eq!(json_of(get(&on, &format!("/api/v1/pastes/{words}"), &[]).await).await["editable"], false);
+    let res = post_multipart(&on, &[("privacy", None, b"public"), ("content", None, b"x")]).await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let words = json_of(res).await["words"].as_str().unwrap().to_owned();
+    assert_eq!(json_of(get(&on, &format!("/api/v1/pastes/{words}"), &[]).await).await["editable"], true);
+    let res =
+        post_multipart(&on, &[("privacy", None, b"public"), ("editable", None, b"false"), ("content", None, b"x")])
+            .await;
+    let words = json_of(res).await["words"].as_str().unwrap().to_owned();
+    assert_eq!(json_of(get(&on, &format!("/api/v1/pastes/{words}"), &[]).await).await["editable"], false);
+}

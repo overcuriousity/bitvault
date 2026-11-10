@@ -904,3 +904,18 @@ async fn a_replayed_creator_cookie_gets_the_ordinary_view() {
     assert!(again.contains("plain words") && !again.contains("Paste created."), "{again}");
     assert_eq!(read_count(&app, &w).await, 1);
 }
+
+#[tokio::test]
+async fn an_automatic_syntax_is_detected_from_the_first_line_when_shown() {
+    let app = app().await;
+    let script = "#!/usr/bin/env python\nprint('hi')\n";
+    let auto = create(&app, new(script, Privacy::Public)).await;
+    assert!(body_text(app.get(&format!("/{auto}")).await).await.contains("hl-"));
+    let plain = create(&app, NewPaste { syntax: Some("plain".into()), ..new(script, Privacy::Public) }).await;
+    assert!(!body_text(app.get(&format!("/{plain}")).await).await.contains("hl-"));
+    let prose = create(&app, new("Dear team,\nhello.\n", Privacy::Public)).await;
+    assert!(!body_text(app.get(&format!("/{prose}")).await).await.contains("hl-"));
+    let off = app_with("[app]\nhighlight = false\n").await;
+    let w = create(&off, new(script, Privacy::Public)).await;
+    assert!(!body_text(off.get(&format!("/{w}")).await).await.contains("hl-"));
+}

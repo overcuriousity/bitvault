@@ -19,6 +19,7 @@ use super::admin::MaybeAdmin;
 use super::multipart::{Guarded, too_large};
 use super::{DeletedQuery, Extras, page_with};
 use crate::assets::Assets;
+use crate::config::AppConfig;
 use crate::domain::crypto::{self, SALT_LEN};
 use crate::domain::expiry::{self, Expiry};
 use crate::domain::files::Staging;
@@ -29,6 +30,8 @@ use crate::ratelimit::{self, RateLimiter};
 use crate::state::AppState;
 
 const MIB: u64 = 1 << 20;
+/// The syntax form value for detection from the first line, stored as no syntax.
+const AUTO: &str = "auto";
 /// Each text field of the create form, and the text of an API create.
 pub(crate) const TEXT_LIMIT: usize = paste::TEXT_LIMIT;
 const SECRET_IN_BROWSER: &str = "Secret pastes are encrypted in the browser. Create them on the web page instead.";
@@ -37,27 +40,51 @@ const SECRET_IN_BROWSER: &str = "Secret pastes are encrypted in the browser. Cre
 // overhead.
 const CONTAINER_LIMIT: usize = crypto::browser_container_max_len(6 * TEXT_LIMIT as u64 + (64 << 10)) as usize;
 
+/// A select option as (value, label, selected).
+type Choice = (&'static str, &'static str, bool);
+
 #[derive(Template)]
 #[template(path = "home.html")]
 struct Home {
-    privacy_options: Vec<(String, &'static str, bool)>,
+    /// Privacy choices by group label, empty groups left out.
+    privacy_groups: Vec<(&'static str, Vec<Choice>)>,
     expiry_options: Vec<(&'static str, String, bool)>,
     syntax_options: Vec<(String, String, bool)>,
     default_burn: u32,
     editable: bool,
     uploader_password: bool,
+    /// The options' one-line summary as rendered; `create.js` keeps it in sync.
+    summary: String,
+    /// Total limit for the files of a paste, which `create.js` checks before uploading.
+    max_file_mb: u64,
     /// Per-file plaintext limit for secret pastes, which `create.js` enforces before encrypting.
     max_secret_mb: u64,
+    words_src: String,
+    help_icon: String,
     deleted: Option<String>,
 }
 
-fn privacy_label(level: &str) -> &'static str {
-    Privacy::parse(level).map_or("Secret", super::privacy_label)
-}
+const PRIVACY_GROUPS: [(&str, &[Privacy]); 3] = [
+    ("No password", &[Privacy::Public, Privacy::Unlisted]),
+    ("Password", &[Privacy::Readonly, Privacy::Private]),
+    ("Encrypted in your browser", &[Privacy::Secret]),
+];
 
 fn sentence_case(s: &str) -> String {
     let mut chars = s.chars();
     chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
+/// The same line `create.js` builds from the live choices, e.g. "Unlisted · 24 hours".
+fn options_summary(privacy: &str, expiry: &str, burn: u32) -> String {
+    let mut parts = vec![privacy.to_owned(), expiry.to_owned()];
+    parts.retain(|p| !p.is_empty());
+    match burn {
+        0 => {}
+        1 => parts.push("Burns after 1 read".to_owned()),
+        n => parts.push(format!("Burns after {n} reads")),
+    }
+    parts.join(" · ")
 }
 
 #[derive(Deserialize)]
@@ -80,30 +107,40 @@ async fn index(
     Query(q): Query<DeletedQuery>,
 ) -> Result<Html<String>, Error> {
     let app = &st.cfg.app;
-    let mut syntax_options = vec![("plain".to_owned(), "Plain".to_owned(), true)];
-    if app.highlight {
-        syntax_options.extend(highlight::languages().iter().map(|(t, n)| (t.clone(), n.clone(), false)));
-    }
+    let syntax_options = syntax_options(app, if app.highlight { None } else { Some(highlight::PLAIN) });
+    let privacy_groups: Vec<_> = PRIVACY_GROUPS
+        .iter()
+        .map(|(group, levels)| {
+            let offered = levels.iter().filter(|p| app.privacy_levels.iter().any(|l| l == p.as_str()));
+            let options = offered.map(|p| (p.as_str(), super::privacy_label(*p), p.as_str() == app.default_privacy));
+            (*group, options.collect::<Vec<_>>())
+        })
+        .filter(|(_, options)| !options.is_empty())
+        .collect();
+    let expiry_options: Vec<_> = Expiry::ALL
+        .into_iter()
+        .filter(|e| expiry::allowed(app, *e))
+        .map(|e| (e.as_str(), sentence_case(e.label()), e.as_str() == app.default_expiry))
+        .collect();
+    let privacy = privacy_groups.iter().flat_map(|(_, o)| o).find(|o| o.2).map_or("", |o| o.1);
+    let expiry_label = expiry_options.iter().find(|o| o.2).map_or("", |o| o.1.as_str());
+    let summary = options_summary(privacy, expiry_label, app.default_burn_after);
     let home = Home {
-        privacy_options: app
-            .privacy_levels
-            .iter()
-            .map(|l| (l.clone(), privacy_label(l), *l == app.default_privacy))
-            .collect(),
-        expiry_options: Expiry::ALL
-            .into_iter()
-            .filter(|e| expiry::allowed(app, *e))
-            .map(|e| (e.as_str(), sentence_case(e.label()), e.as_str() == app.default_expiry))
-            .collect(),
+        privacy_groups,
+        expiry_options,
         syntax_options,
         default_burn: app.default_burn_after,
         editable: app.editable,
         uploader_password: app.uploader_password.is_some(),
+        summary,
+        max_file_mb: app.max_file_mb,
         max_secret_mb: app.max_secret_file_mb,
+        words_src: Assets::url("bip39-english.txt"),
+        help_icon: super::icon("circle-question-mark", super::IconSize::Row),
         deleted: q.notice().map(|n| super::escape_text(&n)),
     };
     let body = home.render().map_err(Error::internal)?;
-    let extras = Extras { js: vec![Assets::url("js/create.js")], ..Extras::default() };
+    let extras = Extras { js: vec![Assets::url("js/create.js"), Assets::url("js/words.js")], ..Extras::default() };
     page_with(&st, admin, "new", "New paste", body, extras)
 }
 
@@ -168,6 +205,9 @@ pub(crate) struct CreateRules {
     pub uploader_checked: bool,
     /// Only the browser can encrypt a secret paste, so the API refuses them.
     pub allow_secret: bool,
+    /// `editable` when the request leaves it out: the server setting for the API, and false for
+    /// the web form, whose unchecked box sends nothing.
+    pub default_editable: bool,
 }
 
 impl CreateRules {
@@ -184,7 +224,7 @@ pub(crate) struct Form {
     pub expiry: Option<Expiry>,
     pub burn_after_reads: Option<u32>,
     pub syntax: Option<String>,
-    pub editable: bool,
+    pub editable: Option<bool>,
     pub password: Option<String>,
     pub content_container: Option<Vec<u8>>,
     pub verifier_salt: Option<[u8; SALT_LEN]>,
@@ -233,16 +273,33 @@ fn default_privacy(st: &AppState) -> Result<Privacy, Error> {
     Privacy::parse(&st.cfg.app.default_privacy).ok_or_else(|| Error::internal("default_privacy is not a privacy level"))
 }
 
+/// `auto` (or nothing) leaves the syntax to detection when the paste is shown; `plain` and the
+/// language tokens are stored as given.
 pub(crate) fn parse_syntax(value: &str) -> Result<Option<String>, Error> {
     let value = value.trim();
-    if value.is_empty() || value == "plain" {
+    if value.is_empty() || value == AUTO {
         return Ok(None);
     }
-    if highlight::languages().iter().any(|(token, _)| token == value) {
+    if value == highlight::PLAIN || highlight::languages().iter().any(|(token, _)| token == value) {
         Ok(Some(value.to_owned()))
     } else {
         Err(invalid("Choose a syntax from the list."))
     }
+}
+
+/// The syntax choices as (value, label, selected), with `chosen` selected (`None` is Automatic).
+/// Automatic and the languages are offered while highlighting is on, and whenever already chosen.
+pub(crate) fn syntax_options(app: &AppConfig, chosen: Option<&str>) -> Vec<(String, String, bool)> {
+    let mut options = Vec::new();
+    if app.highlight || chosen.is_none() {
+        options.push((AUTO.to_owned(), "Automatic".to_owned(), chosen.is_none()));
+    }
+    options.push((highlight::PLAIN.to_owned(), "Plain".to_owned(), chosen == Some(highlight::PLAIN)));
+    let chosen_language = chosen.is_some_and(|c| c != highlight::PLAIN);
+    if app.highlight || chosen_language {
+        options.extend(highlight::languages().iter().map(|(t, n)| (t.clone(), n.clone(), chosen == Some(t.as_str()))));
+    }
+    options
 }
 
 impl Form {
@@ -272,7 +329,7 @@ impl Form {
                 }
             }
             "syntax" => self.syntax = parse_syntax(&text(value)?)?,
-            "editable" => self.editable = matches!(text(value)?.trim(), "on" | "true" | "1"),
+            "editable" => self.editable = Some(matches!(text(value)?.trim(), "on" | "true" | "1")),
             "password" => self.password = Some(text(value)?).filter(|p| !p.is_empty()),
             "content_container" => {
                 crypto::check_browser_container(&value)?;
@@ -309,7 +366,7 @@ impl Form {
             expiry,
             burn_after_reads: self.burn_after_reads.unwrap_or(app.default_burn_after),
             syntax: self.syntax,
-            editable: self.editable,
+            editable: self.editable.unwrap_or(rules.default_editable),
             password: self.password,
             secret,
         })
@@ -321,7 +378,7 @@ impl Form {
 /// would follow the 303 itself, using up the cookie on a response the browser never shows.
 async fn create(State(st): State<AppState>, req: Request) -> Result<Response, Error> {
     let htmx = req.headers().contains_key("hx-request");
-    let rules = CreateRules { uploader_checked: false, allow_secret: true };
+    let rules = CreateRules { uploader_checked: false, allow_secret: true, default_editable: false };
     let (new, staging) = read_multipart(&st, req, rules).await?;
     let now = domain::now();
     let id = paste::create(&st, new, staging, now).await?;

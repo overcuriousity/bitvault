@@ -260,17 +260,18 @@ pub struct CreateRequest {
     /// is refused: only the browser can encrypt a secret paste.
     #[schema(example = "unlisted")]
     pub privacy: Option<String>,
-    /// One of `1min`, `10min`, `1hour`, `24hour`, `3days`, `1week`, `1month`, `6months`, `1year`
-    /// or `never`, within the server's choices and maximum.
+    /// One of `1min`, `10min`, `1hour`, `24hour`, `3days`, `1week`, `1month`, `6months`, `1year`,
+    /// `2years`, `4years`, `8years`, `16years` or `never`, within the server's choices and maximum.
     #[schema(example = "24hour")]
     pub expiry: Option<String>,
     /// The paste is deleted after this many reads; 0 for no limit.
     pub burn_after_reads: Option<u32>,
-    /// A highlighting token such as `rs` or `py`; `plain` or absent for none.
+    /// A highlighting token such as `rs` or `py`, or `plain` for none; `auto` or absent detects the
+    /// language from the first line (a shebang, `<?php`) when the paste is shown.
     pub syntax: Option<String>,
-    /// Lets readers edit it, when the server allows editing.
-    #[serde(default)]
-    pub editable: bool,
+    /// Lets readers edit it, when the server allows editing. Absent means the server's `editable`
+    /// setting.
+    pub editable: Option<bool>,
     /// Required for `readonly` and `private`.
     pub password: Option<String>,
 }
@@ -286,7 +287,7 @@ struct CreateForm {
     expiry: Option<String>,
     burn_after_reads: Option<u32>,
     syntax: Option<String>,
-    /// `true` or `on`.
+    /// `true` or `on`; absent means the server's `editable` setting.
     editable: Option<String>,
     password: Option<String>,
     /// Any number of files, each with a file name.
@@ -362,7 +363,7 @@ async fn create_paste(
     req: Request,
 ) -> Result<(StatusCode, Json<CreateResponse>), ApiError> {
     home::check_uploader(&st, req.headers().get(UPLOADER_HEADER).map(HeaderValue::as_bytes))?;
-    let rules = CreateRules { uploader_checked: true, allow_secret: false };
+    let rules = CreateRules { uploader_checked: true, allow_secret: false, default_editable: st.cfg.app.editable };
     // Media types are case-insensitive.
     let content_type =
         req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or_default().to_ascii_lowercase();
@@ -489,6 +490,7 @@ pub struct PasteResponse {
     pub privacy: String,
     /// `text`, or `url` for a paste that is one link.
     pub kind: String,
+    /// The highlighting token, `plain`, or null for automatic detection.
     pub syntax: Option<String>,
     /// Whether it can be edited now: the server and the paste both allow it.
     pub editable: bool,
@@ -595,7 +597,7 @@ async fn get_paste(
 pub struct EditRequest {
     /// The new text.
     pub content: String,
-    /// A highlighting token, or `plain` for none; absent keeps the current one.
+    /// A highlighting token, `plain` for none or `auto` to detect it; absent keeps the current one.
     pub syntax: Option<String>,
 }
 

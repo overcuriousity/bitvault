@@ -25,6 +25,7 @@ Copied unmodified from overcuriousity/overcuriousity-dev-manifest, tag v2026.11.
 | icons/chevron-down.svg | crates/oc-kit/assets/icons/chevron-down.svg |
 | icons/chevron-right.svg | crates/oc-kit/assets/icons/chevron-right.svg |
 | icons/circle-check.svg | crates/oc-kit/assets/icons/circle-check.svg |
+| icons/circle-question-mark.svg | bitvault addition from Lucide 1.70.0 (lucide-icons/lucide, icons/circle-question-mark.svg), ISC |
 | icons/circle-x.svg | crates/oc-kit/assets/icons/circle-x.svg |
 | icons/copy.svg | crates/oc-kit/assets/icons/copy.svg |
 | icons/download.svg | crates/oc-kit/assets/icons/download.svg |

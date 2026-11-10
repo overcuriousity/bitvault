@@ -167,17 +167,20 @@ struct DeletePage {
     trash: String,
 }
 
-/// Highlighted markup when highlighting is on, the syntax is known and the text is small enough;
-/// escaped plain text otherwise.
+/// Highlighted markup when highlighting is on, the text is small enough and the syntax is known
+/// or, for an automatic one (`None`), detected from the first line; escaped plain text otherwise.
 async fn content_html(st: &AppState, text: &str, syntax: Option<&str>) -> Result<(String, bool), Error> {
-    if let Some(token) = syntax.filter(|_| st.cfg.app.highlight && text.len() <= HIGHLIGHT_LIMIT) {
+    if st.cfg.app.highlight && text.len() <= HIGHLIGHT_LIMIT && syntax != Some(highlight::PLAIN) {
         // The permit moves into the closure, so it is held until the work ends even if the
         // request is dropped.
         let permit = Arc::clone(&HIGHLIGHT_SLOTS).acquire_owned().await.map_err(Error::internal)?;
-        let (owned, token) = (text.to_owned(), token.to_owned());
+        let (owned, token) = (text.to_owned(), syntax.map(str::to_owned));
         let html = tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            highlight::render(&owned, &token)
+            match token {
+                Some(token) => highlight::render(&owned, &token),
+                None => highlight::render_auto(&owned),
+            }
         })
         .await
         .map_err(Error::internal)?;
@@ -506,14 +509,6 @@ fn editable(st: &AppState, p: &Paste) -> Result<(), Error> {
     if paste::editable(st, p) { Ok(()) } else { Err(Error::NotFound) }
 }
 
-fn syntax_options(st: &AppState, chosen: Option<&str>) -> Vec<(String, String, bool)> {
-    let mut options = vec![("plain".to_owned(), "Plain".to_owned(), chosen.is_none())];
-    if st.cfg.app.highlight || chosen.is_some() {
-        options.extend(highlight::languages().iter().map(|(t, n)| (t.clone(), n.clone(), chosen == Some(t.as_str()))));
-    }
-    options
-}
-
 fn edit_page(
     st: &AppState,
     admin: bool,
@@ -527,7 +522,7 @@ fn edit_page(
     let view = EditPage {
         words: words.clone(),
         content,
-        syntax_options: syntax_options(st, syntax),
+        syntax_options: super::home::syntax_options(&st.cfg.app, syntax),
         password: matches!(p.privacy, Privacy::Readonly | Privacy::Private),
         notice,
     };

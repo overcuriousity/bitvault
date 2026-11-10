@@ -15,7 +15,7 @@ title = "BitVault"
 # admin_password = "change-me"                # unset means no admin page at all; prefer the _FILE variant
 # uploader_password = "change-me"             # unset means anyone can create; API clients send X-Uploader-Password
 listing = true                                # show the public list at /list
-editable = false                              # default for the "allow edits" choice on new pastes
+editable = false                              # allow editing: shows "Allow editing", checked on new pastes, and makes it the API default
 read_stats = false                            # show read counts on paste pages
 highlight = true                              # syntax highlighting for public, unlisted and read-only pastes
 qr = true                                     # QR code on paste pages (needs a public_url)
@@ -23,6 +23,7 @@ qr = true                                     # QR code on paste pages (needs a 
 privacy_levels = ["public", "unlisted", "readonly", "private", "secret"]
 default_privacy = "unlisted"                  # must be one of privacy_levels
 expiry_choices = ["1min", "10min", "1hour", "24hour", "3days", "1week", "1month", "6months", "1year", "never"]
+                                              # also valid, opt-in: "2years", "4years", "8years", "16years"
 default_expiry = "24hour"                     # must be one of expiry_choices
 max_expiry = "1week"                          # longest choice users may pick; "never" only if it is also in expiry_choices
 default_burn_after = 0                        # delete after this many reads; 0 turns it off
