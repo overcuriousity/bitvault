@@ -271,7 +271,9 @@ async fn one_box_carries_the_word_list_and_says_what_it_does() {
     let src = bitvault::assets::Assets::url("bip39-english.txt");
     assert!(html.contains(&format!("data-words-src=\"{src}\"")), "{html}");
     assert!(html.contains("aria-describedby=\"box-echo\""));
-    assert!(html.contains("Type three words, such as apple banana cherry, and press Enter to open the paste they name."));
+    assert!(
+        html.contains("Type three words, such as apple banana cherry, and press Enter to open the paste they name.")
+    );
     assert!(html.contains("id=\"box-keep\" name=\"intent\" value=\"create\" hidden>"));
 }
 
