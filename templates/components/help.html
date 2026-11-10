@@ -1,0 +1,7 @@
+{# A field label with a "?" link to the guide section `anchor`; icon is trusted markup. #}
+{% macro label(id, text, anchor, icon) %}
+<div class="bv-label">
+  <label for="{{ id }}">{{ text }}</label>
+  <a class="oc-btn oc-btn--icon oc-btn--row bv-help" href="/guide#{{ anchor }}" aria-label="Help: {{ text }}" data-oc-tip="Help: {{ text }}">{{ icon|safe }}</a>
+</div>
+{% endmacro %}

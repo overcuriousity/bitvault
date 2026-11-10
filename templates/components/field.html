@@ -1,0 +1,25 @@
+{% macro text(id, name, label, autocomplete) %}
+<div class="oc-field">
+  <label for="{{ id }}">{{ label }}</label>
+  <input class="oc-input" id="{{ id }}" name="{{ name }}" type="text" autocomplete="{{ autocomplete }}">
+</div>
+{% endmacro %}
+{# An empty name leaves the input unnamed, so the browser never submits it. #}
+{% macro secret(id, label, autocomplete) %}
+<div class="oc-field">
+  <label for="{{ id }}">{{ label }}</label>
+  <input class="oc-input" id="{{ id }}" type="password" autocomplete="{{ autocomplete }}">
+</div>
+{% endmacro %}
+{% macro password(id, name, label, autocomplete) %}
+<div class="oc-field">
+  <label for="{{ id }}">{{ label }}</label>
+  <input class="oc-input" id="{{ id }}" name="{{ name }}" type="password" autocomplete="{{ autocomplete }}">
+</div>
+{% endmacro %}
+{% macro number(id, name, label, value) %}
+<div class="oc-field">
+  <label for="{{ id }}">{{ label }}</label>
+  <input class="oc-input" id="{{ id }}" name="{{ name }}" type="number" min="0" step="1" inputmode="numeric" value="{{ value }}" autocomplete="off">
+</div>
+{% endmacro %}

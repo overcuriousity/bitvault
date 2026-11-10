@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT paste_id AS \"paste_id!\", position AS \"position!\", name AS \"name!\", size AS \"size!\", mime AS \"mime!\"\n           FROM paste_files WHERE paste_id IN (SELECT value FROM json_each(?))\n           ORDER BY paste_id, position",
+  "describe": {
+    "columns": [
+      {
+        "name": "paste_id!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "position!",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "name!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "size!",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "mime!",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cf2e873fa5ac72c335c4fac295ed0778b67bd9434304fb97b428b162a5f687f9"
+}

@@ -1,0 +1,9 @@
+{# Links to the pages beside this one; base is the list's path. #}
+{% macro pager(base, newer, older) %}
+{%- if newer.is_some() || older.is_some() %}
+<nav class="bv-pager" aria-label="Pages">
+  {%- if let Some(n) = newer %}<a href="{{ base }}?page={{ n }}" rel="prev">Newer pastes</a>{% endif %}
+  {%- if let Some(n) = older %}<a href="{{ base }}?page={{ n }}" rel="next">Older pastes</a>{% endif %}
+</nav>
+{%- endif %}
+{% endmacro %}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT 1 AS \"found!: i64\" FROM pastes\n           WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+  "describe": {
+    "columns": [
+      {
+        "name": "found!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "30c9f8648d8de145a31482b72e2ba4efa991e9e8dc1a8de6fe2018b762b585e2"
+}

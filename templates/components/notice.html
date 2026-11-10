@@ -1,0 +1,6 @@
+{# kind: "info", "success", "warning" or "danger". Each carries its status symbol. #}
+{% macro notice(kind, message) %}<div class="oc-notice oc-notice--{{ kind }}" role="status">{{ crate::web::notice_icon(kind)|safe }}<span class="oc-notice__text">{{ message }}</span></div>{% endmacro %}
+{# html must already be escaped, for text that keeps quotation marks readable (see web::escape_text). #}
+{% macro notice_escaped(kind, html) %}<div class="oc-notice oc-notice--{{ kind }}" role="status">{{ crate::web::notice_icon(kind)|safe }}<span class="oc-notice__text">{{ html|safe }}</span></div>{% endmacro %}
+{# The symbols notice.js gives the notices it builds in the browser. #}
+{% macro icons() %}<template id="bv-notice-icons">{% for kind in ["info", "success", "warning", "danger"] %}<span data-kind="{{ kind }}">{{ crate::web::notice_icon(kind)|safe }}</span>{% endfor %}</template>{% endmacro %}

@@ -1,0 +1,2 @@
+{# icons is trusted markup from web::copy_icons. copy.js writes data-oc-copy to the clipboard. #}
+{% macro copy(label, value, icons) %}<button type="button" class="oc-btn oc-btn--icon oc-btn--row oc-copy" aria-label="Copy {{ label }}" data-oc-tip="Copy {{ label }}" data-oc-copy="{{ value }}">{{ icons|safe }}</button>{% endmacro %}

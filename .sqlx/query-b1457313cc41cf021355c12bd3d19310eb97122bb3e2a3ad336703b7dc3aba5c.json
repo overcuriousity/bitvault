@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE pastes SET read_count = read_count + 1, last_read_at = ?,\n                  burned_at = CASE WHEN burn_after_reads > 0 AND read_count + 1 >= burn_after_reads THEN ? END\n           WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)\n           RETURNING id AS \"id!\", kind AS \"kind!\", privacy AS \"privacy!\", content AS \"content!\",\n                     syntax AS \"syntax?\", editable AS \"editable!: bool\",\n                  wrapped_key AS \"wrapped_key?\", verifier_hash AS \"verifier_hash?\",\n                     burn_after_reads AS \"burn_after_reads!\", read_count AS \"read_count!\",\n                     last_read_at AS \"last_read_at?\", burned_at AS \"burned_at?\", created_at AS \"created_at!\",\n                     expires_at AS \"expires_at?\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "kind!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "privacy!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "content!",
+        "ordinal": 3,
+        "type_info": "Blob"
+      },
+      {
+        "name": "syntax?",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "editable!: bool",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "wrapped_key?",
+        "ordinal": 6,
+        "type_info": "Blob"
+      },
+      {
+        "name": "verifier_hash?",
+        "ordinal": 7,
+        "type_info": "Blob"
+      },
+      {
+        "name": "burn_after_reads!",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "read_count!",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_read_at?",
+        "ordinal": 10,
+        "type_info": "Integer"
+      },
+      {
+        "name": "burned_at?",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 12,
+        "type_info": "Integer"
+      },
+      {
+        "name": "expires_at?",
+        "ordinal": 13,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "b1457313cc41cf021355c12bd3d19310eb97122bb3e2a3ad336703b7dc3aba5c"
+}

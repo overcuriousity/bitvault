@@ -1,0 +1,14 @@
+{% import "components/button.html" as button %}
+{% import "components/field.html" as field %}
+{% import "components/notice.html" as notice %}
+<div class="oc-columns">
+<div class="oc-page-head"><h1>Sign in</h1></div>
+<p class="bv-lead">Sign in as the administrator to see and delete every paste.</p>
+{% if let Some(message) = notice %}{% call notice::notice("danger", message) %}{% endcall %}{% endif %}
+<form class="oc-form" method="post" action="/admin/sign-in">
+  {% call field::password("admin-password", "password", "Password", "current-password") %}{% endcall %}
+  <div class="oc-form__actions">
+    {% call button::submit("primary", "Sign in") %}{% endcall %}
+  </div>
+</form>
+</div>

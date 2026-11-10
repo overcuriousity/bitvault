@@ -1,43 +1,21 @@
-<!-- # DISCLAIMER
-# (c) 2024-05-27 overcuriousity - derived from the original Microbin Project by Daniel Szabo -->
-
-{% include "header.html" %}
-<form action="/{{ path }}/{{ pasta.id_as_words() }}" method="POST" enctype="multipart/form-data">
-    <h4>
-        Editing upload '{{ pasta.id_as_words() }}'
-    </h4>
-    <label>Content</label>
-    <br>
-    <textarea style="width: 100%; min-height: 100px; font-family: monospace;" name="content" id="content" {% if status
-        !="incorrect" %} autofocus {% endif %}>{{ pasta.content_escaped() }}</textarea>
-    <br>
-    <div>
-        {% if pasta.readonly || pasta.encrypt_server %}
-        <div style="float: left; height: 90px;">
-            <label for="password">Re-enter Password <sup><a href="/guide#password">﹖</a></sup></label><br>
-            <input {% if status=="incorrect" %} autofocus {% endif %} style="width: 130px;"
-                type="password" id="password" name="password" autocomplete="off" />
-            {% if status == "incorrect" %}
-            <p>
-                Incorrect password.
-            </p>
-            {% endif %}
-        </div>
-        {% endif %}
-
-
-        <div style="float: right; height: 90px; justify-content: end;">
-            <label for="password_field"></label><br>
-            <input style="width: 140px; float: right; background-color:
-    #2975D2; color: white;" id="submit-button" type="submit" value="Save" />
-            </td>
-        </div>
-    </div>
-
-    <br>
-    <br>
-    <br>
-    <br>
-    <br>
+{% import "components/button.html" as button %}
+{% import "components/notice.html" as notice %}
+{% import "components/select.html" as select %}
+<div class="oc-page-head"><h1>Edit {{ words }}</h1></div>
+{%- if let Some(message) = notice %}
+{% call notice::notice("danger", message) %}{% endcall %}
+{%- endif %}
+<form class="oc-form bv-edit" method="post" action="/{{ words }}/edit">
+  <div class="oc-field">
+    <label for="content">Content</label>
+    <textarea class="oc-input bv-mono" id="content" name="content" rows="16" spellcheck="false" autocomplete="off" autofocus>{{ content }}</textarea>
+  </div>
+  {% call select::select("syntax", "syntax", "Syntax", syntax_options) %}{% endcall %}
+  {%- if let Some(g) = grant %}
+  <input type="hidden" name="g" value="{{ g }}">
+  {%- endif %}
+  <div class="oc-form__actions">
+    {% call button::submit("primary", "Save changes") %}{% endcall %}
+    <a href="/{{ words }}">Cancel</a>
+  </div>
 </form>
-{% include "footer.html" %}

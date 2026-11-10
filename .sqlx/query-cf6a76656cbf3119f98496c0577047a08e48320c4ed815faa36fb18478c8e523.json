@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) AS \"pastes!: i64\", COALESCE(SUM(length(content)), 0) AS \"content_bytes!: i64\"\n           FROM pastes\n           WHERE burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+  "describe": {
+    "columns": [
+      {
+        "name": "pastes!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "content_bytes!: i64",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "cf6a76656cbf3119f98496c0577047a08e48320c4ed815faa36fb18478c8e523"
+}

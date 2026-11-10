@@ -1,0 +1,71 @@
+.oc-table-wrap { overflow: auto; min-height: 0; }
+
+.oc-table {
+  --row-h: 2.25rem;
+  --cell-pad: 0.625rem;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-dense);
+}
+html[data-density="compact"] .oc-table { --row-h: 1.95rem; --cell-pad: 0.45rem; }
+
+.oc-table th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  height: 2rem;
+  padding: 0 var(--cell-pad);
+  background: var(--color-bg-surface);
+  color: var(--color-fg-secondary);
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--color-border-strong);
+  border-right: 1px solid var(--color-border);
+}
+.oc-table th:last-child { border-right: 0; }
+.oc-table th.oc-num { text-align: right; }
+
+.oc-table td {
+  height: var(--row-h);
+  max-width: var(--col-max, 24rem);
+  padding: 0 var(--cell-pad);
+  border-bottom: 1px solid var(--color-border-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oc-table td.oc-cell-copy { overflow: visible; }
+.oc-table td.oc-cell-copy > span { display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%; }
+.oc-table td.oc-cell-copy .oc-truncate { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.oc-table td.oc-wide { --col-max: 40rem; }
+
+.oc-table tbody tr { cursor: default; }
+.oc-table tbody tr:hover td { background: var(--color-bg-hover); }
+
+.oc-table tr.is-selected {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+.oc-table tr.is-selected td { background: var(--color-accent-dim); }
+
+.oc-table tr:hover .oc-muted,
+.oc-table tr.is-selected .oc-muted,
+.oc-table tr:hover .oc-copy,
+.oc-table tr.is-selected .oc-copy { color: var(--color-fg-secondary); }
+
+.oc-table .oc-col-actions { width: 1%; text-align: right; overflow: visible; }
+.oc-row-actions { display: inline-flex; gap: 2px; justify-content: flex-end; }
+.oc-row-actions [data-oc-reveal] { visibility: hidden; }
+.oc-table tr:hover [data-oc-reveal],
+.oc-table tr:focus-within [data-oc-reveal],
+.oc-table tr.is-selected [data-oc-reveal] { visibility: visible; }
+
+.tier-2, .tier-3, .tier-4 { display: none; }
+
+.oc-table tr.oc-row-notice td {
+  height: var(--row-h);
+  background: var(--color-bg-surface);
+  color: var(--color-fg-primary);
+}

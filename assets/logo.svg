@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 148 36" fill="currentColor" role="img" aria-label="BitVault">
+  <g transform="translate(0 2)">
+    <path fill-rule="evenodd" d="M7 0h18a7 7 0 0 1 7 7v18a7 7 0 0 1-7 7H7a7 7 0 0 1-7-7V7a7 7 0 0 1 7-7zM5 16a11 11 0 1 0 22 0a11 11 0 1 0-22 0z"/>
+    <g stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+      <line x1="16" y1="7" x2="16" y2="25"/>
+      <line x1="7" y1="16" x2="25" y2="16"/>
+      <line x1="9.8" y1="8.8" x2="22.2" y2="23.2"/>
+      <line x1="22.2" y1="8.8" x2="9.8" y2="23.2"/>
+    </g>
+    <path fill-rule="evenodd" d="M12.6 16a3.4 3.4 0 1 0 6.8 0a3.4 3.4 0 1 0-6.8 0zM14.3 16a1.7 1.7 0 1 0 3.4 0a1.7 1.7 0 1 0-3.4 0z"/>
+  </g>
+  <text x="40" y="26" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif" font-size="19" xml:space="preserve"><tspan font-weight="400">bit</tspan><tspan font-weight="700">V</tspan><tspan font-weight="400">ault</tspan></text>
+</svg>

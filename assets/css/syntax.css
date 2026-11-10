@@ -1,0 +1,8 @@
+/* Only tokens measured at 4.5:1 or better against the page background in both themes. */
+.hl-comment { color: var(--color-fg-secondary); font-style: italic; }
+.hl-string { color: var(--color-success); }
+.hl-keyword, .hl-storage { color: var(--chart-cat-5); font-weight: 500; }
+.hl-constant.hl-numeric { color: var(--color-warning); }
+.hl-entity.hl-name.hl-function { color: var(--color-accent); }
+.hl-storage.hl-type { color: var(--color-danger); }
+.hl-variable { color: var(--color-fg-muted); }

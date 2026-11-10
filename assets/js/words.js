@@ -1,0 +1,153 @@
+// Paste words in the browser: reading what someone typed as an address, the way the server's
+// `words::parse_typed` does, and offering the words that fit the one being typed. The list is
+// the server's, sorted, one word per line in `bip39-english.txt`.
+
+// Four letters always name one word in this list.
+const PREFIX_LEN = 4;
+const SEPARATORS = /[\s-]+/;
+// Three words of at most eight letters, with room for separators and spaces around them.
+export const MAX_TYPED = 64;
+// The longest text still read as a link to a paste.
+const MAX_LINK = 512;
+// Chips start at the second letter; one letter fits too many words to be a useful list.
+const CHIPS_FROM = 2;
+const CHIP_LIMIT = 6;
+
+/** The index of the word `part` spells in full or, from four letters, is the only word to begin; or -1. */
+export function findIn(words, part) {
+  const exact = words.indexOf(part);
+  if (exact !== -1) return exact;
+  if (part.length < PREFIX_LEN) return -1;
+  const fits = [];
+  for (let i = 0; i < words.length && fits.length < 2; i++) if (words[i].startsWith(part)) fits.push(i);
+  return fits.length === 1 ? fits[0] : -1;
+}
+
+// Every way to read `s` as exactly `count` whole words, as lists of words.
+function wholeWords(words, s, count) {
+  if (count === 0) return s === "" ? [[]] : [];
+  if (s.length < 3 * count || s.length > 8 * count) return [];
+  const out = [];
+  for (let len = 3; len <= Math.min(8, s.length); len++) {
+    const head = s.slice(0, len);
+    if (words.indexOf(head) === -1) continue;
+    for (const tail of wholeWords(words, s.slice(len), count - 1)) out.push([head, ...tail]);
+  }
+  return out;
+}
+
+function readParts(words, parts, done, out) {
+  if (parts.length === 0) {
+    if (done.length === 3) out.push(done);
+    return;
+  }
+  const [part, ...rest] = parts;
+  const one = findIn(words, part);
+  if (one !== -1) readParts(words, rest, [...done, words[one]], out);
+  for (let count = 2; count <= 3 - done.length; count++) {
+    for (const split of wholeWords(words, part, count)) readParts(words, rest, [...done, ...split], out);
+  }
+}
+
+/**
+ * The words in `value` when it is a link to a paste on one of `hosts`: what Copy link and a phone's
+ * share sheet hand out, with or without the scheme, a trailing slash, a query such as `?view` or a
+ * fragment. People paste such a link into the box to open the paste, not to keep the link. Null
+ * otherwise. The server's `words::link_words` reads the same.
+ */
+export function linkWords(value, hosts) {
+  const text = value.trim();
+  if (text.length > MAX_LINK || /\s/.test(text)) return null;
+  const match = /^(?:https?:\/\/)?([^/?#]+)\/([a-z-]+?)\/?(?:[?#].*)?$/i.exec(text);
+  if (!match) return null;
+  const host = match[1].toLowerCase();
+  if (!hosts.some((h) => h && h.toLowerCase() === host)) return null;
+  const parts = match[2].split("-").filter(Boolean);
+  return parts.length === 3 ? parts.join("-").toLowerCase() : null;
+}
+
+/**
+ * What `value` reads as: `{ address: "apple-banana-cherry" }`, `{ ambiguous: true }` for letters
+ * run together that read two ways, or null when it is not three paste words.
+ */
+export function readAddress(value, words) {
+  if (value.length > MAX_TYPED) return null;
+  const parts = value.toLowerCase().split(SEPARATORS).filter(Boolean);
+  if (parts.length === 3) {
+    const found = parts.map((p) => findIn(words, p));
+    return found.includes(-1) ? null : { address: found.map((i) => words[i]).join("-") };
+  }
+  if (parts.length !== 1 && parts.length !== 2) return null;
+  const readings = [];
+  readParts(words, parts, [], readings);
+  if (readings.length === 1) return { address: readings[0].join("-") };
+  return readings.length > 1 ? { ambiguous: true } : null;
+}
+
+/**
+ * Whether `value` could still become three paste words: one line of at most three letter runs,
+ * each finished one a paste word (or words run together), and a third one that begins a word.
+ * Without the word list only the shape is checked.
+ */
+export function addressLike(value, words) {
+  if (value.includes("\n") || value.length > MAX_TYPED || /[^\sa-z-]/i.test(value)) return false;
+  const parts = value.toLowerCase().split(SEPARATORS).filter(Boolean);
+  if (parts.length > 3) return false;
+  if (!words) return true;
+  const ended = /[\s-]$/.test(value);
+  const finished = ended ? parts : parts.slice(0, -1);
+  const readable = (p) => findIn(words, p) !== -1 || wholeWords(words, p, 2).length > 0 || wholeWords(words, p, 3).length > 0;
+  if (!finished.every(readable)) return false;
+  const last = ended ? null : parts[parts.length - 1];
+  return !(last && parts.length === 3 && !words.some((w) => w.startsWith(last)));
+}
+
+/** Whether the last word of `value` can only be one word, so more letters cannot change the address. */
+export function settled(value, words) {
+  const last = value.trim().toLowerCase().split(SEPARATORS).pop() ?? "";
+  let fits = 0;
+  for (const w of words) if (w.startsWith(last) && ++fits > 1) return false;
+  return fits === 1;
+}
+
+/**
+ * The words that fit the one being typed, while the box still looks like an address: one line,
+ * at most three words so far, each finished one a paste word. Null otherwise.
+ */
+export function chips(value, words, limit = CHIP_LIMIT) {
+  if (value.includes("\n")) return null;
+  const match = /^(\s*(?:[^\s-]+[\s-]+){0,2})([a-zA-Z]+)$/.exec(value);
+  if (!match) return null;
+  const [, done, part] = match;
+  if (part.length < CHIPS_FROM) return null;
+  const finished = done.toLowerCase().split(SEPARATORS).filter(Boolean);
+  if (finished.some((w) => findIn(words, w) === -1)) return null;
+  const prefix = part.toLowerCase();
+  const fits = [];
+  for (const w of words) {
+    if (!w.startsWith(prefix)) continue;
+    fits.push(w);
+    if (fits.length >= limit) break;
+  }
+  // A finished last word needs no list.
+  if (fits.length === 0 || (fits.length === 1 && fits[0] === prefix && finished.length === 2)) return null;
+  return { done, fits, count: finished.length + 1 };
+}
+
+/**
+ * The box after choosing `word` for the word being typed: followed by a separator unless it is the
+ * third word, in the separator already used. Null when there is nothing to change.
+ */
+export function choose(value, words, word) {
+  const found = chips(value, words, Number.POSITIVE_INFINITY);
+  if (!found || !found.fits.includes(word)) return null;
+  const separator = found.count < 3 ? (/\s$/.test(found.done) ? " " : "-") : "";
+  const next = found.done + word + separator;
+  return next === value ? null : next;
+}
+
+/** Tab takes the first word in the list. */
+export function accept(value, words) {
+  const found = chips(value, words);
+  return found ? choose(value, words, found.fits[0]) : null;
+}

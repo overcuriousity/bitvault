@@ -1,0 +1,8 @@
+{# body is trusted markup. dialog.js opens it from [data-oc-dialog-open="id"]. #}
+{% macro dialog(id, title, body) %}
+<dialog class="oc-dialog" id="{{ id }}" aria-labelledby="{{ id }}-title">
+  <h2 class="oc-dialog__title" id="{{ id }}-title">{{ title }}</h2>
+  <div class="oc-dialog__body">{{ body|safe }}</div>
+  <div class="oc-dialog__actions"><button type="button" class="oc-btn" data-oc-dialog-close>Close</button></div>
+</dialog>
+{% endmacro %}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO paste_files (paste_id, position, name, size, mime) VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "1f9bf1f652044124230dd3c63253a3168f861fb0b718a742c639e040597383fa"
+}

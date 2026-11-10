@@ -1,0 +1,241 @@
+use std::fmt;
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+
+use figment::Figment;
+use figment::providers::{Format, Toml};
+use figment::value::Value;
+use ipnet::IpNet;
+use serde::Deserialize;
+use url::Url;
+
+use crate::deployment::Deployment;
+use crate::domain::Privacy;
+use crate::domain::expiry::{self, Expiry};
+use crate::error::Error;
+
+const ENV_PREFIX: &str = "BITVAULT__";
+/// The keys whose environment values are parsed as TOML-like values: the switches, numbers and
+/// lists. `tests/config.rs` checks the list against the defaults.
+pub const PARSED_ENV_KEYS: [&str; 12] = [
+    "insecure_http",
+    "trusted_proxies",
+    "app.listing",
+    "app.editable",
+    "app.read_stats",
+    "app.highlight",
+    "app.qr",
+    "app.privacy_levels",
+    "app.expiry_choices",
+    "app.default_burn_after",
+    "app.max_file_mb",
+    "app.max_secret_file_mb",
+];
+
+pub const PRIVACY_LEVELS: [&str; 5] = ["public", "unlisted", "readonly", "private", "secret"];
+/// The default `expiry_choices`. The long expiries (`2years` to `16years`) are valid but opt-in.
+pub const EXPIRY_CHOICES: [&str; 10] =
+    ["1min", "10min", "1hour", "24hour", "3days", "1week", "1month", "6months", "1year", "never"];
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Config {
+    pub bind: SocketAddr,
+    pub public_url: Option<Url>,
+    pub data_dir: Option<PathBuf>,
+    pub trusted_proxies: Vec<IpNet>,
+    /// Serves over plain HTTP on any host name (a private network without TLS): no HSTS, no
+    /// `Secure` cookies, and no Secret pastes.
+    pub insecure_http: bool,
+    pub app: AppConfig,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            bind: SocketAddr::from(([127, 0, 0, 1], 8080)),
+            public_url: None,
+            data_dir: None,
+            trusted_proxies: ["127.0.0.1/32", "::1/128"].iter().filter_map(|s| s.parse().ok()).collect(),
+            insecure_http: false,
+            app: AppConfig::default(),
+        }
+    }
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct AppConfig {
+    pub title: String,
+    pub short_url: Option<String>,
+    pub admin_password: Option<String>,
+    pub uploader_password: Option<String>,
+    pub listing: bool,
+    pub editable: bool,
+    pub read_stats: bool,
+    pub highlight: bool,
+    pub qr: bool,
+    pub translate_url: Option<String>,
+    pub privacy_levels: Vec<String>,
+    pub default_privacy: String,
+    pub expiry_choices: Vec<String>,
+    pub default_expiry: String,
+    pub max_expiry: String,
+    pub default_burn_after: u32,
+    pub max_file_mb: u64,
+    pub max_secret_file_mb: u64,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        let strings = |xs: &[&str]| xs.iter().map(|s| (*s).to_owned()).collect();
+        Self {
+            title: "BitVault".into(),
+            short_url: None,
+            admin_password: None,
+            uploader_password: None,
+            listing: true,
+            editable: false,
+            read_stats: false,
+            highlight: true,
+            qr: true,
+            translate_url: None,
+            privacy_levels: strings(&PRIVACY_LEVELS),
+            default_privacy: "unlisted".into(),
+            expiry_choices: strings(&EXPIRY_CHOICES),
+            default_expiry: "24hour".into(),
+            max_expiry: "1week".into(),
+            default_burn_after: 0,
+            max_file_mb: 2048,
+            max_secret_file_mb: 256,
+        }
+    }
+}
+
+impl fmt::Debug for AppConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let redact = |p: &Option<String>| p.as_ref().map(|_| "***");
+        f.debug_struct("AppConfig")
+            .field("title", &self.title)
+            .field("short_url", &self.short_url)
+            .field("admin_password", &redact(&self.admin_password))
+            .field("uploader_password", &redact(&self.uploader_password))
+            .field("listing", &self.listing)
+            .field("editable", &self.editable)
+            .field("privacy_levels", &self.privacy_levels)
+            .field("expiry_choices", &self.expiry_choices)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Loads the config from an optional TOML file, then `BITVAULT__SECTION__KEY` variables.
+/// `BITVAULT__SECTION__KEY_FILE=/path` sets `section.key` to the trimmed contents of that file.
+pub fn load(file: Option<&Path>) -> Result<Config, Error> {
+    let mut fig = Figment::new();
+    if let Some(path) = file {
+        if !path.exists() {
+            return Err(Error::Invalid(format!("Config file {} does not exist.", path.display())));
+        }
+        fig = fig.merge(Toml::file(path));
+    }
+    let mut files = Vec::new();
+    for (name, value) in std::env::vars() {
+        let Some(name) = name.strip_prefix(ENV_PREFIX) else { continue };
+        let key = |name: &str| name.to_ascii_lowercase().replace("__", ".");
+        if let Some(name) = name.strip_suffix("_FILE") {
+            let secret = std::fs::read_to_string(&value)
+                .map_err(|e| Error::Invalid(format!("Cannot read the secret file {value}: {e}.")))?;
+            files.push((key(name), secret.trim().to_owned()));
+            continue;
+        }
+        let key = key(name);
+        // Only the keys that are no text are parsed. Everything else stays the string it is, so a
+        // password of digits is not read as a number (which would also drop its leading zeros).
+        fig = if PARSED_ENV_KEYS.contains(&key.as_str()) {
+            fig.merge((key, value.parse::<Value>().unwrap_or_else(|never| match never {})))
+        } else {
+            fig.merge((key, value))
+        };
+    }
+    // A `_FILE` variable wins over the plain one, whatever order the environment lists them in.
+    for pair in files {
+        fig = fig.merge(pair);
+    }
+    fig.extract().map_err(|e| Error::Invalid(format!("Invalid configuration: {e}.")))
+}
+
+impl Config {
+    /// Stops start-up on a combination that cannot work, naming the key to fix.
+    pub fn validate(&self) -> Result<(), Error> {
+        let a = &self.app;
+        for level in &a.privacy_levels {
+            if !PRIVACY_LEVELS.contains(&level.as_str()) {
+                return Err(Error::Invalid(format!("privacy_levels has an unknown level '{level}'.")));
+            }
+        }
+        if a.privacy_levels.is_empty() {
+            return Err(Error::Invalid("privacy_levels must offer at least one level.".into()));
+        }
+        if !a.privacy_levels.contains(&a.default_privacy) {
+            return Err(Error::Invalid("default_privacy must be one of privacy_levels.".into()));
+        }
+        if self.insecure_http && a.default_privacy == Privacy::Secret.as_str() {
+            return Err(Error::Invalid("default_privacy cannot be secret while insecure_http is on.".into()));
+        }
+        for choice in &a.expiry_choices {
+            if Expiry::parse(choice).is_none() {
+                return Err(Error::Invalid(format!("expiry_choices has an unknown choice '{choice}'.")));
+            }
+        }
+        if !a.expiry_choices.contains(&a.default_expiry) {
+            return Err(Error::Invalid("default_expiry must be one of expiry_choices.".into()));
+        }
+        if !a.expiry_choices.contains(&a.max_expiry) {
+            return Err(Error::Invalid("max_expiry must be one of expiry_choices.".into()));
+        }
+        if !Expiry::parse(&a.default_expiry).is_some_and(|e| expiry::within_max(a, e)) {
+            return Err(Error::Invalid("default_expiry must not be longer than max_expiry.".into()));
+        }
+        if let Some(raw) = &a.short_url {
+            match Url::parse(raw) {
+                Ok(u) if u.scheme() == "https" && u.host_str().is_some() => {}
+                _ => return Err(Error::Invalid("short_url must be an https URL.".into())),
+            }
+        }
+        if a.max_file_mb == 0 || a.max_secret_file_mb == 0 {
+            return Err(Error::Invalid("max_file_mb and max_secret_file_mb must be at least 1.".into()));
+        }
+        const MAX_MB: u64 = 1_048_576;
+        if a.max_file_mb > MAX_MB || a.max_secret_file_mb > MAX_MB {
+            return Err(Error::Invalid("max_file_mb and max_secret_file_mb must be at most 1048576.".into()));
+        }
+        Deployment::from_config(self).map(|_| ())
+    }
+
+    /// Whether new pastes may use `level`. Browsers keep Web Crypto to https pages, so a Secret
+    /// paste can neither be made nor opened over plain HTTP.
+    pub fn offers(&self, level: Privacy) -> bool {
+        self.app.privacy_levels.iter().any(|l| l == level.as_str()) && !(self.insecure_http && level == Privacy::Secret)
+    }
+
+    /// The configured privacy levels that new pastes may use, in their configured order.
+    pub fn offered_levels(&self) -> Vec<String> {
+        self.app.privacy_levels.iter().filter(|l| Privacy::parse(l).is_some_and(|p| self.offers(p))).cloned().collect()
+    }
+
+    pub fn data_dir(&self) -> PathBuf {
+        if let Some(d) = &self.data_dir {
+            return d.clone();
+        }
+        if let Some(d) = std::env::var_os("STATE_DIRECTORY") {
+            return PathBuf::from(d);
+        }
+        if let Some(d) = std::env::var_os("XDG_DATA_HOME") {
+            return PathBuf::from(d).join("bitvault");
+        }
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(".local/share/bitvault");
+        }
+        PathBuf::from("./data")
+    }
+}

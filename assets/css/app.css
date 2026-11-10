@@ -1,0 +1,315 @@
+/* Deliberate deviation from the kit tokens (AGENTS.md exception 8): larger type, and controls
+   sized to match it. Later than 00-tokens.css, so these win; compact density still scales them. */
+:root {
+  --text-page: 1.625rem;
+  --text-section: 1.25rem;
+  --text-prose: 1.0625rem;
+  --text-ui: 1rem;
+  --text-dense: 0.9375rem;
+  --text-micro: max(0.8125rem, 13px);
+  --text-mono: 0.9375rem;
+  --target-tool: 2.25rem;
+  --icon-tool: 18px;
+  --icon-row: 16px;
+}
+
+/* One centred column for every page, with the top bar's logo and toggles aligned to its edges.
+   The admin page carries a wide table, so its column is wider. */
+.oc-shell--everyday { --bv-column: 50rem; }
+.oc-shell--everyday:has(.bv-admin) { --bv-column: 72rem; }
+.oc-shell--everyday .oc-main {
+  width: 100%;
+  max-width: calc(var(--bv-column) + 2 * var(--space-4));
+  margin-inline: auto;
+}
+.oc-shell--everyday .oc-topbar { padding-inline: max(var(--space-3), calc((100% - var(--bv-column)) / 2)); }
+/* Inside the column, page blocks use its full width so their edges line up. */
+.oc-columns { max-width: none; }
+.bv-create, .bv-edit { max-width: none; }
+
+.bv-sign-in { margin: 0; }
+html { background: var(--color-bg-base); }
+.bv-lead { max-width: 68ch; margin-bottom: var(--space-4); color: var(--color-fg-secondary); }
+
+/* The kit resets margins but not list padding, which indented the rows from the heading. */
+.oc-list { padding: 0; list-style: none; }
+
+/* Native controls: selects (shown where the listbox upgrade does not run) look like the inputs. */
+.oc-field select:not(.oc-select-native) {
+  height: 2.25rem;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-primary);
+}
+/* Desktop listbox buttons fill the form column like the other fields. */
+.bv-create .oc-menu-wrap { display: block; }
+.bv-create .oc-menu-button { width: 100%; min-width: 0; }
+.bv-create .oc-menu { min-width: 100%; }
+
+/* The file field's button matches the default button. */
+input[type="file"]::file-selector-button {
+  height: var(--target-tool);
+  margin-right: var(--space-3);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-primary);
+  font: inherit;
+  font-size: var(--text-dense);
+  font-weight: 500;
+  cursor: pointer;
+}
+input[type="file"]:hover::file-selector-button { background: var(--color-bg-hover); }
+
+/* Admin: the table drops low-value columns when narrow. */
+.bv-admin-table { border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+@container app (max-width: 48rem) {
+  .bv-admin .bv-narrow-hide { display: none; }
+  .bv-admin .oc-table td:first-child { max-width: 8rem; }
+  .bv-admin .oc-table td.bv-wrap { white-space: normal; }
+}
+
+@media (pointer: coarse) {
+  .oc-topbar__logo { min-height: var(--target-touch); }
+  .oc-field select:not(.oc-select-native) { min-height: var(--target-touch); font-size: 16px; }
+  .bv-check { min-height: var(--target-touch); }
+  .bv-create .bv-attach > summary, .bv-create .bv-options > summary { padding-block: var(--space-3); }
+  .bv-chip { min-height: var(--target-touch); }
+  .bv-settings summary { padding-block: var(--space-3); }
+  .bv-check input { width: 1.5rem; height: 1.5rem; }
+  .bv-admin-table td a { display: flex; align-items: center; min-height: var(--target-touch); }
+  .bv-pager a { display: inline-flex; align-items: center; min-height: var(--target-touch); }
+  .oc-list__title { padding-block: var(--space-3); }
+  input[type="file"]::file-selector-button { min-height: var(--target-touch); }
+}
+
+.bv-mono { font-family: var(--font-mono); }
+.bv-check { display: flex; align-items: center; gap: var(--space-2); }
+.bv-hint { margin-top: var(--space-1); color: var(--color-fg-muted); font-size: var(--text-micro); }
+.bv-hint:empty { display: none; }
+
+/* A label with its "?" link to the guide. */
+.bv-label { display: flex; align-items: center; gap: var(--space-1); }
+.bv-label > label:not(.bv-check) { font-weight: 500; color: var(--color-fg-secondary); }
+.bv-help { color: var(--color-fg-muted); }
+
+/* The home page: one box, the options in as few rows as the width allows, files behind a disclosure. */
+.bv-create { padding-top: var(--space-5); }
+.bv-box { gap: var(--space-1); }
+.bv-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.bv-chip { height: auto; min-height: 1.75rem; padding: 0 var(--space-2); font-family: var(--font-mono); font-size: var(--text-dense); }
+.bv-chip:first-child { border-color: var(--color-accent); }
+.bv-options > summary, .bv-attach > summary { width: fit-content; padding-block: var(--space-1); font-weight: 500; color: var(--color-fg-secondary); cursor: pointer; }
+.bv-options__summary, .bv-attach__hint { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
+.bv-options__body { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); }
+.bv-options[open] > .bv-options__body { animation: bv-reveal var(--motion-panel) var(--ease); }
+.bv-options__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: var(--space-3); align-items: end; }
+@keyframes bv-reveal { from { opacity: 0; translate: 0 calc(-1 * var(--space-2)); } }
+.bv-attach > .bv-files { margin-top: var(--space-2); }
+
+/* What the box will do, without words. box.js sets data-box: "open" when Enter or the button
+   opens the paste the words name (green, and the button's plus turns into an arrow),
+   "attention" when the words read two ways or lookups are paused (amber), "opening" while the
+   paste loads (the arrow leaves). data-box-nudge shakes the box red when Enter cannot open. With
+   reduced motion the kit stops every animation, and the colours still tell. */
+.bv-create #content {
+  height: 12rem;
+  transition: border-color var(--motion-panel) var(--ease), box-shadow var(--motion-panel) var(--ease), height var(--motion-panel) var(--ease);
+}
+/* One line until what is typed cannot be three words; box.js removes data-compact then. Only
+   with scripts on, so a browser without them gets the full box. */
+@media (scripting: enabled) {
+  .bv-create[data-compact] #content { min-height: 0; height: calc(1lh + 2 * var(--space-2) + 2px); resize: none; overflow-y: auto; }
+}
+.bv-go { transition: background-color var(--motion-panel) var(--ease), border-color var(--motion-panel) var(--ease); }
+.bv-go__icon { display: inline-flex; }
+.bv-go__icon--open { display: none; }
+.bv-create:is([data-box="open"], [data-box="opening"]) #content {
+  border-color: var(--color-success);
+  box-shadow: 0 0 0 3px var(--color-success-dim);
+  outline-color: var(--color-success);
+}
+.bv-create:is([data-box="open"], [data-box="opening"]) .bv-go { background: var(--color-success); border-color: var(--color-success); }
+.bv-create:is([data-box="open"], [data-box="opening"]) .bv-go:hover { background: color-mix(in srgb, var(--color-success) 88%, var(--color-fg-primary)); }
+.bv-create:is([data-box="open"], [data-box="opening"]) .bv-go__icon--create { display: none; }
+.bv-create:is([data-box="open"], [data-box="opening"]) .bv-go__icon--open { display: inline-flex; animation: bv-arrow-in var(--motion-panel) var(--ease); }
+.bv-create[data-box="opening"] .bv-go__icon--open { animation: bv-arrow-out 240ms var(--ease) forwards; }
+.bv-create[data-box="attention"] #content { border-color: var(--color-warning); box-shadow: 0 0 0 3px var(--color-warning-dim); outline-color: var(--color-warning); }
+.bv-create[data-box-nudge] #content {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 3px var(--color-danger-dim);
+  outline-color: var(--color-danger);
+  animation: bv-nudge 360ms var(--ease);
+}
+@keyframes bv-arrow-in { from { translate: -0.5rem 0; opacity: 0; } }
+@keyframes bv-arrow-out { to { translate: 0.75rem 0; opacity: 0; } }
+@keyframes bv-nudge {
+  20% { translate: -6px 0; }
+  40% { translate: 5px 0; }
+  60% { translate: -3px 0; }
+  80% { translate: 2px 0; }
+}
+
+/* The listbox of a grouped select shows the group labels create.js adds. */
+.oc-menu .bv-menu-group { padding: var(--space-2) var(--space-3) var(--space-1); color: var(--color-fg-muted); font-size: var(--text-micro); font-weight: 600; }
+
+/* Upload progress replaces the spinner once it shows a percentage. */
+.bv-create .oc-btn[data-progress] { opacity: 1; color: var(--color-fg-secondary); font-variant-numeric: tabular-nums; }
+.bv-create .oc-btn[data-progress]::after { content: none; }
+.paste-view { width: 100%; max-width: none; }
+
+/* With scripts off, create.js never sets data-privacy, so every field shows. */
+.bv-create[data-privacy="public"] .bv-password,
+.bv-create[data-privacy="unlisted"] .bv-password,
+.bv-create[data-privacy="readonly"] .bv-password,
+.bv-create[data-privacy="private"] .bv-password[data-for="secret"],
+.bv-create[data-privacy="secret"] .bv-password[data-for="private"] { display: none; }
+
+/* Paste page: the view uses the full width; prose keeps its 68ch measure. */
+.paste-view { display: flex; flex-direction: column; gap: var(--space-4); padding-top: var(--space-5); }
+.bv-paste-head { display: flex; flex-direction: column; gap: var(--space-1); }
+.bv-words { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); font-size: var(--text-page); font-weight: 600; overflow-wrap: anywhere; }
+.bv-word { display: inline-flex; align-items: center; gap: var(--space-1); }
+.bv-address { display: flex; align-items: center; gap: var(--space-1); min-width: 0; color: var(--color-fg-secondary); }
+.bv-address > .oc-mono { overflow-wrap: anywhere; }
+.bv-target { display: flex; flex-direction: column; gap: var(--space-2); }
+.bv-target .bv-address { color: var(--color-fg-primary); }
+/* The paste's dates are one quiet line close under its content. */
+.bv-meta { margin-top: calc(-1 * var(--space-2)); color: var(--color-fg-muted); font-size: var(--text-micro); overflow-wrap: anywhere; }
+.bv-meta__short { display: inline-flex; align-items: center; gap: var(--space-1); }
+.bv-meta .oc-mono { font-size: inherit; }
+.bv-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.bv-actions .oc-btn { gap: var(--space-1); }
+.bv-actions .oc-btn[data-copied] { color: var(--color-success); }
+html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
+.bv-copy-scratch { position: fixed; top: 0; left: -9999px; opacity: 0; }
+.bv-delete { display: flex; align-items: flex-end; gap: var(--space-2); margin: 0; }
+.bv-delete .oc-field { flex: 0 1 18rem; }
+.bv-inline { display: inline; margin: 0; }
+.paste-text {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  font-family: var(--font-mono);
+  font-size: var(--text-mono);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+  counter-reset: line;
+}
+/* Numbers come from a counter, so they are never part of the text a reader selects or copies. */
+.paste-text .line { display: block; position: relative; padding-inline-start: 4.5ch; counter-increment: line; }
+.paste-text .line::before {
+  content: counter(line);
+  position: absolute;
+  inset-inline-start: 0;
+  width: 3.5ch;
+  text-align: right;
+  color: var(--color-fg-muted);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.bv-files { display: flex; flex-direction: column; gap: var(--space-3); }
+.bv-files__head { display: flex; align-items: center; gap: var(--space-2); }
+.bv-files__head h2 { font-size: var(--text-section); }
+.bv-preview { margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.bv-preview img { max-width: 100%; height: auto; border-radius: var(--radius-md); }
+.bv-preview figcaption { color: var(--color-fg-muted); font-size: var(--text-micro); }
+.bv-secret-open { margin-top: var(--space-2); }
+#secret-notice:empty { display: none; }
+.bv-cipher { display: flex; flex-direction: column; gap: var(--space-3); }
+.bv-cipher[hidden] { display: none; }
+.bv-cipher__text { max-height: 16rem; overflow-y: auto; color: var(--color-fg-secondary); }
+.bv-cipher__how > summary { cursor: pointer; color: var(--color-fg-secondary); }
+.bv-cipher__value { overflow-wrap: anywhere; }
+.bv-secret-open[hidden], .bv-delete[hidden] { display: none; }
+
+/* create.js turns the file field into a drop zone. */
+/* The whole form takes dropped files; an outline while they are over it, so the page does not shift. */
+.bv-create[data-dragging] { outline: 2px dashed var(--color-accent); outline-offset: var(--space-2); border-radius: var(--radius-md); }
+
+.bv-pager { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) 0; }
+.bv-totals { max-width: 24rem; margin-bottom: var(--space-4); }
+
+.prose { font-size: var(--text-prose); line-height: 1.6; max-width: var(--measure); margin: 0; padding: var(--space-5) 0 var(--space-6); }
+.prose h1 { font-size: var(--text-page); margin-bottom: var(--space-4); }
+.prose h2 { font-size: var(--text-section); margin: var(--space-6) 0 var(--space-2); }
+.prose h3 { font-size: var(--text-prose); margin: var(--space-4) 0 var(--space-1); }
+.prose p + p { margin-top: 1em; }
+
+/* The QR code is dark modules on a light ground in every theme, as scanners expect. The tokens
+   have no colour that is light in both themes, so in the dark theme the ground is the light
+   text colour and the modules are the page background. */
+.qr { display: block; width: 100%; max-width: 16rem; height: auto; margin: 0 auto; }
+.qr-bg { fill: var(--color-bg-elevated); }
+.qr-fg { fill: var(--color-fg-primary); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .qr-bg { fill: var(--color-fg-primary); }
+  :root:not([data-theme="light"]) .qr-fg { fill: var(--color-bg-base); }
+}
+:root[data-theme="dark"] .qr-bg { fill: var(--color-fg-primary); }
+:root[data-theme="dark"] .qr-fg { fill: var(--color-bg-base); }
+
+/* Footer: one quiet line at the end of the page, above the phone tab bar's reserved space. */
+.bv-footer { margin-top: var(--space-6); padding-block: var(--space-3); color: var(--color-fg-muted); font-size: var(--text-micro); text-align: center; }
+.bv-settings { margin-block: var(--space-4); }
+.bv-settings summary { cursor: pointer; font-weight: 600; }
+
+/* The API reference (/docs), rendered on the server from the OpenAPI document. Quiet lists rather
+   than tables, so it reads the same on a phone. */
+.bv-api { padding-bottom: var(--space-6); }
+.bv-api > p, .bv-api-op > p, .bv-api-type > p { max-width: var(--measure); margin-bottom: var(--space-3); line-height: 1.6; }
+.bv-api code { font-family: var(--font-mono); font-size: var(--text-mono); overflow-wrap: anywhere; }
+.bv-api h2 code, .bv-api h3 code { font-size: inherit; }
+.bv-api-toc ul { display: flex; flex-direction: column; gap: var(--space-1); margin: var(--space-4) 0 0; padding: 0; list-style: none; }
+.bv-api-toc a { color: var(--color-fg-primary); text-decoration: none; }
+.bv-api-toc a:hover code { text-decoration: underline; }
+.bv-api-toc__summary { margin-left: var(--space-2); color: var(--color-fg-muted); }
+.bv-method {
+  display: inline-block;
+  min-width: 4.25em;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-dense);
+  font-weight: 600;
+  text-align: center;
+}
+.bv-method--get { color: var(--color-accent); background: var(--color-accent-dim); }
+.bv-method--post { color: var(--color-success); background: var(--color-success-dim); }
+.bv-method--patch, .bv-method--put { color: var(--color-warning); background: var(--color-warning-dim); }
+.bv-method--delete { color: var(--color-danger); background: var(--color-danger-dim); }
+.bv-api-op, .bv-api-types { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--color-border-subtle); }
+.bv-api-op, .bv-api-type { scroll-margin-top: calc(var(--target-touch) + var(--space-3)); }
+.bv-api-op h2 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); font-size: var(--text-section); }
+.bv-api-types > h2 { font-size: var(--text-section); }
+.bv-api-op h3, .bv-api-type h3 { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-ui); font-weight: 600; }
+.bv-api-op__summary { font-weight: 500; }
+.bv-api-media { font-family: var(--font-mono); font-size: var(--text-dense); font-weight: 400; color: var(--color-fg-muted); }
+.bv-api-example { position: relative; margin: var(--space-3) 0; }
+.bv-api-example pre {
+  margin: 0;
+  padding: var(--space-3) calc(var(--space-3) + var(--target-tool)) var(--space-3) var(--space-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  line-height: 1.6;
+  overflow-x: auto;
+}
+.bv-api-example code { overflow-wrap: normal; white-space: pre; }
+.bv-api-example .oc-copy { position: absolute; top: var(--space-2); right: var(--space-2); }
+.bv-fields { display: flex; flex-direction: column; gap: var(--space-3); margin: 0; }
+.bv-field dt { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); }
+.bv-field dd { max-width: var(--measure); margin: var(--space-1) 0 0; color: var(--color-fg-secondary); }
+.bv-field__type { color: var(--color-fg-muted); font-size: var(--text-dense); }
+.bv-field__required { color: var(--color-warning); font-size: var(--text-micro); font-weight: 600; }
+.bv-status { font-weight: 600; }
+.bv-status--2 { color: var(--color-success); }
+.bv-status--4 { color: var(--color-warning); }
+.bv-status--5 { color: var(--color-danger); }

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT position AS \"position!\", name AS \"name!\", size AS \"size!\", mime AS \"mime!\"\n           FROM paste_files WHERE paste_id = ? ORDER BY position",
+  "describe": {
+    "columns": [
+      {
+        "name": "position!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "name!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "size!",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "mime!",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c8e99c289ac0e74efbe57217de9b781e6ae103599230c86d055c1a62ea3a9bd6"
+}

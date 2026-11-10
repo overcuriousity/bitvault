@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM pastes WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "a3690432c854b2eba0f076ae22d70d04e847dbd7c929bf074a6dcf17f7e0d896"
+}
