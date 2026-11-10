@@ -145,6 +145,21 @@ fn compressible() -> impl Predicate {
         .and(NotForContentType::IMAGES)
         .and(NotForContentType::const_new("application/octet-stream"))
         .and(NotForContentType::const_new("application/zip"))
+        .and(NotFileDownload)
+}
+
+/// Compression drops `Content-Length` and `Accept-Ranges`, which downloads need for progress
+/// and resuming; only file and zip responses carry `Content-Disposition`.
+#[derive(Clone, Copy)]
+struct NotFileDownload;
+
+impl Predicate for NotFileDownload {
+    fn should_compress<B>(&self, response: &axum::http::Response<B>) -> bool
+    where
+        B: axum::body::HttpBody,
+    {
+        !response.headers().contains_key(header::CONTENT_DISPOSITION)
+    }
 }
 
 /// The trace span of a request: method and path only. The query is left out because download

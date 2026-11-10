@@ -848,3 +848,55 @@ async fn a_secret_container_is_served_with_a_length_and_ranges() {
 fn domain_now() -> i64 {
     bitvault::domain::now()
 }
+
+#[tokio::test]
+async fn compressible_file_types_keep_their_length_and_ranges_when_gzip_is_offered() {
+    let app = support::app().await;
+    let text = "line of text\n".repeat(500);
+    let mut staging = Staging::new(&app.st.files_dir).unwrap();
+    staging.add("notes.txt", "", body(text.as_bytes()), LIMIT).await.unwrap();
+    let w = paste::create(&app.st, new("x", Privacy::Public), Some(staging), NOW).await.unwrap().words();
+    let gz = |uri: String| {
+        let r = app.req("GET", &uri).header(header::ACCEPT_ENCODING, "gzip");
+        app.send(r.body(axum::body::Body::empty()).unwrap())
+    };
+    let res = gz(format!("/{w}/file/1")).await;
+    assert_eq!(head(&res, header::CONTENT_LENGTH), Some(text.len().to_string().as_str()));
+    assert_eq!(head(&res, header::ACCEPT_RANGES), Some("bytes"));
+    assert!(res.headers().get(header::CONTENT_ENCODING).is_none());
+
+    let mut staging = Staging::new_private(&app.st.files_dir).unwrap();
+    staging.add("secret.txt", "", body(text.as_bytes()), LIMIT).await.unwrap();
+    let id = paste::create(
+        &app.st,
+        NewPaste { password: Some("pw".into()), ..new("", Privacy::Private) },
+        Some(staging),
+        domain_now(),
+    )
+    .await
+    .unwrap();
+    let opened = paste::read(&app.st, id, Access::Password("pw".into()), IP, domain_now()).await.unwrap();
+    let res = gz(format!("/{}/file/1?g={}", id.words(), opened.grant.unwrap())).await;
+    assert_eq!(head(&res, header::CONTENT_LENGTH), Some(text.len().to_string().as_str()));
+    assert!(res.headers().get(header::CONTENT_ENCODING).is_none());
+
+    // The predicate is scoped to downloads: a long HTML page is still compressed.
+    let mut long = new(&"page text ".repeat(500), Privacy::Public);
+    long.content.push('!');
+    let page_id = paste::create(&app.st, long, None, NOW + 1).await.unwrap();
+    let page = gz(format!("/{}", page_id.words())).await;
+    assert!(page.headers().get(header::CONTENT_ENCODING).is_some());
+}
+
+#[tokio::test]
+async fn overlong_range_numbers_clamp_or_fail_instead_of_being_ignored() {
+    let app = support::app().await;
+    let data = bytes(100, 11);
+    let w = public_file(&app, &data).await;
+    let uri = format!("/{w}/file/1");
+    let res = range_get(&app, &uri, Some("bytes=90-99999999999999999999999")).await;
+    assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(head(&res, header::CONTENT_RANGE), Some("bytes 90-99/100"));
+    let res = range_get(&app, &uri, Some("bytes=99999999999999999999999-")).await;
+    assert_eq!(res.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+}

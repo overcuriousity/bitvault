@@ -92,23 +92,28 @@ fn parse_range(value: Option<&HeaderValue>, total: u64) -> RangeAsk {
         return RangeAsk::Full;
     };
     let Some((first, last)) = spec.trim().split_once('-') else { return RangeAsk::Full };
-    let number = |s: &str| (!s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse::<u64>().ok());
-    match (number(first.trim()), number(last.trim())) {
-        (Some(Some(a)), Some(Some(b))) if a <= b => {
+    // A number too long for u64 is still a number: as a last position it reaches the end, as a
+    // first position it lies past the end.
+    let number = |s: &str| {
+        (!s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse::<u64>().unwrap_or(u64::MAX))
+    };
+    let (first, last) = (first.trim(), last.trim());
+    match (number(first), number(last)) {
+        (Some(a), Some(b)) if a <= b => {
             if a >= total {
                 RangeAsk::Unsatisfiable
             } else {
                 RangeAsk::Part(a, b.min(total - 1))
             }
         }
-        (Some(Some(a)), None) if last.trim().is_empty() => {
+        (Some(a), None) if last.is_empty() => {
             if a >= total {
                 RangeAsk::Unsatisfiable
             } else {
                 RangeAsk::Part(a, total - 1)
             }
         }
-        (None, Some(Some(n))) if first.trim().is_empty() => {
+        (None, Some(n)) if first.is_empty() => {
             if n == 0 || total == 0 {
                 RangeAsk::Unsatisfiable
             } else {
