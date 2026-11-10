@@ -2,8 +2,9 @@
 # for example BITVAULT__BIND=127.0.0.1:9000 or BITVAULT__APP__LISTING=false.
 # A key ending in _FILE reads the value from a file: BITVAULT__APP__ADMIN_PASSWORD_FILE=/run/credentials/bitvault.service/admin-password
 
-# The https address users see. Required when bind is not a loopback address.
+# The https address users see. Required when bind is not a loopback address, unless insecure_http is on.
 # public_url = "https://vault.example.org"
+insecure_http = false                         # plain HTTP on a private network: any host name, an http public_url, no Secret pastes; unsafe on untrusted networks
 
 bind = "127.0.0.1:8080"
 trusted_proxies = ["127.0.0.1/32", "::1/128"] # X-Forwarded-For and -Proto are trusted only from these

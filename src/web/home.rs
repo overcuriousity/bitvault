@@ -19,7 +19,7 @@ use super::admin::MaybeAdmin;
 use super::multipart::{Guarded, too_large};
 use super::{DeletedQuery, Extras, page_with};
 use crate::assets::Assets;
-use crate::config::AppConfig;
+use crate::config::{AppConfig, Config};
 use crate::domain::crypto::{self, SALT_LEN};
 use crate::domain::expiry::{self, Expiry};
 use crate::domain::files::Staging;
@@ -35,6 +35,7 @@ const AUTO: &str = "auto";
 /// Each text field of the create form, and the text of an API create.
 pub(crate) const TEXT_LIMIT: usize = paste::TEXT_LIMIT;
 const SECRET_IN_BROWSER: &str = "Secret pastes are encrypted in the browser. Create them on the web page instead.";
+const SECRET_NEEDS_HTTPS: &str = "Secret pastes need https.";
 // A secret paste's content container holds JSON of up to TEXT_LIMIT of text, which escaping can
 // grow sixfold (a control character becomes \u00XX), plus 64 KiB of file names and the container
 // overhead.
@@ -51,6 +52,8 @@ struct Home {
     expiry_options: Vec<(&'static str, String, bool)>,
     syntax_options: Vec<(String, String, bool)>,
     default_burn: u32,
+    /// Whether Secret is offered, and with it its browser-only password field.
+    secret: bool,
     editable: bool,
     uploader_password: bool,
     /// The options' one-line summary as rendered; `create.js` keeps it in sync.
@@ -111,7 +114,7 @@ async fn index(
     let privacy_groups: Vec<_> = PRIVACY_GROUPS
         .iter()
         .map(|(group, levels)| {
-            let offered = levels.iter().filter(|p| app.privacy_levels.iter().any(|l| l == p.as_str()));
+            let offered = levels.iter().filter(|p| st.cfg.offers(**p));
             let options = offered.map(|p| (p.as_str(), super::privacy_label(*p), p.as_str() == app.default_privacy));
             (*group, options.collect::<Vec<_>>())
         })
@@ -130,6 +133,7 @@ async fn index(
         expiry_options,
         syntax_options,
         default_burn: app.default_burn_after,
+        secret: st.cfg.offers(Privacy::Secret),
         editable: app.editable,
         uploader_password: app.uploader_password.is_some(),
         summary,
@@ -211,8 +215,12 @@ pub(crate) struct CreateRules {
 }
 
 impl CreateRules {
-    fn allows(self, privacy: Privacy) -> Result<(), Error> {
-        if privacy == Privacy::Secret && !self.allow_secret { Err(invalid(SECRET_IN_BROWSER)) } else { Ok(()) }
+    fn allows(self, cfg: &Config, privacy: Privacy) -> Result<(), Error> {
+        match privacy {
+            Privacy::Secret if cfg.insecure_http => Err(invalid(SECRET_NEEDS_HTTPS)),
+            Privacy::Secret if !self.allow_secret => Err(invalid(SECRET_IN_BROWSER)),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -349,7 +357,7 @@ impl Form {
             Some(p) => p,
             None => default_privacy(st)?,
         };
-        rules.allows(privacy)?;
+        rules.allows(&st.cfg, privacy)?;
         let expiry = match self.expiry {
             Some(e) => e,
             None => Expiry::parse(&app.default_expiry).ok_or_else(|| Error::internal("default_expiry is invalid"))?,
@@ -427,7 +435,7 @@ pub(crate) async fn read_multipart(
             } else {
                 form.set(&name, value, staging.is_some(), &app.privacy_levels)?;
                 if let Some(privacy) = form.privacy {
-                    rules.allows(privacy)?;
+                    rules.allows(&st.cfg, privacy)?;
                 }
             }
             continue;
@@ -437,7 +445,7 @@ pub(crate) async fn read_multipart(
             Some(p) => p,
             None => *form.privacy.insert(default_privacy(st)?),
         };
-        rules.allows(privacy)?;
+        rules.allows(&st.cfg, privacy)?;
         let filename = field.file_name().unwrap_or_default().to_owned();
         let claimed_mime = field.content_type().map(ToString::to_string).unwrap_or_default();
         // Browsers send an empty, unnamed part when no file was chosen, so a part is only

@@ -275,3 +275,66 @@ async fn request_traces_carry_the_path_but_never_the_query() {
     assert!(logs.contains("path=/test/ip"), "{logs}");
     assert!(!logs.contains("GRANT-MUST-NOT-BE-LOGGED"), "{logs}");
 }
+
+/// Plain HTTP on a LAN address, with no `public_url`.
+const PLAIN: &str = "insecure_http = true\nbind = \"0.0.0.0:8080\"\n";
+const LAN_HOST: &str = "192.168.1.5:8080";
+
+/// A POST to the sink on `host` carrying `origin`.
+fn post_from(host: &str, origin: &str) -> Request<Body> {
+    plain(Request::builder().method("POST").uri("/test/sink").header(header::HOST, host).header(header::ORIGIN, origin))
+}
+
+#[tokio::test]
+async fn plain_http_answers_any_host_without_hsts() {
+    let app = app_with_test_routes(PLAIN).await;
+    for host in [LAN_HOST, "bitvault.lan", "localhost:8080"] {
+        let res = app.send(with_host(plain(app.req("GET", "/")), host)).await;
+        assert_eq!(res.status(), StatusCode::OK, "{host}");
+        assert!(!res.headers().contains_key(header::STRICT_TRANSPORT_SECURITY), "{host}");
+    }
+}
+
+#[tokio::test]
+async fn plain_http_still_refuses_a_host_that_is_not_a_host_name() {
+    let app = app_with_test_routes(PLAIN).await;
+    for host in ["evil.example/x", "a\"b", "user@evil.example", "a b", ""] {
+        let res = app.send(with_host(plain(app.req("GET", "/")), host)).await;
+        assert_eq!(res.status(), StatusCode::MISDIRECTED_REQUEST, "{host:?}");
+    }
+}
+
+#[tokio::test]
+async fn plain_http_checks_the_origin_against_the_request_host() {
+    let app = app_with_test_routes(PLAIN).await;
+    let same = app.send(post_from(LAN_HOST, "http://192.168.1.5:8080")).await;
+    assert_eq!(same.status(), StatusCode::OK);
+    for origin in ["http://192.168.1.6:8080", "https://192.168.1.5:8080", "http://192.168.1.5", "http://evil.example"] {
+        let res = app.send(post_from(LAN_HOST, origin)).await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN, "{origin}");
+    }
+    let null = plain(
+        Request::builder()
+            .method("POST")
+            .uri("/test/sink")
+            .header(header::HOST, LAN_HOST)
+            .header(header::ORIGIN, "null")
+            .header("sec-fetch-site", "cross-site"),
+    );
+    assert_eq!(app.send(null).await.status(), StatusCode::FORBIDDEN);
+    let cookie_only = plain(
+        Request::builder().method("POST").uri("/test/sink").header(header::HOST, LAN_HOST).header("cookie", "a=b"),
+    );
+    assert_eq!(app.send(cookie_only).await.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn plain_http_with_a_public_url_also_accepts_its_origin_and_sends_no_hsts() {
+    let app = app_with_test_routes("insecure_http = true\npublic_url = \"https://vault.example\"\n").await;
+    let res = app.send(with_host(plain(app.req("GET", "/")), "vault.example")).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(!res.headers().contains_key(header::STRICT_TRANSPORT_SECURITY));
+    assert_eq!(app.send(post_from(LAN_HOST, "https://vault.example")).await.status(), StatusCode::OK);
+    assert_eq!(app.send(post_from(LAN_HOST, "http://192.168.1.5:8080")).await.status(), StatusCode::OK);
+    assert_eq!(app.send(post_from(LAN_HOST, "http://evil.example")).await.status(), StatusCode::FORBIDDEN);
+}

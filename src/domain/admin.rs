@@ -14,7 +14,10 @@ use crate::error::Error;
 
 /// A session ends after this long without a request.
 pub const IDLE_SECS: i64 = 12 * 3600;
+/// The session cookie over https: `__Host-` binds it to this host, `Secure` and path `/`.
 pub const COOKIE: &str = "__Host-bitvault-admin";
+/// The session cookie over plain HTTP, where browsers refuse `__Host-` and `Secure` cookies.
+pub const PLAIN_COOKIE: &str = "bitvault-admin";
 
 pub struct AdminAuth {
     phc: String,

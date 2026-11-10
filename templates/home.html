@@ -53,12 +53,14 @@
         </div>
       </div>
       {#- Unnamed, so the browser never submits it. #}
+      {%- if secret %}
       <div class="bv-password" data-for="secret">
         <div class="oc-field">
           {% call help::label("secret-password", "Password", "password", help_icon) %}{% endcall %}
           <input class="oc-input" id="secret-password" type="password" autocomplete="new-password">
         </div>
       </div>
+      {%- endif %}
       <div class="oc-field">
         {% call help::label("expiry", "Expires after", "expiry", help_icon) %}{% endcall %}
         <select id="expiry" name="expiry" data-oc-menu>

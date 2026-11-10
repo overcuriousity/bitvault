@@ -43,7 +43,7 @@ async fn guide(State(st): State<AppState>, MaybeAdmin(admin): MaybeAdmin) -> Res
     let app = &st.cfg.app;
     let body = render(&Guide {
         cfg_title: app.title.clone(),
-        levels: app.privacy_levels.clone(),
+        levels: st.cfg.offered_levels(),
         listing: app.listing,
         editable: app.editable,
         highlight: app.highlight,

@@ -77,6 +77,29 @@ fn a_non_loopback_bind_needs_an_https_public_url() {
 }
 
 #[test]
+fn a_non_loopback_bind_without_a_public_url_is_refused_unless_insecure_http_is_on() {
+    let m = invalid("bind = \"0.0.0.0:8080\"\n");
+    assert!(m.contains("public_url"), "{m}");
+    let cfg = from_toml("insecure_http = true\nbind = \"0.0.0.0:8080\"\n").unwrap();
+    assert!(cfg.insecure_http);
+    assert!(!from_toml("").unwrap().insecure_http, "plain HTTP is off by default");
+}
+
+#[test]
+fn an_http_public_url_is_refused_unless_insecure_http_is_on() {
+    let lan = "bind = \"0.0.0.0:8080\"\npublic_url = \"http://vault.lan:8080\"\n";
+    let m = invalid(lan);
+    assert!(m.contains("public_url"), "{m}");
+    assert!(from_toml(&format!("insecure_http = true\n{lan}")).is_ok());
+}
+
+#[test]
+fn plain_http_cannot_make_secret_the_default_level() {
+    let m = invalid("insecure_http = true\n[app]\ndefault_privacy = \"secret\"\n");
+    assert!(m.contains("default_privacy") && m.contains("insecure_http"), "{m}");
+}
+
+#[test]
 fn environment_variables_override_the_file() {
     let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
     figment::Jail::expect_with(|jail| {

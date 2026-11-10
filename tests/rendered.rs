@@ -152,6 +152,22 @@ async fn every_rendered_page_and_fragment_is_clean() {
     check("unlock 422", wrong, StatusCode::UNPROCESSABLE_ENTITY).await;
 }
 
+#[tokio::test]
+async fn plain_http_pages_are_clean() {
+    let mut app =
+        app_with(&GATE_CONFIG.replace("public_url = \"https://paste.example\"\n", "insecure_http = true\n")).await;
+    app.origin = ("192.168.1.5:8080".into(), "http://192.168.1.5:8080".into());
+    let public = create(&app, NewPaste { editable: true, ..new("hello there", Privacy::Public) }).await;
+    let secret = create(&app, secret()).await;
+    check("plain home", app.get("/").await, StatusCode::OK).await;
+    check("plain public paste", app.get(&format!("/{public}")).await, StatusCode::OK).await;
+    check("plain secret notice", app.get(&format!("/{secret}")).await, StatusCode::OK).await;
+    check("plain guide", app.get("/guide").await, StatusCode::OK).await;
+    app.sign_in_admin().await;
+    check("plain admin", app.get("/admin").await, StatusCode::OK).await;
+    check("plain secret notice signed in", app.get(&format!("/{secret}")).await, StatusCode::OK).await;
+}
+
 fn panics(html: &str) -> bool {
     std::panic::catch_unwind(|| assert_clean_html(html)).is_err()
 }

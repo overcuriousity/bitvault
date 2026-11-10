@@ -25,6 +25,10 @@ The installer works offline, checks every file against `SHA256SUMS` and never ca
 
 BitVault listens on `127.0.0.1:8080` and expects a reverse proxy to terminate TLS. Use [`deploy/nginx.conf`](deploy/nginx.conf) (it is also in the bundle) and set `public_url` to the address users type. Uploads stream through nginx, so keep `client_max_body_size` at `max_file_mb` plus one.
 
+### Plain HTTP on a private network
+
+Set `insecure_http = true` to serve plain HTTP without a proxy, for example on `0.0.0.0:8080` in a home network: any host name is answered and addresses follow the one in the browser. Secret pastes are unavailable, because browsers only encrypt on https pages. Passwords and pastes then cross the network unencrypted, so never use it on a network you do not trust.
+
 ## Configuration
 
 Copy [`config.example.toml`](config.example.toml) and pass it with `--config`. Every key is optional and documented there. Environment variables override the file as `BITVAULT__SECTION__KEY`, and a `_FILE` suffix reads a secret from a file.

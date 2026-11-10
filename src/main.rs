@@ -43,6 +43,9 @@ async fn run(cli: Cli) -> Result<(), bitvault::error::Error> {
         .await
         .map_err(|e| bitvault::error::Error::Invalid(format!("Cannot listen on {bind}: {e}.")))?;
     tracing::info!("Listening on {}", st.dep.origin);
+    if st.cfg.insecure_http {
+        tracing::warn!("Plain HTTP is on: passwords and pastes travel unencrypted on the network.");
+    }
     let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]);
     spawn_watchdog();
     spawn_purge(st.clone());

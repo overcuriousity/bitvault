@@ -1082,3 +1082,55 @@ async fn the_guide_has_an_anchor_for_every_help_link_on_the_create_form() {
         assert!(guide.contains(&format!("id=\"{id}\"")), "the guide has no #{id}");
     }
 }
+
+const LAN_HOST: &str = "192.168.1.5:8080";
+
+/// Plain HTTP with no `public_url`, reached as a LAN address.
+async fn plain_app(extra: &str) -> App {
+    let mut app = app_with(&format!("insecure_http = true\nbind = \"0.0.0.0:8080\"\n{extra}")).await;
+    app.origin = (LAN_HOST.into(), format!("http://{LAN_HOST}"));
+    app
+}
+
+#[tokio::test]
+async fn over_plain_http_a_secret_paste_shows_the_https_notice_instead_of_the_open_form() {
+    let app = plain_app("").await;
+    let w = create(&app, secret(0)).await;
+    let res = app.get(&format!("/{w}")).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let html = body_text(res).await;
+    assert!(html.contains("Secret pastes open only over https."), "{html}");
+    assert!(!html.contains("id=\"secret-open\"") && !html.contains("js/secret."), "{html}");
+    assert!(!html.contains("data-verifier-salt"), "a delete that needs secret.js is not offered");
+    assert_eq!(read_count(&app, &w).await, 0);
+}
+
+#[tokio::test]
+async fn over_plain_http_without_a_public_url_addresses_use_the_request_host() {
+    let app = plain_app("[app]\ntranslate_url = \"https://translate.example/t\"\n").await;
+    let w = create_with_file(&app, new("lan", Privacy::Public), "a.txt", b"x").await;
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    let full = format!("http://{LAN_HOST}/{w}");
+    assert!(html.contains(&format!("data-oc-copy=\"{full}\"")), "{html}");
+    assert!(html.contains(&format!(">{full}<")), "{html}");
+    assert!(html.contains(&format!("data-oc-copy=\"{full}/file/1\"")), "{html}");
+    assert!(html.contains(&bitvault::domain::qr::svg(&full).unwrap()), "the QR code encodes the LAN address");
+    let raw: String = url::form_urlencoded::byte_serialize(format!("{full}/raw").as_bytes()).collect();
+    assert!(html.contains(&format!("from={raw}")), "{html}");
+
+    let mut other = app.req("GET", &format!("/{w}")).body(Body::empty()).unwrap();
+    other.headers_mut().insert(header::HOST, "bitvault.lan".parse().unwrap());
+    let html = body_text(app.send(other).await).await;
+    assert!(html.contains(&format!(">http://bitvault.lan/{w}<")), "{html}");
+}
+
+#[tokio::test]
+async fn over_plain_http_the_creator_cookie_is_not_secure_even_with_an_https_public_url() {
+    let mut app = app_with("insecure_http = true\npublic_url = \"https://paste.example\"\n").await;
+    app.origin = ("paste.example".into(), "https://paste.example".into());
+    let res = app.post_multipart("/", &[("content", None, b"hello")]).await;
+    let (w, cookie) = support::created(&res);
+    assert_eq!(set_cookie(&res).unwrap(), format!("{cookie}; Path=/{w}; HttpOnly; SameSite=Lax; Max-Age=600"));
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    assert!(html.contains(&format!(">https://paste.example/{w}<")), "the public_url wins over the Host: {html}");
+}

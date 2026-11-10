@@ -16,6 +16,7 @@ use axum::response::Html;
 
 use crate::domain::Privacy;
 use crate::error::Error;
+use crate::security::BaseUrl;
 use crate::state::AppState;
 
 /// Asset URLs a page adds to the shell's own.
@@ -222,10 +223,10 @@ pub fn copy_icons() -> String {
     format!("{}{}", icon("copy", IconSize::Row), icon("check", IconSize::Row))
 }
 
-/// A paste's full address on the public origin, and on the short host when one is configured.
-pub fn paste_urls(st: &AppState, words: &str) -> (String, Option<String>) {
+/// A paste's full address on this request's origin, and on the short host when one is configured.
+pub fn paste_urls(st: &AppState, base: &BaseUrl, words: &str) -> (String, Option<String>) {
     let short = st.cfg.app.short_url.as_deref().map(|s| format!("{}/{words}", s.trim_end_matches('/')));
-    (format!("{}/{words}", st.dep.origin), short)
+    (format!("{}/{words}", base.0), short)
 }
 
 /// Paste words from a path segment; anything else is simply not found.

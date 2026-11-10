@@ -22,6 +22,7 @@ https://github.com/overcuriousity/overcuriousity-dev-manifest/tree/v2026.11.0/ma
 5. No dependency on `oc-kit`; the design files are copied at `v2026.11.0` and the security layer is bitvault's own (`50-stack.md` "depend on `oc-kit` by CalVer tag").
 6. No `oc-check` in CI or tests (`70-ops.md` CI contents, `80-code.md` rendered-page `oc-check` test). The narrower inline-style, inline-script and handler check in `tests/rendered.rs` and the console CSP check remain; literal colours rely on review.
 7. Theme and text size are stored in `localStorage` for the admin too, not server-side (`10-visual.md` "store the choice per user"); a single in-memory admin session has nowhere durable to keep them.
+8. Opt-in plain HTTP (`insecure_http`), off by default: any Host, an `http://` `public_url`, origins checked against the request's own Host, no HSTS, a `bitvault-admin` cookie without `Secure`, and no Secret pastes (`70-ops.md` "NEVER an insecure LAN mode"). It restores 1.6.0's LAN use by the owner's decision; start-up logs a warning.
 
 ## Layout
 

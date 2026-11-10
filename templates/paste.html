@@ -40,7 +40,9 @@
   {%- endif %}
 </div>
 {%- endif %}
-{%- if secret %}
+{%- if https_only %}
+{% call notice::notice("info", "Secret pastes open only over https.") %}{% endcall %}
+{%- else if secret %}
 <div id="secret-notice" aria-live="polite"></div>
 <form class="oc-form bv-secret-open" id="secret-open">
   {% call field::secret("secret-password", "Password", "current-password") %}{% endcall %}
@@ -97,7 +99,8 @@
   <dt>{{ fact.term }}</dt><dd><span class="oc-value">{{ fact.text }}{% if let Some(t) = fact.time %}<time datetime="{{ t.iso }}" title="{{ t.title }}" data-bv-relative="{{ t.kind }}">{{ t.text }}</time>{% endif %}</span></dd>
   {%- endfor %}
 </dl>
-{%- if !burned %}
+{#- A secret paste's delete needs secret.js, which plain HTTP does not load; the admin needs no proof. #}
+{%- if !burned && !(https_only && delete.secret()) %}
 {% call delete_form::form(delete, self.icon("trash-2")) %}{% endcall %}
 {%- endif %}
 {%- if let Some(svg) = qr %}

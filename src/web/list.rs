@@ -12,6 +12,7 @@ use super::{Extras, TimeView, copy_icons, date, page_with, paste_urls, render};
 use crate::assets::Assets;
 use crate::domain::{self, paste};
 use crate::error::Error;
+use crate::security::BaseUrl;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -51,6 +52,7 @@ fn files(n: usize) -> String {
 async fn list(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
+    base: BaseUrl,
     Query(q): Query<ListQuery>,
 ) -> Result<Html<String>, Error> {
     if !st.cfg.app.listing {
@@ -69,7 +71,7 @@ async fn list(
             Item {
                 meta: format!("Created {}{}", date(p.created_at), files(p.files.len())),
                 expires: TimeView::expiry(p.expires_at, now),
-                url: paste_urls(&st, &words).0,
+                url: paste_urls(&st, &base, &words).0,
                 words,
             }
         })

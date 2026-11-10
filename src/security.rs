@@ -40,6 +40,28 @@ impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
     }
 }
 
+/// Where absolute addresses for this request start, such as `https://paste.example`: the
+/// `public_url` origin, or `http://{Host}` over plain HTTP without one. The host check has
+/// already vouched for the Host it may contain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BaseUrl(pub String);
+
+impl<S: Send + Sync> FromRequestParts<S> for BaseUrl {
+    type Rejection = Error;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<BaseUrl>()
+            .cloned()
+            .ok_or_else(|| Error::Internal("BaseUrl requires the security layer.".into()))
+    }
+}
+
+/// The Host the host check accepted, for the origin check.
+#[derive(Clone)]
+struct RequestHost(String);
+
 struct Ctx {
     dep: Arc<Deployment>,
     proxies: Vec<IpNet>,
@@ -105,9 +127,11 @@ async fn host_check(State(ctx): State<Arc<Ctx>>, req: Request, next: Next) -> Re
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
         .or_else(|| parts.uri.authority().map(|a| a.as_str()));
-    if !host.is_some_and(|h| ctx.dep.host_allowed(h)) {
+    let Some(host) = host.filter(|h| ctx.dep.host_allowed(h)).map(str::to_owned) else {
         return (StatusCode::MISDIRECTED_REQUEST, "This server does not answer for that host name.").into_response();
-    }
+    };
+    parts.extensions.insert(BaseUrl(ctx.dep.base_url(&host)));
+    parts.extensions.insert(RequestHost(host));
     if let Some(ip) = resolve(&parts, &ctx.proxies) {
         parts.extensions.insert(ClientIp(ip));
     }
@@ -125,8 +149,9 @@ async fn origin_check(State(ctx): State<Arc<Ctx>>, req: Request, next: Next) -> 
     // so "null" counts as absent and Sec-Fetch-Site decides.
     let origin = h.get(header::ORIGIN).and_then(|v| v.to_str().ok()).filter(|o| *o != "null");
     let site = h.get("sec-fetch-site").and_then(|v| v.to_str().ok());
+    let host = req.extensions().get::<RequestHost>().map_or("", |h| h.0.as_str());
     let allowed = match (origin, site) {
-        (Some(o), _) if !ctx.dep.origin_allowed(o) => false,
+        (Some(o), _) if !ctx.dep.origin_allowed(o, host) => false,
         (_, Some(s)) => matches!(s, "same-origin" | "none"),
         (Some(_), None) => true,
         (None, None) => !h.contains_key(header::COOKIE),

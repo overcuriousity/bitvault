@@ -16,8 +16,8 @@ use serde::Deserialize;
 
 use super::{DeletedQuery, Extras, TimeView, date, icon, page, page_with, privacy_label, render, size};
 use crate::assets::Assets;
-use crate::config::AppConfig;
-use crate::domain::admin::COOKIE;
+use crate::config::Config;
+use crate::domain::admin::{COOKIE, PLAIN_COOKIE};
 use crate::domain::expiry::{self, Expiry};
 use crate::domain::{self, paste};
 use crate::error::Error;
@@ -44,18 +44,24 @@ impl FromRequestParts<AppState> for MaybeAdmin {
     }
 }
 
-fn token(headers: &HeaderMap) -> Option<&str> {
+/// The session cookie's name in this mode; only that name is read.
+fn cookie_name(st: &AppState) -> &'static str {
+    if st.dep.plain_http { PLAIN_COOKIE } else { COOKIE }
+}
+
+fn token<'h>(st: &AppState, headers: &'h HeaderMap) -> Option<&'h str> {
+    let name = cookie_name(st);
     headers
         .get_all(header::COOKIE)
         .iter()
         .filter_map(|v| v.to_str().ok())
         .flat_map(|v| v.split(';'))
-        .find_map(|pair| pair.trim().strip_prefix(COOKIE)?.strip_prefix('='))
+        .find_map(|pair| pair.trim().strip_prefix(name)?.strip_prefix('='))
         .filter(|t| !t.is_empty())
 }
 
 fn valid(st: &AppState, headers: &HeaderMap) -> bool {
-    match (&st.admin, token(headers)) {
+    match (&st.admin, token(st, headers)) {
         (Some(auth), Some(t)) => auth.is_valid(t, domain::now()),
         _ => false,
     }
@@ -109,9 +115,11 @@ struct SignInForm {
     password: String,
 }
 
-fn cookie(value: &str, max_age: Option<u32>) -> Result<HeaderValue, Error> {
+fn cookie(st: &AppState, value: &str, max_age: Option<u32>) -> Result<HeaderValue, Error> {
     let age = max_age.map(|a| format!("; Max-Age={a}")).unwrap_or_default();
-    HeaderValue::from_str(&format!("{COOKIE}={value}; HttpOnly; Secure; SameSite=Lax; Path=/{age}"))
+    let secure = if st.dep.plain_http { "" } else { "; Secure" };
+    let name = cookie_name(st);
+    HeaderValue::from_str(&format!("{name}={value}; HttpOnly{secure}; SameSite=Lax; Path=/{age}"))
         .map_err(Error::internal)
 }
 
@@ -129,7 +137,7 @@ async fn sign_in(
             st.failures.refund(ip);
             // A session cookie: the server ends the session after 12 idle hours.
             let mut res = Redirect::to("/admin").into_response();
-            res.headers_mut().insert(header::SET_COOKIE, cookie(&token, None)?);
+            res.headers_mut().insert(header::SET_COOKIE, cookie(&st, &token, None)?);
             // The request carried no session yet, so the session layer does not add this.
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             Ok(res)
@@ -142,11 +150,11 @@ async fn sign_in(
 }
 
 async fn sign_out(State(st): State<AppState>, headers: HeaderMap) -> Result<Response, Error> {
-    if let (Some(auth), Some(t)) = (&st.admin, token(&headers)) {
+    if let (Some(auth), Some(t)) = (&st.admin, token(&st, &headers)) {
         auth.sign_out(t);
     }
     let mut res = Redirect::to("/").into_response();
-    res.headers_mut().insert(header::SET_COOKIE, cookie("", Some(0))?);
+    res.headers_mut().insert(header::SET_COOKIE, cookie(&st, "", Some(0))?);
     Ok(res)
 }
 
@@ -164,7 +172,8 @@ struct Row {
 }
 
 /// The non-secret effective settings, as term and value. Passwords only show whether they are set.
-fn settings(app: &AppConfig) -> Vec<(&'static str, String)> {
+fn settings(cfg: &Config) -> Vec<(&'static str, String)> {
+    let app = &cfg.app;
     let yes = |on: bool| if on { "on" } else { "off" }.to_owned();
     let expiry = |value: &str| Expiry::parse(value).map_or_else(|| value.to_owned(), |e| e.label().to_owned());
     let mb = |n: u64| format!("{n} MB");
@@ -174,7 +183,7 @@ fn settings(app: &AppConfig) -> Vec<(&'static str, String)> {
         ("Syntax highlighting", yes(app.highlight)),
         ("QR codes", yes(app.qr)),
         ("Read statistics", yes(app.read_stats)),
-        ("Privacy levels", app.privacy_levels.join(", ")),
+        ("Privacy levels", cfg.offered_levels().join(", ")),
         ("Default expiry", expiry(&app.default_expiry)),
         ("Longest expiry", expiry::max(app).label().to_owned()),
         ("Largest upload", mb(app.max_file_mb)),
@@ -182,7 +191,7 @@ fn settings(app: &AppConfig) -> Vec<(&'static str, String)> {
         ("Short address", app.short_url.clone().unwrap_or_else(|| "none".into())),
         ("Translate service", app.translate_url.clone().unwrap_or_else(|| "none".into())),
         ("Uploader password", yes(app.uploader_password.is_some())),
-        // Task R6 adds the plain-HTTP mode here.
+        ("Plain HTTP", yes(cfg.insecure_http)),
     ]
 }
 
@@ -234,7 +243,7 @@ async fn table(
         file_size: size(files),
         trash: icon("trash-2", super::IconSize::Row),
         version: env!("CARGO_PKG_VERSION"),
-        settings: settings(&st.cfg.app),
+        settings: settings(&st.cfg),
     })?;
     let extras = Extras { js: vec![Assets::url("js/paste.js")], ..Extras::default() };
     Ok(page_with(&st, true, "admin", "Admin", body, extras)?.into_response())

@@ -9,6 +9,7 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::deployment::Deployment;
+use crate::domain::Privacy;
 use crate::domain::expiry::Expiry;
 use crate::error::Error;
 
@@ -26,6 +27,9 @@ pub struct Config {
     pub public_url: Option<Url>,
     pub data_dir: Option<PathBuf>,
     pub trusted_proxies: Vec<IpNet>,
+    /// Serves over plain HTTP on any host name (a private network without TLS): no HSTS, no
+    /// `Secure` cookies, and no Secret pastes.
+    pub insecure_http: bool,
     pub app: AppConfig,
 }
 
@@ -36,6 +40,7 @@ impl Default for Config {
             public_url: None,
             data_dir: None,
             trusted_proxies: ["127.0.0.1/32", "::1/128"].iter().filter_map(|s| s.parse().ok()).collect(),
+            insecure_http: false,
             app: AppConfig::default(),
         }
     }
@@ -144,6 +149,9 @@ impl Config {
         if !a.privacy_levels.contains(&a.default_privacy) {
             return Err(Error::Invalid("default_privacy must be one of privacy_levels.".into()));
         }
+        if self.insecure_http && a.default_privacy == Privacy::Secret.as_str() {
+            return Err(Error::Invalid("default_privacy cannot be secret while insecure_http is on.".into()));
+        }
         for choice in &a.expiry_choices {
             if Expiry::parse(choice).is_none() {
                 return Err(Error::Invalid(format!("expiry_choices has an unknown choice '{choice}'.")));
@@ -169,6 +177,17 @@ impl Config {
             return Err(Error::Invalid("max_file_mb and max_secret_file_mb must be at most 1048576.".into()));
         }
         Deployment::from_config(self).map(|_| ())
+    }
+
+    /// Whether new pastes may use `level`. Browsers keep Web Crypto to https pages, so a Secret
+    /// paste can neither be made nor opened over plain HTTP.
+    pub fn offers(&self, level: Privacy) -> bool {
+        self.app.privacy_levels.iter().any(|l| l == level.as_str()) && !(self.insecure_http && level == Privacy::Secret)
+    }
+
+    /// The configured privacy levels that new pastes may use, in their configured order.
+    pub fn offered_levels(&self) -> Vec<String> {
+        self.app.privacy_levels.iter().filter(|l| Privacy::parse(l).is_some_and(|p| self.offers(p))).cloned().collect()
     }
 
     pub fn data_dir(&self) -> PathBuf {

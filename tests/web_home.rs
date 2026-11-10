@@ -281,3 +281,31 @@ async fn labels_link_to_their_guide_sections() {
     }
     assert!(html.contains("data-icon=\"circle-question-mark\""));
 }
+
+async fn plain_app() -> support::App {
+    let mut app = app_with("insecure_http = true\nbind = \"0.0.0.0:8080\"\n").await;
+    app.origin = ("192.168.1.5:8080".into(), "http://192.168.1.5:8080".into());
+    app
+}
+
+#[tokio::test]
+async fn over_plain_http_the_form_does_not_offer_secret() {
+    let app = plain_app().await;
+    let html = body_text(app.get("/").await).await;
+    assert!(html.contains("value=\"private\""));
+    assert!(!html.contains("value=\"secret\"") && !html.contains("Encrypted in your browser"), "{html}");
+    assert!(!html.contains("id=\"secret-password\""), "no password field for a level that is not offered");
+    let guide = body_text(app.get("/guide").await).await;
+    assert!(!guide.contains("<h3>Secret</h3>"), "the guide follows the offered levels");
+}
+
+#[tokio::test]
+async fn over_plain_http_a_secret_create_is_refused_before_any_file() {
+    let app = plain_app().await;
+    let parts: &[(&str, Option<&str>, &[u8])] = &[("privacy", None, b"secret"), ("file", Some("a"), b"x")];
+    let res = app.post_multipart("/", parts).await;
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(body_text(res).await.contains("Secret pastes need https."));
+    let res = app.post_multipart("/", &[("content", None, b"hello"), ("privacy", None, b"unlisted")]).await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+}

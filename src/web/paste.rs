@@ -5,7 +5,8 @@ use std::sync::{Arc, LazyLock};
 use askama::Template;
 use axum::Form;
 use axum::Router;
-use axum::extract::{Path, Query, RawQuery, State};
+use axum::extract::{FromRequestParts, Path, Query, RawQuery, State};
+use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -23,7 +24,7 @@ use crate::domain::paste::{self, Access, Body, DeleteAuth, Opened, Paste};
 use crate::domain::words::PasteId;
 use crate::domain::{self, Kind, Privacy, grant, highlight, qr};
 use crate::error::Error;
-use crate::security::ClientIp;
+use crate::security::{BaseUrl, ClientIp};
 use crate::state::AppState;
 
 /// Content above this size is shown plain: syntect's fancy-regex can backtrack badly on large
@@ -129,6 +130,9 @@ struct PasteView {
     facts: Vec<Fact>,
     burned: bool,
     secret: bool,
+    /// A secret paste over plain HTTP, where the browser cannot decrypt it: a notice instead of
+    /// the open form, and no secret.js.
+    https_only: bool,
     sealed: bool,
     raw_href: Option<String>,
     qr: Option<String>,
@@ -220,7 +224,15 @@ fn reads(n: u32) -> String {
 /// The page for a paste whose content (if any) has been read and rendered by [`content_html`].
 /// `grant` is set after an unlock and on the burning read; it is added to the links that need it.
 /// `created` marks the creator view.
-fn paste_view(st: &AppState, admin: bool, p: &Paste, shown: Shown, grant: Option<&str>, created: bool) -> PasteView {
+fn paste_view(
+    st: &AppState,
+    admin: bool,
+    base: &BaseUrl,
+    p: &Paste,
+    shown: Shown,
+    grant: Option<&str>,
+    created: bool,
+) -> PasteView {
     let app = &st.cfg.app;
     let words = p.id.words();
     let burned = p.burned_at.is_some();
@@ -229,7 +241,7 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, shown: Shown, grant: Option
     let files_g = grant.map(|g| format!("?g={g}")).unwrap_or_default();
     // Raw and edit only take a grant from an unlock; a burned paste has neither.
     let read_g = if p.privacy == Privacy::Private { files_g.clone() } else { String::new() };
-    let (full, short_url) = paste_urls(st, &words);
+    let (full, short_url) = paste_urls(st, base, &words);
     let raw_href = (!secret && !sealed).then(|| format!("/{words}/raw{read_g}"));
     let now = domain::now();
     let mut facts = vec![Fact::text("Created", date(p.created_at))];
@@ -277,7 +289,7 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, shown: Shown, grant: Option
                 position: f.position,
                 name: f.name.clone(),
                 size: if secret { String::new() } else { size(f.size) },
-                url: format!("{}{href}", st.dep.origin),
+                url: format!("{}{href}", base.0),
                 preview: !secret && inline_image(&f.mime),
                 href,
             }
@@ -292,6 +304,7 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, shown: Shown, grant: Option
         facts,
         burned,
         secret,
+        https_only: secret && st.dep.plain_http,
         sealed,
         raw_href,
         qr: if app.qr && !burned { qr::svg(&full).ok() } else { None },
@@ -311,7 +324,7 @@ fn paste_view(st: &AppState, admin: bool, p: &Paste, shown: Shown, grant: Option
 fn render_paste(st: &AppState, admin: bool, view: &PasteView, words: &str) -> Result<Response, Error> {
     let body = render(view)?;
     let mut js = vec![Assets::url("js/paste.js")];
-    if view.secret {
+    if view.secret && !view.https_only {
         js.push(Assets::url("js/secret.js"));
     }
     let extras = Extras { css: vec![Assets::url("css/syntax.css")], js, ..Extras::default() };
@@ -342,22 +355,22 @@ async fn shown(st: &AppState, p: &Paste, body: &Body) -> Result<Shown, Error> {
     }
 }
 
-async fn render_opened(st: &AppState, admin: bool, opened: &Opened) -> Result<Response, Error> {
+async fn render_opened(st: &AppState, admin: bool, base: &BaseUrl, opened: &Opened) -> Result<Response, Error> {
     let shown = shown(st, &opened.paste, &opened.body).await?;
-    let view = paste_view(st, admin, &opened.paste, shown, opened.grant.as_deref(), false);
+    let view = paste_view(st, admin, base, &opened.paste, shown, opened.grant.as_deref(), false);
     render_paste(st, admin, &view, &opened.paste.id.words())
 }
 
 /// The page a web create lands on: the paste as a reader would see it, without counting a read
 /// or following a URL paste's redirect.
-async fn render_creator(st: &AppState, admin: bool, id: PasteId, now: i64) -> Result<Response, Error> {
+async fn render_creator(st: &AppState, admin: bool, base: &BaseUrl, id: PasteId, now: i64) -> Result<Response, Error> {
     let (p, body) = paste::creator_view(st, id, now).await?;
     let shown = match &body {
         Some(body) => shown(st, &p, body).await?,
         None if p.privacy == Privacy::Secret => Shown::Secret,
         None => Shown::Sealed,
     };
-    let view = paste_view(st, admin, &p, shown, None, true);
+    let view = paste_view(st, admin, base, &p, shown, None, true);
     render_paste(st, admin, &view, &id.words())
 }
 
@@ -418,8 +431,7 @@ fn wants_page(query: Option<&str>) -> bool {
 /// already redeemed is refused even if the cookie is sent again.
 async fn view(
     State(st): State<AppState>,
-    MaybeAdmin(admin): MaybeAdmin,
-    ClientIp(ip): ClientIp,
+    viewer: Viewer,
     method: Method,
     Path(words): Path<String>,
     RawQuery(query): RawQuery,
@@ -429,9 +441,9 @@ async fn view(
     let now = domain::now();
     let tokens = created_tokens(&headers);
     let mut res = if tokens.iter().any(|t| grant::redeem_creator(&st.grant_key, &st.redeemed, t, id, now)) {
-        render_creator(&st, admin, id, now).await?
+        render_creator(&st, viewer.admin, &viewer.base, id, now).await?
     } else {
-        ordinary_view(&st, admin, ip, &method, id, now, wants_page(query.as_deref())).await?
+        ordinary_view(&st, &viewer, &method, id, now, wants_page(query.as_deref())).await?
     };
     if !tokens.is_empty() {
         res.headers_mut().append(header::SET_COOKIE, created_cookie(&st, &id.words(), "", 0)?);
@@ -439,21 +451,39 @@ async fn view(
     Ok(res)
 }
 
-async fn ordinary_view(
-    st: &AppState,
+/// Who is looking at a paste page, and the origin its addresses start with.
+struct Viewer {
     admin: bool,
     ip: std::net::IpAddr,
+    base: BaseUrl,
+}
+
+impl FromRequestParts<AppState> for Viewer {
+    type Rejection = Error;
+
+    async fn from_request_parts(parts: &mut Parts, st: &AppState) -> Result<Self, Error> {
+        let Ok(MaybeAdmin(admin)) = MaybeAdmin::from_request_parts(parts, st).await;
+        let ClientIp(ip) = ClientIp::from_request_parts(parts, st).await?;
+        let base = BaseUrl::from_request_parts(parts, st).await?;
+        Ok(Self { admin, ip, base })
+    }
+}
+
+async fn ordinary_view(
+    st: &AppState,
+    viewer: &Viewer,
     method: &Method,
     id: PasteId,
     now: i64,
     page: bool,
 ) -> Result<Response, Error> {
+    let Viewer { admin, ip, ref base } = *viewer;
     let p = paste::meta(st, id, now).await?;
     match p.privacy {
         // Only the form: a private paste's file names and sizes are private as well.
         Privacy::Private => unlock_page(st, admin, id.words(), None, StatusCode::OK),
         Privacy::Secret => {
-            let view = paste_view(st, admin, &p, Shown::Secret, None, false);
+            let view = paste_view(st, admin, base, &p, Shown::Secret, None, false);
             render_paste(st, admin, &view, &id.words())
         }
         _ if *method == Method::HEAD => Ok(head_only(HTML)),
@@ -461,7 +491,7 @@ async fn ordinary_view(
             let opened = paste::read(st, id, Access::Anonymous, ip, now).await?;
             match &opened.body {
                 Body::Url(target) if !page => redirect_to(target),
-                _ => render_opened(st, admin, &opened).await,
+                _ => render_opened(st, admin, base, &opened).await,
             }
         }
     }
@@ -478,6 +508,7 @@ async fn unlock(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
     ClientIp(ip): ClientIp,
+    base: BaseUrl,
     Path(words): Path<String>,
     Form(form): Form<PasswordForm>,
 ) -> Result<Response, Error> {
@@ -492,7 +523,7 @@ async fn unlock(
         return unlock_page(&st, admin, id.words(), notice, StatusCode::UNPROCESSABLE_ENTITY);
     }
     match paste::read(&st, id, Access::Password(form.password), ip, now).await {
-        Ok(opened) => render_opened(&st, admin, &opened).await,
+        Ok(opened) => render_opened(&st, admin, &base, &opened).await,
         Err(e @ Error::WrongPassword) => {
             unlock_page(&st, admin, id.words(), Some(e.to_string()), StatusCode::UNPROCESSABLE_ENTITY)
         }

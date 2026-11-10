@@ -201,3 +201,59 @@ async fn the_admin_page_shows_the_version_settings_editable_and_last_read() {
     assert!(html.contains("data-bv-relative=\"expires\""));
     assert!(html.contains("js/paste."), "the page loads the relative-time module");
 }
+
+/// [`ADMIN_CONFIG`] with plain HTTP on, reached as a LAN address.
+async fn plain_admin_app() -> App {
+    let mut app = app_with(&format!("insecure_http = true\nbind = \"0.0.0.0:8080\"\n{ADMIN_CONFIG}")).await;
+    app.origin = ("192.168.1.5:8080".into(), "http://192.168.1.5:8080".into());
+    app
+}
+
+#[tokio::test]
+async fn over_plain_http_the_session_cookie_drops_secure_and_the_host_prefix() {
+    let app = plain_admin_app().await;
+    let res = app.post_form("/admin/sign-in", "password=admin-pw-123").await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    let cookie = res.headers()[header::SET_COOKIE].to_str().unwrap();
+    assert!(cookie.starts_with("bitvault-admin="), "{cookie}");
+    for attr in ["HttpOnly", "SameSite=Lax", "Path=/"] {
+        assert!(cookie.contains(attr), "{cookie}");
+    }
+    assert!(!cookie.contains("Secure") && !cookie.contains("__Host-") && !cookie.contains("Domain"), "{cookie}");
+}
+
+#[tokio::test]
+async fn signing_in_works_over_plain_http_and_the_secure_cookie_name_is_ignored() {
+    let mut app = plain_admin_app().await;
+    app.sign_in_admin().await;
+    assert_eq!(app.get("/admin").await.status(), StatusCode::OK);
+    let token = app.cookie.clone().unwrap().split_once('=').unwrap().1.to_owned();
+    app.cookie = Some(format!("__Host-bitvault-admin={token}"));
+    assert_eq!(app.get("/admin").await.status(), StatusCode::SEE_OTHER);
+    let res = app.post_form("/admin/sign-out", "").await;
+    let cleared = res.headers()[header::SET_COOKIE].to_str().unwrap();
+    assert!(cleared.starts_with("bitvault-admin=;") && cleared.contains("Max-Age=0"), "{cleared}");
+}
+
+#[tokio::test]
+async fn over_https_the_plain_cookie_name_is_ignored() {
+    let mut app = app_with(ADMIN_CONFIG).await;
+    app.sign_in_admin().await;
+    let token = app.cookie.clone().unwrap().split_once('=').unwrap().1.to_owned();
+    app.cookie = Some(format!("bitvault-admin={token}"));
+    assert_eq!(app.get("/admin").await.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn the_admin_settings_show_whether_plain_http_is_on() {
+    let row = |on: &str| format!("<dt>Plain HTTP</dt><dd><span class=\"oc-value\">{on}</span></dd>");
+    let mut app = app_with(ADMIN_CONFIG).await;
+    app.sign_in_admin().await;
+    let html = body_text(app.get("/admin").await).await;
+    assert!(html.contains(&row("off")), "{html}");
+    let mut plain = plain_admin_app().await;
+    plain.sign_in_admin().await;
+    let html = body_text(plain.get("/admin").await).await;
+    assert!(html.contains(&row("on")), "{html}");
+    assert!(html.contains("public, unlisted, readonly, private<"), "Secret is not offered over plain HTTP: {html}");
+}

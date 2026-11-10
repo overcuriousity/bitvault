@@ -26,7 +26,7 @@ use crate::domain::paste::{self, Access, Body, DeleteAuth, Paste};
 use crate::domain::{self, Privacy};
 use crate::error::Error;
 use crate::ratelimit::{self, RateLimiter};
-use crate::security::ClientIp;
+use crate::security::{BaseUrl, ClientIp};
 use crate::state::AppState;
 use crate::web::home::{self, CreateRules, Form, TEXT_LIMIT};
 use crate::web::{paste_id, paste_urls};
@@ -367,6 +367,7 @@ pub struct CreateResponse {
 )]
 async fn create_paste(
     State(st): State<AppState>,
+    base: BaseUrl,
     req: Request,
 ) -> Result<(StatusCode, Json<CreateResponse>), ApiError> {
     home::check_uploader(&st, req.headers().get(UPLOADER_HEADER).map(HeaderValue::as_bytes))?;
@@ -391,7 +392,7 @@ async fn create_paste(
     let id = paste::create(&st, new, staging, now).await?;
     let p = paste::meta(&st, id, now).await?;
     let words = id.words();
-    let (url, short_url) = paste_urls(&st, &words);
+    let (url, short_url) = paste_urls(&st, &base, &words);
     let created = CreateResponse {
         id: id.0,
         words,
@@ -448,6 +449,7 @@ pub struct ListResponse {
 )]
 async fn list_pastes(
     State(st): State<AppState>,
+    base: BaseUrl,
     query: Result<Query<ListQuery>, QueryRejection>,
 ) -> ApiResult<ListResponse> {
     if !st.cfg.app.listing {
@@ -463,7 +465,7 @@ async fn list_pastes(
             let words = p.id.words();
             ListItem {
                 id: p.id.0,
-                url: paste_urls(&st, &words).0,
+                url: paste_urls(&st, &base, &words).0,
                 words,
                 created_at: p.created_at,
                 expires_at: p.expires_at,
@@ -521,9 +523,16 @@ pub struct PasteResponse {
     pub grant: Option<String>,
 }
 
-fn paste_response(st: &AppState, p: &Paste, encrypted: bool, content: String, grant: Option<String>) -> PasteResponse {
+fn paste_response(
+    st: &AppState,
+    base: &BaseUrl,
+    p: &Paste,
+    encrypted: bool,
+    content: String,
+    grant: Option<String>,
+) -> PasteResponse {
     let words = p.id.words();
-    let (url, short_url) = paste_urls(st, &words);
+    let (url, short_url) = paste_urls(st, base, &words);
     let files = p
         .files
         .iter()
@@ -532,7 +541,7 @@ fn paste_response(st: &AppState, p: &Paste, encrypted: bool, content: String, gr
             name: f.name.clone(),
             size: f.size,
             mime: f.mime.clone(),
-            url: format!("{}/api/v1/pastes/{words}/files/{}", st.dep.origin, f.position),
+            url: format!("{}/api/v1/pastes/{words}/files/{}", base.0, f.position),
         })
         .collect();
     PasteResponse {
@@ -580,6 +589,7 @@ fn paste_response(st: &AppState, p: &Paste, encrypted: bool, content: String, gr
 async fn get_paste(
     State(st): State<AppState>,
     ClientIp(ip): ClientIp,
+    base: BaseUrl,
     method: Method,
     Path(words): Path<String>,
     headers: HeaderMap,
@@ -595,7 +605,7 @@ async fn get_paste(
         Body::Text(t) | Body::Url(t) => (false, t),
         Body::Cipher(c) => (true, STANDARD.encode(c)),
     };
-    let view = paste_response(&st, &opened.paste, encrypted, content, opened.grant);
+    let view = paste_response(&st, &base, &opened.paste, encrypted, content, opened.grant);
     Ok(no_store(Json(view).into_response()))
 }
 
@@ -640,6 +650,7 @@ pub struct EditResponse {
 async fn update_paste(
     State(st): State<AppState>,
     ClientIp(ip): ClientIp,
+    base: BaseUrl,
     Path(words): Path<String>,
     headers: HeaderMap,
     ApiJson(body): ApiJson<EditRequest>,
@@ -652,7 +663,7 @@ async fn update_paste(
     };
     paste::edit(&st, id, password_access(&headers)?, ip, body.content, syntax.clone(), now).await?;
     let words = id.words();
-    let url = paste_urls(&st, &words).0;
+    let url = paste_urls(&st, &base, &words).0;
     Ok(Json(EditResponse { id: id.0, words, url, syntax }))
 }
 

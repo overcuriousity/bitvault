@@ -560,3 +560,26 @@ async fn the_file_route_honours_ranges_for_public_files() {
     assert_eq!(res.status(), StatusCode::RANGE_NOT_SATISFIABLE);
     assert_eq!(res.headers()["content-range"], "bytes */5");
 }
+
+#[tokio::test]
+async fn over_plain_http_the_api_refuses_secret_and_answers_with_the_request_host() {
+    let app = app_with("insecure_http = true\nbind = \"0.0.0.0:8080\"\n").await;
+    let lan = |body: &Value| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/pastes")
+            .header(header::HOST, "192.168.1.5:8080")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let res = app.send(lan(&json!({"content": "x", "privacy": "secret"}))).await;
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let v = json_of(res).await;
+    assert_eq!(v["error"]["code"], "INVALID");
+    assert_eq!(v["error"]["message"], "Secret pastes need https.");
+    let res = app.send(lan(&json!({"content": "x"}))).await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let v = json_of(res).await;
+    assert_eq!(v["url"], format!("http://192.168.1.5:8080/{}", v["words"].as_str().unwrap()));
+}
