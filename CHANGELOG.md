@@ -15,13 +15,23 @@ This is a rewrite and a fresh start. There is no compatibility with 1.6.0: no da
 - `BITVAULT_NO_LISTING` became `listing`, `BITVAULT_HIGHLIGHTSYNTAX` became `highlight`, and `BITVAULT_ETERNAL_PASTA` became `never` in `expiry_choices` and `max_expiry`.
 - `BITVAULT_ENABLE_READONLY`, `BITVAULT_ENCRYPTION_CLIENT_SIDE` and `BITVAULT_ENCRYPTION_SERVER_SIDE` became entries in `privacy_levels`; `BITVAULT_MAX_FILE_SIZE_UNENCRYPTED_MB` and `BITVAULT_MAX_FILE_SIZE_ENCRYPTED_MB` became `max_file_mb` and `max_secret_file_mb`.
 - The admin password has no default; without one there is no admin page.
+- BitVault must be served over https from one public host: a non-loopback `bind` needs an https `public_url`, and requests for any other host name are refused. `insecure_http = true` opts out for private networks (any host name, no HSTS, no Secret pastes); see the README.
+- `editable` now means the "Allow editing" checkbox is shown and pre-checked on new pastes, and it sets the API default.
+- Text is limited to 1 MiB per paste.
+- The expiries 2, 4, 8 and 16 years exist again, but only as opt-in through `expiry_choices`.
 
 ### Added
 
 - Secret file encryption: files in a Secret paste are encrypted in the browser.
 - Three-word canonical URLs: every paste lives at `/{three-words}`.
 - A generated OpenAPI document at `/api/v1/openapi.json` with Swagger UI at `/docs`.
-- Per-address rate limits: creates, API calls, wrong passwords, and lookups of words that match no paste (so unlisted pastes cannot be enumerated).
+- Per-address rate limits: creates 30 per minute (burst 10), other API calls 120 (burst 30), wrong passwords 10 (burst 5), and lookups of words that match no paste 20 (burst 10), so unlisted pastes cannot be enumerated.
+- After creating on the web you see the new paste with its words, address, Copy link, Share, QR code and delete; fetch-based creates show upload progress and you can paste images from the clipboard.
+- Open a paste by typing the first four letters of each word.
+- Syntax "Automatic" (the default) detects the language from the first line, such as a shebang; code gets line numbers.
+- Copy text and Share (where the browser has it) on paste pages; raw text, link and QR stay in one toolbar.
+- File downloads send `Content-Length` and resume with byte ranges, except in private pastes and zip downloads.
+- Guide and API in the navigation, help links on the create form, a version footer, and an admin settings summary.
 
 ### Removed
 
@@ -32,6 +42,7 @@ This is a rewrite and a fresh start. There is no compatibility with 1.6.0: no da
 - `BITVAULT_JSON_DB` (SQLite only) and `BITVAULT_HASH_IDS` (three-word addresses only).
 - `BITVAULT_CUSTOM_CSS`, `BITVAULT_PURE_HTML` and `BITVAULT_WIDE` (one design, one layout).
 - `BITVAULT_HIDE_HEADER`, `BITVAULT_HIDE_FOOTER`, `BITVAULT_HIDE_LOGO` and `BITVAULT_FOOTER_TEXT`.
-- `BITVAULT_THREADS` (the runtime sizes itself) and `BITVAULT_GC_DAYS` (expired pastes are purged within a minute).
+- `BITVAULT_THREADS` (the runtime sizes itself).
+- `BITVAULT_GC_DAYS`. Expired pastes are purged within a minute, but it also deleted pastes that nobody had read for that many days; there is no replacement.
 - `BITVAULT_ENABLE_BURN_AFTER` (burn after reading is always available; `default_burn_after` sets the default) and `BITVAULT_NO_FILE_UPLOAD`.
 - The Docker image, `compose.yaml`, `.env` and `docker-setup.sh`.

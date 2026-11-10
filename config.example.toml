@@ -18,7 +18,7 @@ title = "BitVault"
 listing = true                                # show the public list at /list
 editable = false                              # allow editing: shows "Allow editing", checked on new pastes, and makes it the API default
 read_stats = false                            # show read counts on paste pages
-highlight = true                              # syntax highlighting for public, unlisted and read-only pastes
+highlight = true                              # syntax highlighting (Automatic detects the language from the first line) for public, unlisted and read-only pastes
 qr = true                                     # QR code on paste pages (needs a public_url)
 # translate_url = "https://translate.example.org" # adds a Translate link on text paste pages: translate_url?from=<url-encoded raw URL of the paste>
 privacy_levels = ["public", "unlisted", "readonly", "private", "secret"]
