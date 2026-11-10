@@ -75,6 +75,8 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-word { display: inline-flex; align-items: center; gap: var(--space-1); }
 .bv-address { display: flex; align-items: center; gap: var(--space-1); min-width: 0; color: var(--color-fg-secondary); }
 .bv-address > .oc-mono { overflow-wrap: anywhere; }
+.bv-target { display: flex; flex-direction: column; gap: var(--space-2); }
+.bv-target .bv-address { color: var(--color-fg-primary); }
 .bv-meta { max-width: 36rem; }
 .bv-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
 .bv-delete { display: flex; align-items: flex-end; gap: var(--space-2); margin: 0; }

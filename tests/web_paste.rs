@@ -624,3 +624,144 @@ async fn an_edit_of_almost_a_mebibyte_of_text_is_saved_and_a_larger_one_refused(
     let res = app.post_form(&format!("/{w}/delete"), &format!("password={}", "x".repeat(1 << 20))).await;
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
+
+fn location(res: &axum::http::Response<Body>) -> String {
+    res.headers()[header::LOCATION].to_str().unwrap().to_owned()
+}
+
+fn id_of(words: &str) -> bitvault::domain::words::PasteId {
+    bitvault::domain::words::parse(words).unwrap()
+}
+
+#[tokio::test]
+async fn creating_a_url_paste_shows_its_words_instead_of_redirecting() {
+    let app = app().await;
+    let res = app.post_multipart("/", &[("content", None, b"https://example.com/target?a=1&b=2")]).await;
+    let (w, token) = support::created(&res);
+    assert_eq!(location(&res), format!("/{w}?c={token}"));
+    let res = app.get(&location(&res)).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let html = body_text(res).await;
+    assert!(html.contains("Paste created."), "{html}");
+    for word in w.split('-') {
+        assert!(html.contains(&format!("data-oc-copy=\"{word}\"")), "{word}");
+    }
+    assert!(html.contains(&format!("data-oc-copy=\"http://localhost:8080/{w}\"")));
+    let link =
+        "<a href=\"https://example.com/target?a=1&#38;b=2\" rel=\"noreferrer noopener\" data-bv-target>Go to URL</a>";
+    assert!(html.contains(link), "{html}");
+    assert_eq!(read_count(&app, &w).await, 0);
+    assert_eq!(app.get(&format!("/{w}")).await.status(), StatusCode::FOUND);
+}
+
+#[tokio::test]
+async fn the_creator_view_does_not_burn_a_burn_after_one_paste() {
+    let app = app().await;
+    let res = app.post_multipart("/", &[("content", None, b"only once"), ("burn_after_reads", None, b"1")]).await;
+    let (w, _) = support::created(&res);
+    let creator = location(&res);
+    for _ in 0..2 {
+        let html = body_text(app.get(&creator).await).await;
+        assert!(html.contains("only once") && html.contains("Paste created."), "{html}");
+        assert!(!html.contains("That was the last read"));
+    }
+    assert_eq!(read_count(&app, &w).await, 0);
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    assert!(html.contains("only once") && html.contains("That was the last read"), "{html}");
+    assert!(!html.contains("Paste created."));
+    assert_eq!(app.get(&format!("/{w}")).await.status(), StatusCode::NOT_FOUND);
+    assert_eq!(app.get(&creator).await.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_forged_or_expired_creator_token_is_ignored() {
+    use bitvault::domain::grant;
+    let app = app().await;
+    let url = create(&app, new("https://example.com/target", Privacy::Unlisted)).await;
+    let text = create(&app, new("plain words", Privacy::Unlisted)).await;
+    let key = &app.st.grant_key;
+    let now = domain::now();
+    let refused = [
+        "forged".to_owned(),
+        String::new(),
+        grant::issue_creator(key, id_of(&url), now - 601),
+        grant::issue(key, id_of(&url), None, now),
+        grant::issue_creator(key, id_of(&text), now),
+    ];
+    for c in &refused {
+        let res = app.get(&format!("/{url}?c={c}")).await;
+        assert_eq!(res.status(), StatusCode::FOUND, "{c}");
+        assert_eq!(res.headers()[header::LOCATION], "https://example.com/target");
+    }
+    assert_eq!(read_count(&app, &url).await, refused.len() as u64);
+    let html = body_text(app.get(&format!("/{text}?c=forged")).await).await;
+    assert!(html.contains("plain words") && !html.contains("Paste created."), "{html}");
+    assert_eq!(read_count(&app, &text).await, 1);
+}
+
+#[tokio::test]
+async fn url_pastes_have_a_page_with_view() {
+    let app = app().await;
+    let w = create(&app, new("https://example.com/target", Privacy::Public)).await;
+    let res = app.get(&format!("/{w}?view")).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
+    let html = body_text(res).await;
+    assert!(
+        html.contains("href=\"https://example.com/target\" rel=\"noreferrer noopener\" data-bv-target>Go to URL</a>")
+    );
+    assert!(html.contains("data-oc-copy=\"https://example.com/target\""), "the target has a copy button");
+    assert!(html.contains("data-oc-dialog-open=\"qr-dialog\""), "the page offers the QR code");
+    assert!(!html.contains("Paste created."));
+    assert_eq!(read_count(&app, &w).await, 1);
+    let once = create(&app, NewPaste { burn_after_reads: 1, ..new("https://example.com/once", Privacy::Public) }).await;
+    let html = body_text(app.get(&format!("/{once}?view")).await).await;
+    assert!(html.contains("https://example.com/once") && html.contains("That was the last read"), "{html}");
+    assert_eq!(app.get(&format!("/{once}")).await.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn the_creator_view_of_a_private_paste_shows_no_content() {
+    let app = app().await;
+    let parts: &[(&str, Option<&str>, &[u8])] = &[
+        ("content", None, b"quietly kept text"),
+        ("privacy", None, b"private"),
+        ("password", None, b"pw"),
+        ("file", Some("salary-report.pdf"), b"file body"),
+    ];
+    let res = app.post_multipart("/", parts).await;
+    let (w, _) = support::created(&res);
+    let res = app.get(&location(&res)).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let html = body_text(res).await;
+    assert!(html.contains("Paste created.") && html.contains("Encrypted. Open it with its password."), "{html}");
+    assert!(!html.contains("quietly kept text"));
+    assert!(!html.contains("salary-report"));
+    assert!(!html.contains(&format!("/{w}/raw")), "raw text needs the password");
+    assert!(grant_links(&html).is_empty());
+    assert!(html.contains(&format!("action=\"/{w}/delete\"")), "the creator can still delete it");
+    assert_eq!(read_count(&app, &w).await, 0);
+}
+
+#[tokio::test]
+async fn the_creator_view_carries_no_store() {
+    let app = app().await;
+    let res = app.post_multipart("/", &[("content", None, b"hello")]).await;
+    let res = app.get(&location(&res)).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
+    assert!(body_text(res).await.contains("Paste created."));
+}
+
+#[tokio::test]
+async fn the_creator_view_of_a_secret_paste_is_the_secret_shell() {
+    let app = app().await;
+    let w = create(&app, secret(1)).await;
+    let c = bitvault::domain::grant::issue_creator(&app.st.grant_key, id_of(&w), domain::now());
+    let res = app.get(&format!("/{w}?c={c}")).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
+    let html = body_text(res).await;
+    assert!(html.contains("Paste created.") && html.contains("id=\"secret-open\""), "{html}");
+    assert!(html.contains("js/secret.js"));
+}

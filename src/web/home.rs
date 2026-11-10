@@ -23,7 +23,7 @@ use crate::domain::crypto::{self, SALT_LEN};
 use crate::domain::expiry::{self, Expiry};
 use crate::domain::files::Staging;
 use crate::domain::paste::{self, NewPaste, SecretParts};
-use crate::domain::{self, Privacy, highlight, words};
+use crate::domain::{self, Privacy, grant, highlight, words};
 use crate::error::Error;
 use crate::ratelimit::{self, RateLimiter};
 use crate::state::AppState;
@@ -316,12 +316,14 @@ impl Form {
     }
 }
 
-/// `POST /`.
+/// `POST /`: to the new paste's creator view, which shows it without counting a read.
 async fn create(State(st): State<AppState>, req: Request) -> Result<Redirect, Error> {
     let rules = CreateRules { uploader_checked: false, allow_secret: true };
     let (new, staging) = read_multipart(&st, req, rules).await?;
-    let id = paste::create(&st, new, staging, domain::now()).await?;
-    Ok(Redirect::to(&format!("/{}", id.words())))
+    let now = domain::now();
+    let id = paste::create(&st, new, staging, now).await?;
+    let token = grant::issue_creator(&st.grant_key, id, now);
+    Ok(Redirect::to(&format!("/{}?c={token}", id.words())))
 }
 
 /// Reads a multipart create in order, streaming each file into a staging directory (encrypted

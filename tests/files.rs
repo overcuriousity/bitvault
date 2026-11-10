@@ -163,8 +163,7 @@ async fn a_secret_paste_stores_only_placeholder_file_names() {
         )
         .await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
-    let location = res.headers()[header::LOCATION].to_str().unwrap().to_owned();
-    let id = words::parse(location.trim_start_matches('/')).unwrap();
+    let id = words::parse(&support::created(&res).0).unwrap();
     let p = paste::meta(&app.st, id, bitvault::domain::now()).await.unwrap();
     assert_eq!(p.privacy, Privacy::Secret);
     assert_eq!(
@@ -362,8 +361,7 @@ async fn the_create_route_accepts_bodies_larger_than_one_mebibyte() {
         )
         .await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
-    let location = res.headers()[header::LOCATION].to_str().unwrap().to_owned();
-    let id = words::parse(location.trim_start_matches('/')).unwrap();
+    let id = words::parse(&support::created(&res).0).unwrap();
     let (meta, b) = files::open(&app.st, id, 1, None).await.unwrap();
     assert_eq!(meta.size, u64::try_from(file.len()).unwrap());
     assert_eq!(collect(b).await.unwrap(), file);
@@ -387,9 +385,7 @@ async fn the_create_form_stores_every_field() {
         )
         .await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
-    let location = res.headers()[header::LOCATION].to_str().unwrap().to_owned();
-    let id = words::parse(location.trim_start_matches('/')).unwrap();
-    assert_eq!(location, format!("/{}", id.words()));
+    let id = words::parse(&support::created(&res).0).unwrap();
     let p = paste::meta(&app.st, id, bitvault::domain::now()).await.unwrap();
     assert_eq!(p.privacy, Privacy::Readonly);
     assert_eq!(p.syntax.as_deref(), Some("rs"));
@@ -565,8 +561,7 @@ async fn a_form_split_into_tiny_chunks_still_parses() {
     });
     let res = app.post_multipart_body("/", axum::body::Body::from_stream(trickle)).await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
-    let location = res.headers()[header::LOCATION].to_str().unwrap().to_owned();
-    let id = words::parse(location.trim_start_matches('/')).unwrap();
+    let id = words::parse(&support::created(&res).0).unwrap();
     let (_, b) = files::open(&app.st, id, 1, None).await.unwrap();
     assert_eq!(collect(b).await.unwrap(), file);
     let (meta, b) = files::open(&app.st, id, 2, None).await.unwrap();
@@ -658,8 +653,7 @@ async fn a_file_part_without_a_filename_is_stored_under_a_placeholder() {
         )
         .await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
-    let location = res.headers()[header::LOCATION].to_str().unwrap().to_owned();
-    let id = words::parse(location.trim_start_matches('/')).unwrap();
+    let id = words::parse(&support::created(&res).0).unwrap();
     let p = paste::meta(&app.st, id, bitvault::domain::now()).await.unwrap();
     let stored: Vec<_> = p.files.iter().map(|f| (f.name.as_str(), f.size, f.mime.as_str())).collect();
     assert_eq!(stored, vec![("file-1", 3, "application/octet-stream"), ("empty.txt", 0, "text/plain")]);

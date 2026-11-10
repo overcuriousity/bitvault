@@ -687,3 +687,43 @@ async fn an_expiry_that_is_not_offered_says_so_even_when_the_maximum_is_never() 
     let Err(Error::Invalid(msg)) = res else { panic!("{res:?}") };
     assert_eq!(msg, "Choose an expiry of 1 week or less.");
 }
+
+#[tokio::test]
+async fn the_creator_view_shows_plaintext_content_without_counting_a_read() {
+    let app = support::app().await;
+    let text_id =
+        create(&app.st, NewPaste { burn_after_reads: 1, ..with_password("once", Privacy::Readonly, "pw") }).await;
+    let url_id = create(&app.st, new("https://example.com/x", Privacy::Public)).await;
+    for _ in 0..2 {
+        let (p, body) = paste::creator_view(&app.st, text_id, NOW).await.unwrap();
+        assert_eq!(text(&body.unwrap()), "once");
+        assert_eq!((p.read_count, p.last_read_at, p.burned_at), (0, None, None));
+        let (_, body) = paste::creator_view(&app.st, url_id, NOW).await.unwrap();
+        assert!(matches!(body, Some(Body::Url(u)) if u == "https://example.com/x"));
+    }
+    assert_eq!(paste::meta(&app.st, text_id, NOW).await.unwrap().read_count, 0);
+    assert_eq!(text(&read(&app.st, text_id, Access::Anonymous).await.unwrap().body), "once");
+}
+
+#[tokio::test]
+async fn the_creator_view_holds_no_content_for_private_and_secret_pastes() {
+    let app = support::app().await;
+    let private = create(&app.st, with_password("locked", Privacy::Private, "pw")).await;
+    let secret = create(&app.st, secret_paste(PBKDF2_ITERATIONS)).await;
+    for id in [private, secret] {
+        let (p, body) = paste::creator_view(&app.st, id, NOW).await.unwrap();
+        assert!(body.is_none(), "{:?}", p.privacy);
+        assert_eq!(p.read_count, 0);
+    }
+}
+
+#[tokio::test]
+async fn the_creator_view_refuses_burned_and_expired_pastes() {
+    let app = support::app().await;
+    let burned = create(&app.st, NewPaste { burn_after_reads: 1, ..new("once", Privacy::Public) }).await;
+    read(&app.st, burned, Access::Anonymous).await.unwrap();
+    assert!(matches!(paste::creator_view(&app.st, burned, NOW).await, Err(Error::NotFound)));
+    let brief = create(&app.st, NewPaste { expiry: Expiry::Min1, ..new("brief", Privacy::Public) }).await;
+    assert!(matches!(paste::creator_view(&app.st, brief, NOW + 61).await, Err(Error::NotFound)));
+    assert!(matches!(paste::creator_view(&app.st, PasteId(12345), NOW).await, Err(Error::NotFound)));
+}

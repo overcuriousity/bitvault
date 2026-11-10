@@ -135,6 +135,15 @@ pub fn multipart_parts(parts: &[(&str, Option<&str>, &[u8])]) -> Vec<u8> {
     body
 }
 
+/// The paste words and the `?c=` creator token of a web create's redirect.
+pub fn created(res: &Response<Body>) -> (String, String) {
+    assert_eq!(res.status(), axum::http::StatusCode::SEE_OTHER, "the create did not redirect");
+    let location = res.headers()[header::LOCATION].to_str().unwrap();
+    let (path, query) = location.split_once('?').unwrap_or((location, ""));
+    let token = query.strip_prefix("c=").unwrap_or_else(|| panic!("no creator token in {location}"));
+    (path.trim_start_matches('/').to_owned(), token.to_owned())
+}
+
 pub async fn body_text(res: Response<Body>) -> String {
     String::from_utf8(axum::body::to_bytes(res.into_body(), 8 << 20).await.unwrap().to_vec()).unwrap()
 }
@@ -147,6 +156,16 @@ pub const GATE_ALLOWED_URLS: [&str; 3] = ["https://paste.example", "https://s.ex
 /// Panics with the offending snippet when a page carries inline code or an unconfigured external address.
 /// Only tag interiors are inspected, so escaped paste text such as `style=` is never flagged.
 pub fn assert_clean_html(body: &str) {
+    assert_clean_html_inner(body, None);
+}
+
+/// [`assert_clean_html`] for a URL paste's own page, which may also link to `target`, the paste's
+/// stored address, but only from an `<a data-bv-target rel="noreferrer noopener">`.
+pub fn assert_clean_url_paste_html(body: &str, target: &str) {
+    assert_clean_html_inner(body, Some(target));
+}
+
+fn assert_clean_html_inner(body: &str, target: Option<&str>) {
     let bytes = body.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -164,7 +183,7 @@ pub fn assert_clean_html(body: &str) {
             continue;
         }
         let (tag, end) = parse_tag(body, i);
-        check_tag(body, i, &tag);
+        check_tag(body, i, &tag, target);
         i = end;
         if tag.name == "script" {
             let close = body[i..].to_ascii_lowercase().find("</script").map_or(bytes.len(), |e| i + e);
@@ -251,14 +270,71 @@ fn parse_tag(body: &str, start: usize) -> (Tag, usize) {
     (Tag { name, attrs }, i)
 }
 
-fn check_tag(body: &str, at: usize, tag: &Tag) {
+/// Decodes the character references askama writes in attribute values.
+fn unescape(value: &str) -> String {
+    let mut out = String::new();
+    let mut rest = value;
+    while let Some(p) = rest.find('&') {
+        out.push_str(&rest[..p]);
+        rest = &rest[p..];
+        let Some(end) = rest.find(';') else { break };
+        let entity = &rest[1..end];
+        let decoded = match entity {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            _ => entity
+                .strip_prefix('#')
+                .and_then(|n| match n.strip_prefix(['x', 'X']) {
+                    Some(hex) => u32::from_str_radix(hex, 16).ok(),
+                    None => n.parse().ok(),
+                })
+                .and_then(char::from_u32),
+        };
+        match decoded {
+            Some(c) => {
+                out.push(c);
+                rest = &rest[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The one external link a URL paste's page may carry: its own target, on a marked `<a>` that
+/// sends no referrer and gives the target no handle on this page.
+fn check_target_link(tag: &Tag, href: &str, target: Option<&str>, here: &dyn Fn() -> String) {
+    let Some(target) = target else { panic!("data-bv-target on a page that is not a URL paste's: {}", here()) };
+    assert_eq!(tag.name, "a", "data-bv-target on a <{}>: {}", tag.name, here());
+    let rel = tag.attrs.iter().find(|(n, _)| n == "rel").map(|(_, v)| v.to_ascii_lowercase()).unwrap_or_default();
+    let rel: Vec<&str> = rel.split_ascii_whitespace().collect();
+    assert!(
+        rel.contains(&"noreferrer") && rel.contains(&"noopener"),
+        "target link without rel=\"noreferrer noopener\": {}",
+        here()
+    );
+    let lower = target.to_ascii_lowercase();
+    assert!(lower.starts_with("https://") || lower.starts_with("http://"), "target `{target}` is not a web address");
+    assert_eq!(unescape(href), target, "data-bv-target links somewhere else: {}", here());
+}
+
+fn check_tag(body: &str, at: usize, tag: &Tag, target: Option<&str>) {
     let here = || snippet(body, at).to_owned();
+    let marked = tag.attrs.iter().any(|(n, _)| n == "data-bv-target");
     for (attr, value) in &tag.attrs {
         let handler = attr.len() > 2 && attr.starts_with("on") && attr.bytes().all(|c| c.is_ascii_lowercase());
         assert!(attr != "style", "style attribute: {}", here());
         assert!(!handler, "event handler attribute `{attr}`: {}", here());
         assert!(!attr.starts_with("hx-on"), "hx-on attribute: {}", here());
         match attr.as_str() {
+            "href" if marked => check_target_link(tag, value, target, &here),
             "src" | "href" | "action" | "formaction" | "poster" | "data" => {
                 check_url(value, tag.name == "img" && attr == "src", &here);
             }

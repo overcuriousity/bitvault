@@ -504,6 +504,36 @@ pub async fn meta(st: &AppState, id: PasteId, now: i64) -> Result<Paste, Error> 
     with_files(st, row.try_into()?).await
 }
 
+/// The paste and its content without counting a read, for the creator's page right after a
+/// create. Private and secret pastes give no content: their text is sealed under a password the
+/// server does not hold here.
+pub async fn creator_view(st: &AppState, id: PasteId, now: i64) -> Result<(Paste, Option<Body>), Error> {
+    let db = db_id(id);
+    let row = sqlx::query_as!(
+        ReadRow,
+        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", content AS "content!",
+                  syntax AS "syntax?", editable AS "editable!: bool", password_hash AS "password_hash?",
+                  wrapped_key AS "wrapped_key?", verifier_hash AS "verifier_hash?",
+                  burn_after_reads AS "burn_after_reads!", read_count AS "read_count!",
+                  last_read_at AS "last_read_at?", burned_at AS "burned_at?", created_at AS "created_at!",
+                  expires_at AS "expires_at?"
+           FROM pastes
+           WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)"#,
+        db,
+        now,
+    )
+    .fetch_optional(&st.pool)
+    .await?
+    .ok_or(Error::NotFound)?;
+    let (paste, content) = row.split()?;
+    let body = match (paste.privacy, paste.kind) {
+        (Privacy::Private | Privacy::Secret, _) => None,
+        (_, Kind::Url) => Some(Body::Url(utf8(content)?)),
+        (_, Kind::Text) => Some(Body::Text(utf8(content)?)),
+    };
+    Ok((with_files(st, paste).await?, body))
+}
+
 /// Like [`meta`], but also finds a paste that burned less than [`BURNED_TTL_SECS`] ago, so the
 /// burning read's grant can still fetch its files. Only for callers holding a valid grant for `id`.
 pub async fn meta_for_grant(st: &AppState, id: PasteId, now: i64) -> Result<Paste, Error> {

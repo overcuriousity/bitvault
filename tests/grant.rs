@@ -86,3 +86,46 @@ async fn the_app_state_holds_a_grant_key() {
     let token = grant::issue(&app.st.grant_key, PasteId(1), None, NOW);
     assert!(grant::check(&app.st.grant_key, &token, PasteId(1), NOW).is_ok());
 }
+
+#[test]
+fn a_creator_token_opens_the_creator_view_of_its_paste_for_ten_minutes() {
+    let key = GrantKey::random();
+    let token = grant::issue_creator(&key, PasteId(42), NOW);
+    assert!(!token.contains('=') && !token.contains('+') && !token.contains('/'), "{token}");
+    assert!(grant::check_creator(&key, &token, PasteId(42), NOW));
+    assert!(grant::check_creator(&key, &token, PasteId(42), NOW + 600));
+    assert!(!grant::check_creator(&key, &token, PasteId(42), NOW + 601));
+}
+
+#[test]
+fn a_creator_token_for_one_paste_does_not_open_another() {
+    let key = GrantKey::random();
+    let token = grant::issue_creator(&key, PasteId(42), NOW);
+    assert!(!grant::check_creator(&key, &token, PasteId(43), NOW));
+    assert!(!grant::check_creator(&GrantKey::random(), &token, PasteId(42), NOW));
+}
+
+#[test]
+fn grants_and_creator_tokens_cannot_stand_in_for_each_other() {
+    let key = GrantKey::random();
+    let creator = grant::issue_creator(&key, PasteId(5), NOW);
+    assert!(matches!(grant::check(&key, &creator, PasteId(5), NOW), Err(Error::GrantExpired)));
+    for dek in [None, Some(Dek::random())] {
+        let download = grant::issue(&key, PasteId(5), dek.as_ref(), NOW);
+        assert!(!grant::check_creator(&key, &download, PasteId(5), NOW));
+    }
+}
+
+#[test]
+fn malformed_creator_tokens_are_refused_without_panicking() {
+    let key = GrantKey::random();
+    for token in ["", "=", "not base64!", "AAAA", &"A".repeat(10_000)] {
+        assert!(!grant::check_creator(&key, token, PasteId(1), NOW), "{token}");
+    }
+    let mut raw = URL_SAFE_NO_PAD.decode(grant::issue_creator(&key, PasteId(1), NOW)).unwrap();
+    for i in 0..raw.len() {
+        raw[i] ^= 0x01;
+        assert!(!grant::check_creator(&key, &URL_SAFE_NO_PAD.encode(&raw), PasteId(1), NOW), "byte {i}");
+        raw[i] ^= 0x01;
+    }
+}

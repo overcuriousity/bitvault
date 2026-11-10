@@ -169,7 +169,7 @@ async fn a_secret_paste_created_with_javascript_parts_deletes_with_its_verifier(
         .await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER, "{}", support::body_text(res).await);
     let location = res.headers()[header::LOCATION].to_str().unwrap().to_owned();
-    let words = location.trim_start_matches('/');
+    let (words, _) = support::created(&res);
 
     let html = support::body_text(app.get(&location).await).await;
     assert!(html.contains(&format!("data-verifier-salt=\"{}\"", f.verifier_salt_hex)));
@@ -186,6 +186,7 @@ async fn a_secret_paste_created_with_javascript_parts_deletes_with_its_verifier(
     let res = app.post_form(&format!("/{words}/delete"), &format!("verifier={}", f.verifier_hex)).await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     assert_eq!(app.get(&location).await.status(), StatusCode::NOT_FOUND);
+    assert_eq!(app.get(&format!("/{words}")).await.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

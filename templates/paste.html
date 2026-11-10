@@ -6,6 +6,9 @@
 {% import "components/icon_button.html" as icon_button %}
 {% import "components/notice.html" as notice %}
 <article class="paste-view"{% if secret %} data-secret{% endif %}>
+{%- if created %}
+{% call notice::notice("success", "Paste created.") %}{% endcall %}
+{%- endif %}
 <header class="bv-paste-head">
   <h1 class="bv-words">
     {%- for word in word_list %}
@@ -28,8 +31,8 @@
 </dl>
 {%- if !burned %}
 <div class="bv-actions" role="toolbar" aria-label="Paste actions">
-  {%- if !secret %}
-  {% call icon_button::link(self.icon("file"), "Open raw text", raw_href) %}{% endcall %}
+  {%- if let Some(href) = raw_href %}
+  {% call icon_button::link(self.icon("file"), "Open raw text", href) %}{% endcall %}
   {%- endif %}
   {%- if qr.is_some() %}
   <button type="button" class="oc-btn oc-btn--icon" aria-label="Show QR code" data-oc-tip="Show QR code" data-oc-dialog-open="qr-dialog">{{ self.icon("qr-code")|safe }}</button>
@@ -58,10 +61,15 @@
 </form>
 <noscript>{% call notice::notice("info", "This paste is decrypted in the browser. Turn on JavaScript to open it.") %}{% endcall %}</noscript>
 <pre class="paste-text" hidden></pre>
-{%- else %}
-{%- if let Some(html) = content %}
+{%- else if sealed %}
+{% call notice::notice("info", "Encrypted. Open it with its password.") %}{% endcall %}
+{%- else if let Some(url) = target %}
+<section class="bv-target" aria-label="Target">
+  <p class="bv-address"><span class="oc-mono">{{ url }}</span>{% call copy::copy("URL", url, self.copy_icons()) %}{% endcall %}</p>
+  <p><a href="{{ url }}" rel="noreferrer noopener" data-bv-target>Go to URL</a></p>
+</section>
+{%- else if let Some(html) = content %}
 <pre class="paste-text{% if highlighted %} bv-code{% endif %}"><code>{{ html|safe }}</code></pre>
-{%- endif %}
 {%- endif %}
 {%- if !files.is_empty() %}
 <section class="bv-files" aria-labelledby="files-heading">

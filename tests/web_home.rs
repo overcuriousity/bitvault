@@ -23,12 +23,15 @@ async fn the_form_offers_only_configured_privacy_levels_and_expiries() {
 }
 
 #[tokio::test]
-async fn creating_a_text_paste_redirects_to_its_words() {
+async fn creating_a_text_paste_redirects_to_its_words_with_a_creator_token() {
     let app = app().await;
     let res = app.post_multipart("/", &[("content", None, b"hello"), ("privacy", None, b"unlisted")]).await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     let location = res.headers()[header::LOCATION].to_str().unwrap();
-    assert!(words_shape(location), "{location}");
+    let (path, token) = location.split_once("?c=").unwrap();
+    assert!(words_shape(path), "{location}");
+    let id = bitvault::domain::words::parse(path.trim_start_matches('/')).unwrap();
+    assert!(bitvault::domain::grant::check_creator(&app.st.grant_key, token, id, bitvault::domain::now()));
 }
 
 #[tokio::test]
@@ -100,11 +103,11 @@ async fn the_page_has_no_inline_styles_scripts_or_handlers() {
 async fn opening_by_words_tolerates_spacing_and_case() {
     let app = app().await;
     let created = app.post_multipart("/", &[("content", None, b"hi")]).await;
-    let location = created.headers()[header::LOCATION].to_str().unwrap().to_owned();
-    let spaced = location.trim_start_matches('/').replace('-', "  ").to_uppercase();
+    let (words, _) = support::created(&created);
+    let spaced = words.replace('-', "  ").to_uppercase();
     let res = app.post_form("/open", &format!("words={}", spaced.replace(' ', "+"))).await;
     assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(res.headers()["hx-redirect"], location.as_str());
+    assert_eq!(res.headers()["hx-redirect"], format!("/{words}"));
 }
 
 #[tokio::test]

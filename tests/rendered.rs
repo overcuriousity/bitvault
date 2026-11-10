@@ -5,9 +5,12 @@ mod support;
 use axum::http::{Response, StatusCode, header};
 use bitvault::domain::crypto::{self, PBKDF2_ITERATIONS};
 use bitvault::domain::expiry::Expiry;
+use bitvault::domain::grant;
 use bitvault::domain::paste::{self, NewPaste, SecretParts};
 use bitvault::domain::{self, Privacy};
-use support::{App, GATE_CONFIG, app_with, assert_clean_html, body_text};
+use support::{App, GATE_CONFIG, app_with, assert_clean_html, assert_clean_url_paste_html, body_text};
+
+const TARGET: &str = "https://example.com/target?a=1&b=2";
 
 fn new(content: &str, privacy: Privacy) -> NewPaste {
     NewPaste {
@@ -46,10 +49,26 @@ async fn create(app: &App, p: NewPaste) -> String {
 
 /// Checks the status, the CSP header and the page body; returns nothing because every page must pass alike.
 async fn check(what: &str, res: Response<axum::body::Body>, status: StatusCode) {
+    check_page(what, res, status, None).await;
+}
+
+/// [`check`] for a URL paste's own page, which may link to its `target`.
+async fn check_url_page(what: &str, res: Response<axum::body::Body>, target: &str) {
+    check_page(what, res, StatusCode::OK, Some(target)).await;
+}
+
+async fn check_page(what: &str, res: Response<axum::body::Body>, status: StatusCode, target: Option<&str>) {
     assert_eq!(res.status(), status, "{what}");
     assert_eq!(res.headers()[header::CONTENT_SECURITY_POLICY], bitvault::security::CSP, "{what}");
     let body = body_text(res).await;
-    std::panic::catch_unwind(|| assert_clean_html(&body)).unwrap_or_else(|e| {
+    if target.is_some() {
+        assert!(body.contains("data-bv-target"), "{what}: the page must link to its target");
+    }
+    std::panic::catch_unwind(|| match target {
+        Some(t) => assert_clean_url_paste_html(&body, t),
+        None => assert_clean_html(&body),
+    })
+    .unwrap_or_else(|e| {
         let msg = e.downcast_ref::<String>().cloned().unwrap_or_default();
         panic!("{what}: {msg}");
     });
@@ -66,7 +85,7 @@ async fn every_rendered_page_and_fragment_is_clean() {
     let mut app = gate_app("").await;
     let public = create(&app, NewPaste { editable: true, ..new("hello there", Privacy::Public) }).await;
     let readonly = create(&app, NewPaste { password: Some("pw".into()), ..new("kept", Privacy::Readonly) }).await;
-    let url = create(&app, new("https://example.com/target", Privacy::Unlisted)).await;
+    let url = create(&app, new(TARGET, Privacy::Unlisted)).await;
     let private = create(&app, NewPaste { password: Some("pw".into()), ..new("locked", Privacy::Private) }).await;
     let secret = create(&app, secret()).await;
     let hostile = create(&app, new("hello style=\"x\" onclick=alert(1) <script>", Privacy::Public)).await;
@@ -87,6 +106,16 @@ async fn every_rendered_page_and_fragment_is_clean() {
     assert_eq!(res.status(), StatusCode::FOUND);
     assert_eq!(res.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
     assert_eq!(res.headers()[header::REFERRER_POLICY], "no-referrer");
+    check_url_page("url paste page", app.get(&format!("/{url}?view")).await, TARGET).await;
+    let creator = |words: &str| {
+        let id = bitvault::domain::words::parse(words).unwrap();
+        format!("/{words}?c={}", grant::issue_creator(&app.st.grant_key, id, domain::now()))
+    };
+    for (what, words) in [("public", &public), ("readonly", &readonly), ("private", &private), ("secret", &secret)] {
+        let res = app.get(&creator(words)).await;
+        check(&format!("creator view of the {what} paste"), res, StatusCode::OK).await;
+    }
+    check_url_page("creator view of the url paste", app.get(&creator(&url)).await, TARGET).await;
     check("private locked", app.get(&format!("/{private}")).await, StatusCode::OK).await;
     let unlock = app.post_form(&format!("/{private}/unlock"), "password=pw").await;
     check("private unlocked", unlock, StatusCode::OK).await;
@@ -121,6 +150,33 @@ async fn every_rendered_page_and_fragment_is_clean() {
 
 fn panics(html: &str) -> bool {
     std::panic::catch_unwind(|| assert_clean_html(html)).is_err()
+}
+
+fn panics_on_url_page(html: &str, target: &str) -> bool {
+    std::panic::catch_unwind(|| assert_clean_url_paste_html(html, target)).is_err()
+}
+
+#[test]
+fn the_scanner_lets_a_url_paste_page_link_only_to_its_own_target() {
+    let link = "<a href=\"https://example.com/t?a=1&#38;b=2\" rel=\"noreferrer noopener\" data-bv-target>Go to URL</a>";
+    let target = "https://example.com/t?a=1&b=2";
+    assert!(!panics_on_url_page(link, target), "the paste's own target must pass");
+    assert!(!panics_on_url_page(&link.replace("&#38;", "&amp;"), target), "either escape must pass");
+    assert!(panics(link), "no other page may carry a target link");
+    assert!(panics_on_url_page(link, "https://example.com/other"), "a different target must be rejected");
+    let bad = [
+        "<a href=\"https://example.com/t?a=1&#38;b=2\" data-bv-target>",
+        "<a href=\"https://example.com/t?a=1&#38;b=2\" rel=\"noopener\" data-bv-target>",
+        "<link href=\"https://example.com/t?a=1&#38;b=2\" rel=\"noreferrer noopener\" data-bv-target>",
+        "<img src=\"https://example.com/t?a=1&#38;b=2\" data-bv-target>",
+        "<a href=\"https://example.com/t?a=1&#38;b=2\">",
+        "<a href=\"https://evil.example\" rel=\"noreferrer noopener\">",
+    ];
+    for html in bad {
+        assert!(panics_on_url_page(html, target), "{html} must be rejected");
+    }
+    let script = "<a href=\"javascript:x\" rel=\"noreferrer noopener\" data-bv-target>";
+    assert!(panics_on_url_page(script, "javascript:x"), "only a web address may be a target");
 }
 
 #[test]

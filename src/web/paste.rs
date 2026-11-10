@@ -5,7 +5,7 @@ use std::sync::{Arc, LazyLock};
 use askama::Template;
 use axum::Form;
 use axum::Router;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, Query, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -20,7 +20,8 @@ use super::{
 };
 use crate::assets::Assets;
 use crate::domain::paste::{self, Access, Body, DeleteAuth, Opened, Paste};
-use crate::domain::{self, Kind, Privacy, highlight, qr};
+use crate::domain::words::PasteId;
+use crate::domain::{self, Kind, Privacy, grant, highlight, qr};
 use crate::error::Error;
 use crate::security::ClientIp;
 use crate::state::AppState;
@@ -86,9 +87,23 @@ struct FileView {
     preview: bool,
 }
 
+/// What a paste page shows as its content.
+enum Shown {
+    /// Escaped or highlighted markup, and whether it is highlighted.
+    Text(String, bool),
+    /// A URL paste's target.
+    Url(String),
+    /// A secret paste's shell, which `secret.js` fills.
+    Secret,
+    /// A private paste seen without its password: neither its text nor its files.
+    Sealed,
+}
+
 #[derive(Template)]
 #[template(path = "paste.html")]
 struct PasteView {
+    /// The creator view, right after a web create.
+    created: bool,
     word_list: Vec<String>,
     full_url: String,
     short_url: Option<String>,
@@ -97,7 +112,8 @@ struct PasteView {
     facts: Vec<(&'static str, String)>,
     burned: bool,
     secret: bool,
-    raw_href: String,
+    sealed: bool,
+    raw_href: Option<String>,
     qr: Option<String>,
     translate: Option<String>,
     edit_href: Option<String>,
@@ -105,6 +121,8 @@ struct PasteView {
     /// Escaped or highlighted markup; `None` for a secret paste, which `secret.js` fills.
     content: Option<String>,
     highlighted: bool,
+    /// A URL paste's target, shown with a link to it.
+    target: Option<String>,
     files: Vec<FileView>,
     zip_href: Option<String>,
 }
@@ -176,22 +194,18 @@ fn reads(n: u32) -> String {
 
 /// The page for a paste whose content (if any) has been read and rendered by [`content_html`].
 /// `grant` is set after an unlock and on the burning read; it is added to the links that need it.
-fn paste_view(
-    st: &AppState,
-    admin: bool,
-    p: &Paste,
-    content: Option<(String, bool)>,
-    grant: Option<&str>,
-) -> PasteView {
+/// `created` marks the creator view.
+fn paste_view(st: &AppState, admin: bool, p: &Paste, shown: Shown, grant: Option<&str>, created: bool) -> PasteView {
     let app = &st.cfg.app;
     let words = p.id.words();
     let burned = p.burned_at.is_some();
     let secret = p.privacy == Privacy::Secret;
+    let sealed = matches!(shown, Shown::Sealed);
     let files_g = grant.map(|g| format!("?g={g}")).unwrap_or_default();
     // Raw and edit only take a grant from an unlock; a burned paste has neither.
     let read_g = if p.privacy == Privacy::Private { files_g.clone() } else { String::new() };
     let (full, short_url) = paste_urls(st, &words);
-    let raw_href = format!("/{words}/raw{read_g}");
+    let raw_href = (!secret && !sealed).then(|| format!("/{words}/raw{read_g}"));
     let mut facts = vec![("Created", date(p.created_at))];
     facts.push(("Expires", p.expires_at.map_or_else(|| "Never".to_owned(), date)));
     if p.burn_after_reads > 0 {
@@ -215,13 +229,15 @@ fn paste_view(
     let editable = paste::editable(st, p) && !burned;
     let edit_href =
         editable.then(|| format!("/{words}/edit{read_g}")).filter(|_| p.privacy != Privacy::Private || grant.is_some());
-    let (content, highlighted) = match content {
-        Some((html, hl)) => (Some(html), hl),
-        None => (None, false),
+    let (content, highlighted, target) = match shown {
+        Shown::Text(html, hl) => (Some(html), hl, None),
+        Shown::Url(target) => (None, false, Some(target)),
+        Shown::Secret | Shown::Sealed => (None, false, None),
     };
     let files = p
         .files
         .iter()
+        .filter(|_| !sealed)
         .map(|f| {
             let href = format!("/{words}/file/{}{files_g}", f.position);
             FileView {
@@ -235,6 +251,7 @@ fn paste_view(
         })
         .collect::<Vec<_>>();
     PasteView {
+        created,
         word_list: words.split('-').map(str::to_owned).collect(),
         short_url,
         privacy_label: privacy_label(p.privacy),
@@ -242,6 +259,7 @@ fn paste_view(
         facts,
         burned,
         secret,
+        sealed,
         raw_href,
         qr: if app.qr && !burned { qr::svg(&full).ok() } else { None },
         translate,
@@ -249,6 +267,7 @@ fn paste_view(
         delete: DeleteView::new(p, admin),
         content,
         highlighted,
+        target,
         zip_href: (!secret && !files.is_empty()).then(|| format!("/{words}/zip{files_g}")),
         files,
         full_url: full,
@@ -275,14 +294,34 @@ fn no_store(mut res: Response) -> Response {
     res
 }
 
+async fn shown(st: &AppState, p: &Paste, body: &Body) -> Result<Shown, Error> {
+    match body {
+        Body::Text(t) => {
+            let (html, highlighted) = content_html(st, t, p.syntax.as_deref()).await?;
+            Ok(Shown::Text(html, highlighted))
+        }
+        Body::Url(target) => Ok(Shown::Url(target.clone())),
+        Body::Cipher(_) => Err(Error::internal("a secret paste cannot be rendered on the server")),
+    }
+}
+
 async fn render_opened(st: &AppState, admin: bool, opened: &Opened) -> Result<Response, Error> {
-    let text = match &opened.body {
-        Body::Text(t) | Body::Url(t) => t.as_str(),
-        Body::Cipher(_) => return Err(Error::internal("a secret paste cannot be rendered on the server")),
-    };
-    let content = content_html(st, text, opened.paste.syntax.as_deref()).await?;
-    let view = paste_view(st, admin, &opened.paste, Some(content), opened.grant.as_deref());
+    let shown = shown(st, &opened.paste, &opened.body).await?;
+    let view = paste_view(st, admin, &opened.paste, shown, opened.grant.as_deref(), false);
     render_paste(st, admin, &view, &opened.paste.id.words())
+}
+
+/// The page a web create lands on: the paste as a reader would see it, without counting a read
+/// or following a URL paste's redirect.
+async fn render_creator(st: &AppState, admin: bool, id: PasteId, now: i64) -> Result<Response, Error> {
+    let (p, body) = paste::creator_view(st, id, now).await?;
+    let shown = match &body {
+        Some(body) => shown(st, &p, body).await?,
+        None if p.privacy == Privacy::Secret => Shown::Secret,
+        None => Shown::Sealed,
+    };
+    let view = paste_view(st, admin, &p, shown, None, true);
+    render_paste(st, admin, &view, &id.words())
 }
 
 fn unlock_page(
@@ -307,30 +346,59 @@ fn redirect_to(target: &str) -> Result<Response, Error> {
     Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response())
 }
 
+/// The query of `GET /{words}`, read leniently: anything unknown or malformed is ignored.
+struct ViewQuery {
+    /// `?c=`, the creator token of a web create's redirect.
+    creator: Option<String>,
+    /// `?view`: a URL paste's page instead of its redirect.
+    page: bool,
+}
+
+impl ViewQuery {
+    fn parse(raw: Option<&str>) -> Self {
+        let mut q = Self { creator: None, page: false };
+        for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
+            match &*key {
+                "c" if q.creator.is_none() => q.creator = Some(value.into_owned()),
+                "view" => q.page = true,
+                _ => {}
+            }
+        }
+        q
+    }
+}
+
 /// `GET /{words}`: content for plaintext levels (a read), the unlock form for private (no
-/// read), and an empty shell for secret, which the browser fills from `/raw`.
+/// read), and an empty shell for secret, which the browser fills from `/raw`. A URL paste
+/// redirects, or shows its page with `?view`; both count a read. A valid creator token shows
+/// the creator view instead; an invalid one is ignored.
 async fn view(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
     ClientIp(ip): ClientIp,
     method: Method,
     Path(words): Path<String>,
+    RawQuery(query): RawQuery,
 ) -> Result<Response, Error> {
     let id = paste_id(&words)?;
     let now = domain::now();
+    let q = ViewQuery::parse(query.as_deref());
+    if q.creator.is_some_and(|c| grant::check_creator(&st.grant_key, &c, id, now)) {
+        return render_creator(&st, admin, id, now).await;
+    }
     let p = paste::meta(&st, id, now).await?;
     match p.privacy {
         // Only the form: a private paste's file names and sizes are private as well.
         Privacy::Private => unlock_page(&st, admin, id.words(), None, StatusCode::OK),
         Privacy::Secret => {
-            let view = paste_view(&st, admin, &p, None, None);
+            let view = paste_view(&st, admin, &p, Shown::Secret, None, false);
             render_paste(&st, admin, &view, &id.words())
         }
         _ if method == Method::HEAD => Ok(head_only(HTML)),
         _ => {
             let opened = paste::read(&st, id, Access::Anonymous, ip, now).await?;
             match &opened.body {
-                Body::Url(target) => redirect_to(target),
+                Body::Url(target) if !q.page => redirect_to(target),
                 _ => render_opened(&st, admin, &opened).await,
             }
         }
