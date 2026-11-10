@@ -93,14 +93,14 @@ async fn files_attached_to_a_public_paste_download_byte_for_byte() {
     assert_eq!(p.files[0].mime, "text/plain");
     for (i, data) in originals.iter().enumerate() {
         let position = u32::try_from(i + 1).unwrap();
-        let (meta, b) = files::open(&app.st, id, position, None).await.unwrap();
+        let (meta, b) = open(&app.st, id, position, None).await.unwrap();
         assert_eq!(meta.position, position);
         assert_eq!(&collect(b).await.unwrap(), data);
         let on_disk = std::fs::read(app.st.files_dir.join(id.0.to_string()).join(position.to_string())).unwrap();
         assert_eq!(&on_disk, data);
     }
-    assert!(matches!(files::open(&app.st, id, 4, None).await, Err(Error::NotFound)));
-    let opened = paste::read(&app.st, id, Access::Anonymous, IP, NOW).await.unwrap();
+    assert!(matches!(open(&app.st, id, 4, None).await, Err(Error::NotFound)));
+    let opened = read_at(&app.st, id, Access::Anonymous, IP, NOW).await.unwrap();
     assert_eq!(opened.paste.files, p.files);
     assert_eq!(staging_entries(&app.st), 0);
 }
@@ -126,20 +126,20 @@ async fn private_files_are_encrypted_on_disk_and_decrypt_with_the_paste_key() {
     assert_ne!(on_disk, plain);
     assert!(!on_disk.windows(64).any(|w| w == &plain[1000..1064]));
 
-    let opened = paste::read(&app.st, id, Access::Password("pw".into()), IP, NOW).await.unwrap();
+    let opened = read_at(&app.st, id, Access::Password("pw".into()), IP, NOW).await.unwrap();
     let dek = grant::check(&app.st.grant_key, &opened.grant.unwrap(), id, NOW).unwrap().unwrap();
-    let (meta, b) = files::open(&app.st, id, 1, Some(&dek)).await.unwrap();
+    let (meta, b) = open(&app.st, id, 1, Some(&dek)).await.unwrap();
     assert_eq!(meta.name, "report.pdf");
     assert_eq!(collect(b).await.unwrap(), plain);
 
-    let zipped = collect(files::zip(&app.st, id, Some(&dek)).await.unwrap()).await.unwrap();
+    let zipped = collect(zip(&app.st, id, Some(&dek)).await.unwrap()).await.unwrap();
     assert_eq!(unzip(zipped).await, vec![("report.pdf".to_owned(), plain.clone())]);
 
-    assert!(matches!(files::open(&app.st, id, 1, None).await, Err(Error::PasswordRequired)));
+    assert!(matches!(open(&app.st, id, 1, None).await, Err(Error::PasswordRequired)));
     // A wrong key fails the stream rather than ending it, so a client never mistakes it for the file.
-    let (_, b) = files::open(&app.st, id, 1, Some(&Dek::random())).await.unwrap();
+    let (_, b) = open(&app.st, id, 1, Some(&Dek::random())).await.unwrap();
     assert!(collect(b).await.is_err());
-    let z = files::zip(&app.st, id, Some(&Dek::random())).await.unwrap();
+    let z = zip(&app.st, id, Some(&Dek::random())).await.unwrap();
     assert!(collect(z).await.is_err());
 }
 
@@ -177,7 +177,7 @@ async fn a_secret_paste_stores_only_placeholder_file_names() {
     );
     let names: Vec<String> = sqlx::query_scalar("SELECT name FROM paste_files").fetch_all(&app.st.pool).await.unwrap();
     assert_eq!(names, vec!["file-1".to_owned()]);
-    let (_, b) = files::open(&app.st, id, 1, None).await.unwrap();
+    let (_, b) = open(&app.st, id, 1, None).await.unwrap();
     assert_eq!(collect(b).await.unwrap(), file);
 
     let mut staging = Staging::new(&app.st.files_dir).unwrap();
@@ -339,7 +339,7 @@ async fn the_zip_contains_every_file() {
         staging.add(name, "application/octet-stream", body(data), LIMIT).await.unwrap();
     }
     let id = paste::create(&app.st, new("zipped", Privacy::Public), Some(staging), NOW).await.unwrap();
-    let zipped = collect(files::zip(&app.st, id, None).await.unwrap()).await.unwrap();
+    let zipped = collect(zip(&app.st, id, None).await.unwrap()).await.unwrap();
     let entries = unzip(zipped).await;
     let expected: Vec<(String, Vec<u8>)> = vec![
         ("a.txt".into(), originals[0].1.clone()),
@@ -348,6 +348,25 @@ async fn the_zip_contains_every_file() {
         ("3-a.txt".into(), originals[2].1.clone()),
     ];
     assert_eq!(entries, expected);
+}
+
+#[tokio::test]
+#[allow(deprecated)]
+async fn zip_entries_are_readable_files_dated_like_the_paste() {
+    let app = support::app().await;
+    let mut staging = Staging::new(&app.st.files_dir).unwrap();
+    staging.add("a.txt", "text/plain", body(b"abc"), LIMIT).await.unwrap();
+    let id = paste::create(&app.st, new("zipped", Privacy::Public), Some(staging), NOW).await.unwrap();
+    let zipped = collect(zip(&app.st, id, None).await.unwrap()).await.unwrap();
+    // Info-ZIP's unzip reports an error on the zip64 records async_zip streams; a small archive has none.
+    assert!(!zipped.windows(4).any(|w| w == b"PK\x06\x06"), "a small archive is not zip64");
+    let reader = async_zip::base::read::mem::ZipFileReader::new(zipped).await.unwrap();
+    let entry = reader.file().entries()[0].clone();
+    // A mode of 0 extracts as a file nobody can read, and an unset date is the invalid 1980-00-00.
+    assert_eq!(entry.unix_permissions(), Some(0o644));
+    let date = entry.last_modification_date();
+    // NOW is 2027-01-15 08:00:00 UTC.
+    assert_eq!((date.year(), date.month(), date.day(), date.hour(), date.minute()), (2027, 1, 15, 8, 0));
 }
 
 #[tokio::test]
@@ -362,7 +381,7 @@ async fn the_create_route_accepts_bodies_larger_than_one_mebibyte() {
         .await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     let id = words::parse(&support::created(&res).0).unwrap();
-    let (meta, b) = files::open(&app.st, id, 1, None).await.unwrap();
+    let (meta, b) = open(&app.st, id, 1, None).await.unwrap();
     assert_eq!(meta.size, u64::try_from(file.len()).unwrap());
     assert_eq!(collect(b).await.unwrap(), file);
 }
@@ -562,9 +581,9 @@ async fn a_form_split_into_tiny_chunks_still_parses() {
     let res = app.post_multipart_body("/", axum::body::Body::from_stream(trickle)).await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     let id = words::parse(&support::created(&res).0).unwrap();
-    let (_, b) = files::open(&app.st, id, 1, None).await.unwrap();
+    let (_, b) = open(&app.st, id, 1, None).await.unwrap();
     assert_eq!(collect(b).await.unwrap(), file);
-    let (meta, b) = files::open(&app.st, id, 2, None).await.unwrap();
+    let (meta, b) = open(&app.st, id, 2, None).await.unwrap();
     assert_eq!(meta.name, "b.txt");
     assert_eq!(collect(b).await.unwrap(), b"second");
 }
@@ -811,7 +830,7 @@ async fn private_files_have_a_plaintext_length_and_ignore_ranges() {
     )
     .await
     .unwrap();
-    let opened = paste::read(&app.st, id, Access::Password("pw".into()), IP, domain_now()).await.unwrap();
+    let opened = read_at(&app.st, id, Access::Password("pw".into()), IP, domain_now()).await.unwrap();
     let uri = format!("/{}/file/1?g={}", id.words(), opened.grant.unwrap());
     let res = range_get(&app, &uri, Some("bytes=0-9")).await;
     assert_eq!(res.status(), StatusCode::OK);
@@ -845,6 +864,33 @@ async fn a_secret_container_is_served_with_a_length_and_ranges() {
     assert_eq!(collect(res.into_body()).await.unwrap(), file[2..=6]);
 }
 
+/// Loads the paste and reads it, as every caller of `paste::read` does.
+async fn read_at(
+    st: &AppState,
+    id: words::PasteId,
+    access: Access,
+    ip: IpAddr,
+    now: i64,
+) -> Result<paste::Opened, Error> {
+    let found = paste::meta(st, id, now).await?;
+    paste::read(st, &found, access, ip, now).await
+}
+
+/// `files::open` on the paste as stored, burned or not.
+async fn open(
+    st: &AppState,
+    id: words::PasteId,
+    position: u32,
+    dek: Option<&Dek>,
+) -> Result<(FileMeta, axum::body::Body), Error> {
+    files::open(st, &paste::meta_for_grant(st, id, NOW.min(domain_now())).await?, position, dek).await
+}
+
+/// `files::zip` on the paste as stored, burned or not.
+async fn zip(st: &AppState, id: words::PasteId, dek: Option<&Dek>) -> Result<axum::body::Body, Error> {
+    files::zip(st, &paste::meta_for_grant(st, id, NOW.min(domain_now())).await?, dek).await
+}
+
 fn domain_now() -> i64 {
     bitvault::domain::now()
 }
@@ -875,7 +921,7 @@ async fn compressible_file_types_keep_their_length_and_ranges_when_gzip_is_offer
     )
     .await
     .unwrap();
-    let opened = paste::read(&app.st, id, Access::Password("pw".into()), IP, domain_now()).await.unwrap();
+    let opened = read_at(&app.st, id, Access::Password("pw".into()), IP, domain_now()).await.unwrap();
     let res = gz(format!("/{}/file/1?g={}", id.words(), opened.grant.unwrap())).await;
     assert_eq!(head(&res, header::CONTENT_LENGTH), Some(text.len().to_string().as_str()));
     assert!(res.headers().get(header::CONTENT_ENCODING).is_none());

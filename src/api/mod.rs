@@ -467,7 +467,7 @@ async fn list_pastes(
     if !st.cfg.app.listing {
         return Err(Error::NotFound.into());
     }
-    let Query(q) = query.map_err(|_| invalid("Give the page as a whole number from 1."))?;
+    let Query(q) = query.map_err(|_| invalid(crate::web::PAGE_NUMBER))?;
     let page = q.page.unwrap_or(1).max(1);
     let pastes = paste::list_public(&st, page, domain::now()).await?;
     let full = pastes.len() == paste::PAGE_SIZE as usize;
@@ -607,12 +607,13 @@ async fn get_paste(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let id = paste_id(&words)?;
+    let now = domain::now();
+    let p = paste::meta(&st, id, now).await?;
     // HEAD must not count a read, or it could burn the paste.
     if method == Method::HEAD {
-        paste::meta(&st, id, domain::now()).await?;
         return Ok(crate::web::paste::head_only("application/json"));
     }
-    let opened = paste::read(&st, id, password_access(&headers)?, ip, domain::now()).await?;
+    let opened = paste::read(&st, &p, password_access(&headers)?, ip, now).await?;
     let (encrypted, content) = match opened.body {
         Body::Text(t) | Body::Url(t) => (false, t),
         Body::Cipher(c) => (true, STANDARD.encode(c)),

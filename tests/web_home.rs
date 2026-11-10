@@ -363,6 +363,25 @@ async fn opening_from_the_box_needs_no_uploader_password_but_keeping_does() {
 }
 
 #[tokio::test]
+async fn an_empty_uploader_password_field_is_no_attempt() {
+    let app = app_with("[app]\nuploader_password = \"up\"\n").await;
+    let (words, _) = support::created(
+        &app.post_multipart("/", &[("uploader_password", None, b"up"), ("content", None, b"kept")]).await,
+    );
+    // The form always sends the field. Left empty, it opens a paste, refuses a create, and
+    // takes no failed-attempt token however often it is sent.
+    let blank: &[(&str, Option<&str>, &[u8])] = &[("uploader_password", None, b"")];
+    // Six blank posts: one more than the failed attempts allowed, and within the create limit.
+    for _ in 0..3 {
+        let res = post_box(&app, &words, blank).await;
+        assert_eq!(res.headers()[header::LOCATION], format!("/{words}"));
+        assert_eq!(post_box(&app, "just some text", blank).await.status(), StatusCode::FORBIDDEN);
+    }
+    let res = app.post_multipart("/", &[("uploader_password", None, b"up"), ("content", None, b"more")]).await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
 async fn a_box_lookup_that_misses_spends_the_lookup_budget() {
     let app = app().await;
     support::created(&post_box(&app, &bitvault::domain::words::PasteId(1).words(), &[]).await);

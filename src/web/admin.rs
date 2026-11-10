@@ -14,7 +14,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use serde::Deserialize;
 
-use super::{DeletedQuery, Extras, PageQuery, TimeView, date, icon, page, page_with, privacy_label, render, size};
+use super::{DeletedQuery, Extras, Paged, TimeView, date, icon, page, page_with, privacy_label, render, size};
 use crate::assets::Assets;
 use crate::config::Config;
 use crate::domain::admin::{COOKIE, PLAIN_COOKIE};
@@ -214,13 +214,12 @@ async fn table(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
     Query(q): Query<DeletedQuery>,
-    Query(at): Query<PageQuery>,
+    Paged(number): Paged,
 ) -> Result<Response, Error> {
     if !admin {
         return Ok(Redirect::to("/admin/sign-in").into_response());
     }
     let now = domain::now();
-    let number = at.number();
     let (pastes, totals) = tokio::try_join!(paste::list_all(&st, number, now), paste::totals(&st, now))?;
     let (newer, older) = super::neighbours(number, pastes.len());
     let rows = pastes

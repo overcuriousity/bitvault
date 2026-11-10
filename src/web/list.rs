@@ -2,12 +2,12 @@
 
 use askama::Template;
 use axum::Router;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::response::Html;
 use axum::routing::get;
 
 use super::admin::MaybeAdmin;
-use super::{Extras, PageQuery, TimeView, copy_icons, date, page_with, paste_urls, render};
+use super::{Extras, Paged, TimeView, copy_icons, date, page_with, paste_urls, render};
 use crate::assets::Assets;
 use crate::domain::{self, paste};
 use crate::error::Error;
@@ -47,12 +47,11 @@ async fn list(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
     base: BaseUrl,
-    Query(q): Query<PageQuery>,
+    Paged(number): Paged,
 ) -> Result<Html<String>, Error> {
     if !st.cfg.app.listing {
         return Err(Error::NotFound);
     }
-    let number = q.number();
     let pastes = paste::list_public(&st, number, domain::now()).await?;
     let (newer, older) = super::neighbours(number, pastes.len());
     // Only addresses and dates: showing content here would let a list view read a paste

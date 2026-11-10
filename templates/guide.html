@@ -48,7 +48,7 @@
 <p>Every paste is deleted when its expiry time has passed.{% if let Some(max) = max_expiry %} The longest expiry here is {{ max }}.{% endif %} Longer expiries are only there if the administrator turned them on.</p>
 
 <h2 id="burn">Burn after reads</h2>
-<p>Burn after reads deletes a paste once it has been read that many times; 0 turns it off. Viewing the paste, fetching its raw text and reading it through the API each count as a read, and so does the preview a chat app fetches when you send it the address. Downloading files does not. After the last read, the page that showed it keeps its file downloads working for ten minutes.</p>
+<p>Burn after reads deletes a paste once it has been read that many times; 0 turns it off. Viewing the paste, opening it for editing, fetching its raw text and reading it through the API each count as a read, and so does the preview a chat app fetches when you send it the address. Downloading files does not. After the last read, the page that showed it keeps its file downloads working for ten minutes.</p>
 
 <h2 id="syntax">Syntax highlighting</h2>
 {%- if highlight %}

@@ -9,6 +9,7 @@ use std::net::IpAddr;
 
 use linkify::{LinkFinder, LinkKind};
 
+use crate::config::Config;
 use crate::domain::crypto::{self, Dek, KdfParams, SALT_LEN};
 use crate::domain::expiry::{self, Expiry};
 use crate::domain::files::{self, FileMeta, PLACEHOLDER_MIME, Staging};
@@ -397,14 +398,24 @@ fn check_staging(privacy: Privacy, staging: &Staging) -> Result<(), Error> {
     Ok(())
 }
 
+/// Whether new pastes may use `privacy` here ([`Config::offers`]), with the reason when not.
+/// `create` enforces it; the adapters also ask before any file streams in.
+pub fn check_level(cfg: &Config, privacy: Privacy) -> Result<(), Error> {
+    if cfg.offers(privacy) {
+        Ok(())
+    } else if privacy == Privacy::Secret && cfg.app.privacy_levels.iter().any(|l| l == privacy.as_str()) {
+        Err(Error::Invalid("Secret pastes need https.".into()))
+    } else {
+        Err(Error::Invalid("That privacy level is not offered here. Choose another one.".into()))
+    }
+}
+
 /// Stores a new paste under a fresh random ID, retrying on collisions. Staged files are moved
 /// into `files/<id>/` in the same transaction that inserts the row and its `paste_files`, so a
 /// failure anywhere leaves neither the row nor the files.
 pub async fn create(st: &AppState, new: NewPaste, staging: Option<Staging>, now: i64) -> Result<PasteId, Error> {
+    check_level(&st.cfg, new.privacy)?;
     let cfg = &st.cfg.app;
-    if !cfg.privacy_levels.iter().any(|l| l == new.privacy.as_str()) {
-        return Err(Error::Invalid("That privacy level is not offered here. Choose another one.".into()));
-    }
     if !expiry::allowed(cfg, new.expiry) {
         let msg = if !expiry::within_max(cfg, new.expiry) {
             format!("Choose an expiry of {} or less.", expiry::max(cfg).label())
@@ -481,6 +492,20 @@ pub async fn create(st: &AppState, new: NewPaste, staging: Option<Staging>, now:
         return Ok(id);
     }
     Err(Error::IdSpaceExhausted)
+}
+
+/// Whether a paste has this address now, without loading it.
+pub async fn exists(st: &AppState, id: PasteId, now: i64) -> Result<bool, Error> {
+    let db = db_id(id);
+    let found = sqlx::query_scalar!(
+        r#"SELECT 1 AS "found!: i64" FROM pastes
+           WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)"#,
+        db,
+        now,
+    )
+    .fetch_optional(&st.pool)
+    .await?;
+    Ok(found.is_some())
 }
 
 /// The paste without counting a read.
@@ -574,7 +599,8 @@ async fn with_files_of_all(st: &AppState, rows: Vec<Row>) -> Result<Vec<Paste>, 
 }
 
 /// Counts one read in a single statement, burning the row on its last allowed read, and returns
-/// the paste with its content. `None` means the row is gone, burned or expired.
+/// the paste with its content but without its files. `None` means the row is gone, burned or
+/// expired.
 async fn count_read(st: &AppState, id: PasteId, now: i64) -> Result<Option<(Paste, Vec<u8>)>, Error> {
     let db = db_id(id);
     let row = sqlx::query_as!(
@@ -595,13 +621,7 @@ async fn count_read(st: &AppState, id: PasteId, now: i64) -> Result<Option<(Past
     )
     .fetch_optional(&st.pool)
     .await?;
-    match row {
-        Some(row) => {
-            let (paste, content) = row.split()?;
-            Ok(Some((with_files(st, paste).await?, content)))
-        }
-        None => Ok(None),
-    }
+    row.map(ReadRow::split).transpose()
 }
 
 /// Runs a password or verifier check under the failed-attempt limiter. A token is taken before
@@ -640,15 +660,15 @@ fn utf8(bytes: Vec<u8>) -> Result<String, Error> {
     String::from_utf8(bytes).map_err(Error::internal)
 }
 
-/// Opens a paste for reading and counts the read. Private pastes need the password or a grant;
-/// a secret paste returns its ciphertext.
-pub async fn read(st: &AppState, id: PasteId, access: Access, ip: IpAddr, now: i64) -> Result<Opened, Error> {
-    let found = meta(st, id, now).await?;
+/// Opens `found`, a paste just loaded by [`meta`], for reading and counts the read. Private
+/// pastes need the password or a grant; a secret paste returns its ciphertext.
+pub async fn read(st: &AppState, found: &Paste, access: Access, ip: IpAddr, now: i64) -> Result<Opened, Error> {
+    let id = found.id;
     let mut fresh_grant = false;
     let dek = match (found.privacy, access) {
         (Privacy::Private, Access::Password(pw)) => {
             fresh_grant = true;
-            Some(unlock(st, &found, &pw, ip).await?)
+            Some(unlock(st, found, &pw, ip).await?)
         }
         (Privacy::Private, Access::Grant(token)) => {
             Some(grant::check(&st.grant_key, &token, id, now)?.ok_or(Error::GrantExpired)?)
@@ -656,7 +676,13 @@ pub async fn read(st: &AppState, id: PasteId, access: Access, ip: IpAddr, now: i
         (Privacy::Private, Access::Anonymous | Access::Admin) => return Err(Error::PasswordRequired),
         _ => None,
     };
-    let (paste, content) = count_read(st, id, now).await?.ok_or(Error::NotFound)?;
+    let (mut paste, content) = count_read(st, id, now).await?.ok_or(Error::NotFound)?;
+    // Files never change after the create, so `found` has them; the creation time tells a paste
+    // that took over the address since `found` was loaded from the one that was asked for.
+    if paste.created_at != found.created_at {
+        return Err(Error::NotFound);
+    }
+    paste.files.clone_from(&found.files);
     let burning = paste.burned_at.is_some();
     let body = match (&dek, paste.kind) {
         (Some(dek), _) => Body::Text(utf8(crypto::open(dek, &content)?)?),

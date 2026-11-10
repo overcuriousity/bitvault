@@ -39,6 +39,23 @@ impl PageQuery {
     }
 }
 
+/// [`PageQuery`] for a page: a `?page=` that is no page number gets the error page, not the
+/// extractor's own text.
+pub struct Paged(pub u32);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for Paged {
+    type Rejection = Error;
+
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &S) -> Result<Self, Error> {
+        match axum::extract::Query::<PageQuery>::from_request_parts(parts, state).await {
+            Ok(axum::extract::Query(q)) => Ok(Self(q.number())),
+            Err(_) => Err(Error::Invalid(PAGE_NUMBER.into())),
+        }
+    }
+}
+
+pub const PAGE_NUMBER: &str = "Give the page as a whole number from 1.";
+
 /// The newer and the older page beside page `number`, which shows `shown` pastes: a full page
 /// may have an older one after it.
 pub fn neighbours(number: u32, shown: usize) -> (Option<u32>, Option<u32>) {

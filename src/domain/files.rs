@@ -10,7 +10,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use async_zip::base::write::ZipFileWriter;
-use async_zip::{Compression, ZipEntryBuilder};
+use async_zip::{Compression, ZipDateTime, ZipDateTimeBuilder, ZipEntryBuilder};
 use axum::body::Body;
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt, future, stream};
@@ -20,7 +20,9 @@ use tokio::task::JoinHandle;
 use tokio_util::compat::FuturesAsyncWriteCompatExt;
 use tokio_util::io::{ReaderStream, StreamReader};
 
+use crate::domain::Privacy;
 use crate::domain::crypto::{self, CHUNK_LEN, Dek, random_bytes};
+use crate::domain::paste::Paste;
 use crate::domain::words::PasteId;
 use crate::error::Error;
 use crate::state::AppState;
@@ -28,6 +30,8 @@ use crate::state::AppState;
 /// The type of every secret file and of any file whose type is unknown.
 pub const PLACEHOLDER_MIME: &str = "application/octet-stream";
 const STAGING_DIR: &str = ".staging";
+/// More than a zip entry's headers and name take, twice over (the central directory repeats them).
+const ZIP_ENTRY_OVERHEAD: u64 = 2048;
 // Enough for any container header plus one tag, which is all the browser-container check reads.
 const CONTAINER_HEAD_LEN: usize = 128;
 
@@ -330,31 +334,22 @@ pub(crate) async fn list_for(st: &AppState, ids: &[PasteId]) -> Result<HashMap<P
     Ok(out)
 }
 
-async fn privacy(st: &AppState, id: PasteId) -> Result<String, Error> {
-    let db = db_id(id);
-    sqlx::query_scalar!(r#"SELECT privacy AS "privacy!" FROM pastes WHERE id = ?"#, db)
-        .fetch_optional(&st.pool)
-        .await?
-        .ok_or(Error::NotFound)
-}
-
 /// The data key to decrypt with: required for private pastes, ignored for every other level.
-fn key_for(privacy: &str, dek: Option<&Dek>) -> Result<Option<Dek>, Error> {
-    if privacy != "private" {
+fn key_for(privacy: Privacy, dek: Option<&Dek>) -> Result<Option<Dek>, Error> {
+    if privacy != Privacy::Private {
         return Ok(None);
     }
     let dek = dek.ok_or(Error::PasswordRequired)?;
     Dek::from_slice(dek.as_bytes()).map(Some).ok_or_else(|| Error::internal("a data key has the wrong length"))
 }
 
-/// One file's metadata and a streamed body. Access rules (grants, burning, expiry) are the
-/// caller's; this only needs the data key for a private paste. A body whose bytes fail to
-/// decrypt ends in an error, never cleanly.
-pub async fn open(st: &AppState, id: PasteId, position: u32, dek: Option<&Dek>) -> Result<(FileMeta, Body), Error> {
-    let level = privacy(st, id).await?;
-    let meta = list(st, id).await?.into_iter().find(|f| f.position == position).ok_or(Error::NotFound)?;
-    let key = key_for(&level, dek)?;
-    let file = File::open(dir(st, id).join(position.to_string())).await?;
+/// One file of `p`: its metadata and a streamed body. Access rules (grants, burning, expiry)
+/// are the caller's, who loaded `p` under them; this only needs the data key for a private
+/// paste. A body whose bytes fail to decrypt ends in an error, never cleanly.
+pub async fn open(st: &AppState, p: &Paste, position: u32, dek: Option<&Dek>) -> Result<(FileMeta, Body), Error> {
+    let meta = p.files.iter().find(|f| f.position == position).cloned().ok_or(Error::NotFound)?;
+    let key = key_for(p.privacy, dek)?;
+    let file = File::open(dir(st, p.id).join(position.to_string())).await?;
     let body = match key {
         None => Body::from_stream(ReaderStream::with_capacity(file, CHUNK_LEN)),
         Some(key) => {
@@ -377,24 +372,47 @@ pub async fn open_range(st: &AppState, id: PasteId, position: u32, start: u64, e
     Ok(Body::from_stream(ReaderStream::with_capacity(file.take(len), CHUNK_LEN)))
 }
 
-/// One file's metadata without opening it.
-pub async fn meta(st: &AppState, id: PasteId, position: u32) -> Result<FileMeta, Error> {
-    list(st, id).await?.into_iter().find(|f| f.position == position).ok_or(Error::NotFound)
-}
-
-/// Every file of a paste as a stored (uncompressed) zip, written while it streams out.
-pub async fn zip(st: &AppState, id: PasteId, dek: Option<&Dek>) -> Result<Body, Error> {
-    let level = privacy(st, id).await?;
-    let metas = list(st, id).await?;
-    let key = key_for(&level, dek)?;
-    let dir = dir(st, id);
+/// Every file of `p` as a stored (uncompressed) zip, written while it streams out. Access rules
+/// are the caller's, as for [`open`].
+pub async fn zip(st: &AppState, p: &Paste, dek: Option<&Dek>) -> Result<Body, Error> {
+    let metas = p.files.clone();
+    let key = key_for(p.privacy, dek)?;
+    let dir = dir(st, p.id);
+    let stamp = zip_date(p.created_at);
     let (reader, writer) = tokio::io::duplex(CHUNK_LEN);
-    let task = tokio::spawn(async move { write_zip(writer, &dir, metas, key).await });
+    let task = tokio::spawn(async move { write_zip(writer, &dir, metas, key, stamp).await });
     Ok(piped(reader, task))
 }
 
-async fn write_zip(w: DuplexStream, dir: &Path, metas: Vec<FileMeta>, key: Option<Dek>) -> Result<(), Error> {
+/// A Unix time as a zip entry's date, in UTC. Zip dates start in 1980 and an entry without one
+/// reads as the invalid day 1980-00-00.
+fn zip_date(ts: i64) -> ZipDateTime {
+    let t = time::OffsetDateTime::from_unix_timestamp(ts).unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    ZipDateTimeBuilder::new()
+        .year(t.year().clamp(1980, 2107))
+        .month(u32::from(u8::from(t.month())))
+        .day(u32::from(t.day()))
+        .hour(u32::from(t.hour()))
+        .minute(u32::from(t.minute()))
+        .second(u32::from(t.second()))
+        .build()
+}
+
+async fn write_zip(
+    w: DuplexStream,
+    dir: &Path,
+    metas: Vec<FileMeta>,
+    key: Option<Dek>,
+    stamp: ZipDateTime,
+) -> Result<(), Error> {
     let mut zip = ZipFileWriter::with_tokio(w);
+    // async_zip ends a streamed zip64 entry with its sizes in the 32-bit form, which Info-ZIP's
+    // unzip reports as an error after extracting. An archive that fits the classic format is
+    // written in it; only one of 4 GiB or more needs zip64 and keeps that flaw.
+    let total = metas.iter().fold(0u64, |sum, f| sum.saturating_add(f.size).saturating_add(ZIP_ENTRY_OVERHEAD));
+    if total < u64::from(u32::MAX) {
+        zip = zip.force_no_zip64();
+    }
     let mut used = HashSet::new();
     for f in metas {
         // A repeated name would overwrite the earlier file on extraction.
@@ -403,7 +421,10 @@ async fn write_zip(w: DuplexStream, dir: &Path, metas: Vec<FileMeta>, key: Optio
             name = format!("{}-{name}", f.position);
         }
         used.insert(name.clone());
-        let entry = ZipEntryBuilder::new(name.into(), Compression::Stored);
+        // The entries say they come from Unix, where a mode of 0 extracts as a file nobody can read.
+        let entry = ZipEntryBuilder::new(name.into(), Compression::Stored)
+            .unix_permissions(0o644)
+            .last_modification_date(stamp);
         let mut out = zip.write_entry_stream(entry).await.map_err(Error::internal)?.compat_write();
         let file = BufReader::new(File::open(dir.join(f.position.to_string())).await?);
         match &key {

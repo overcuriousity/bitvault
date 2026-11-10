@@ -11,6 +11,8 @@ import { accept, addressLike, chips, choose, MAX_TYPED, readAddress, settled } f
 const LOOKUP_DELAY = 350;
 // Once the last word can only be one word, more letters cannot change the address: look it up now.
 const SETTLED_DELAY = 0;
+// How long "too many lookups" stands before the address is asked about again.
+const BUSY_RETRY = 60_000;
 
 // As few words as will do: the colours and the button's icon carry the rest.
 function echoFor(state, address) {
@@ -43,6 +45,46 @@ async function lookup(address) {
   throw new Error(`lookup answered ${res.status}`);
 }
 
+/**
+ * The lookups' answers, each address asked once through `ask` and remembered. "busy" is no answer
+ * about the address, so it is forgotten after `busyFor` and `forgotten` is called to ask again.
+ */
+export function rememberLookups(ask, forgotten, busyFor = BUSY_RETRY, wait = setTimeout) {
+  const results = new Map();
+  return {
+    known: (address) => results.get(address),
+    /** The answer for `address`; null when it could not be asked. */
+    async resolve(address) {
+      const known = results.get(address);
+      if (known) return known;
+      try {
+        const result = await ask(address);
+        results.set(address, result);
+        if (result === "busy") {
+          wait(() => {
+            if (results.get(address) !== "busy") return;
+            results.delete(address);
+            forgotten();
+          }, busyFor);
+        }
+        return result;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
+/**
+ * What a submit does with a lookup's answer for `address`: open the paste, keep the words as text,
+ * or (not asked, or too many lookups) leave it to the server, which opens the paste or says why
+ * it cannot look.
+ */
+export function submitDecision(result, address) {
+  if (!result || result === "busy") return {};
+  return result === "found" ? { open: `/${address}` } : { intent: "create" };
+}
+
 /** Binds the box of `form` and returns `decide`, which create.js awaits on submit. */
 export function bindBox(form) {
   const box = form.querySelector("#content");
@@ -55,7 +97,7 @@ export function bindBox(form) {
 
   const label = submit.querySelector(".bv-go__label") ?? submit;
   const idleLabel = label.textContent;
-  const results = new Map();
+  const lookups = rememberLookups(lookup, () => update());
   let words = null;
   let loading = null;
   let timer = null;
@@ -82,7 +124,7 @@ export function bindBox(form) {
     if (!read) return { state: "idle" };
     if (read.ambiguous) return { state: "ambiguous" };
     if (hasFiles()) return { state: "files", address: read.address };
-    return { state: results.get(read.address) ?? "checking", address: read.address };
+    return { state: lookups.known(read.address) ?? "checking", address: read.address };
   };
 
   const setText = (el, text) => {
@@ -175,19 +217,10 @@ export function bindBox(form) {
     if (event.persisted) render();
   });
 
-  // The lookup's answer for `address`, asked once and remembered; null when it could not be asked.
   // Asking now replaces the lookup that was waiting for a pause in typing.
-  const resolve = async (address) => {
+  const resolve = (address) => {
     clearTimeout(timer);
-    const known = results.get(address);
-    if (known) return known;
-    try {
-      const result = await lookup(address);
-      results.set(address, result);
-      return result;
-    } catch {
-      return null;
-    }
+    return lookups.resolve(address);
   };
 
   function update() {
@@ -270,11 +303,9 @@ export function bindBox(form) {
       if (!read) return {};
       if (read.ambiguous) return { intent: "create" };
       const result = await resolve(read.address);
-      // Unknown: leave it to the server.
-      if (!result) return {};
       render();
       if (result === "found") form.dataset.box = "opening";
-      return result === "found" ? { open: `/${read.address}` } : { intent: "create" };
+      return submitDecision(result, read.address);
     },
   };
 }

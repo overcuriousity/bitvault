@@ -490,7 +490,7 @@ async fn ordinary_view(
         }
         _ if *method == Method::HEAD => Ok(head_only(HTML)),
         _ => {
-            let opened = paste::read(st, id, Access::Anonymous, ip, now).await?;
+            let opened = paste::read(st, &p, Access::Anonymous, ip, now).await?;
             match &opened.body {
                 Body::Url(target) if !page => redirect_to(target),
                 _ => render_opened(st, admin, base, &opened).await,
@@ -524,7 +524,7 @@ async fn unlock(
         let notice = Some(Error::PasswordRequired.to_string());
         return unlock_page(&st, admin, id.words(), notice, StatusCode::UNPROCESSABLE_ENTITY);
     }
-    match paste::read(&st, id, Access::Password(form.password), ip, now).await {
+    match paste::read(&st, &p, Access::Password(form.password), ip, now).await {
         Ok(opened) => render_opened(&st, admin, &base, &opened).await,
         Err(e @ Error::WrongPassword) => {
             unlock_page(&st, admin, id.words(), Some(e.to_string()), StatusCode::UNPROCESSABLE_ENTITY)
@@ -562,7 +562,7 @@ async fn raw(
     if method == Method::HEAD {
         return Ok(head_only(if p.privacy == Privacy::Secret { OCTETS } else { TEXT }));
     }
-    let opened = paste::read(&st, id, access, ip, now).await?;
+    let opened = paste::read(&st, &p, access, ip, now).await?;
     let (content_type, bytes) = match opened.body {
         Body::Text(t) | Body::Url(t) => (TEXT, t.into_bytes()),
         Body::Cipher(c) => (OCTETS, c),
@@ -605,11 +605,13 @@ fn edit_page(
 }
 
 /// `GET /{words}/edit`: the form, prefilled. Showing the content counts as a read; a private
-/// paste needs the grant from its unlocked page.
+/// paste needs the grant from its unlocked page. A read that burns the paste leaves nothing to
+/// save, so it shows the paste's page, as any other last read does.
 async fn edit_form(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
     ClientIp(ip): ClientIp,
+    base: BaseUrl,
     method: Method,
     Path(words): Path<String>,
     Query(q): Query<GrantQuery>,
@@ -626,7 +628,10 @@ async fn edit_form(
     if method == Method::HEAD {
         return Ok(head_only(HTML));
     }
-    let opened = paste::read(&st, id, access, ip, now).await?;
+    let opened = paste::read(&st, &p, access, ip, now).await?;
+    if opened.paste.burned_at.is_some() {
+        return render_opened(&st, admin, &base, &opened).await;
+    }
     let content = match opened.body {
         Body::Text(t) | Body::Url(t) => t,
         Body::Cipher(_) => return Err(Error::NotFound),

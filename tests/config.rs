@@ -112,6 +112,50 @@ fn environment_variables_override_the_file() {
 }
 
 #[test]
+fn text_from_the_environment_stays_text() {
+    let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+    figment::Jail::expect_with(|jail| {
+        // Read as values, these would be a number (without its leading zeros), a boolean and a list.
+        jail.set_env("BITVAULT__APP__ADMIN_PASSWORD", "0012345678");
+        jail.set_env("BITVAULT__APP__UPLOADER_PASSWORD", "true");
+        jail.set_env("BITVAULT__APP__TITLE", "[2026]");
+        jail.set_env("BITVAULT__APP__MAX_FILE_MB", "64");
+        jail.set_env("BITVAULT__APP__EXPIRY_CHOICES", "[\"1hour\", \"24hour\", \"1week\"]");
+        let cfg = config::load(None).unwrap();
+        cfg.validate().unwrap();
+        assert_eq!(cfg.app.admin_password.as_deref(), Some("0012345678"));
+        assert_eq!(cfg.app.uploader_password.as_deref(), Some("true"));
+        assert_eq!(cfg.app.title, "[2026]");
+        assert_eq!(cfg.app.max_file_mb, 64);
+        assert_eq!(cfg.app.expiry_choices, ["1hour", "24hour", "1week"]);
+        Ok(())
+    });
+}
+
+#[test]
+fn the_parsed_environment_keys_are_the_keys_that_are_no_text() {
+    use figment::providers::{Format, Toml};
+    use figment::value::Value;
+    // config.example.toml documents every key with its default.
+    let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("config.example.toml");
+    let example: Value = figment::Figment::from(Toml::file(example)).extract().unwrap();
+    let mut found = Vec::new();
+    let mut pending = vec![(String::new(), example)];
+    while let Some((path, value)) = pending.pop() {
+        match value {
+            Value::Dict(_, dict) => pending
+                .extend(dict.into_iter().map(|(k, v)| (if path.is_empty() { k } else { format!("{path}.{k}") }, v))),
+            Value::String(..) => {}
+            _ => found.push(path),
+        }
+    }
+    found.sort();
+    let mut parsed = config::PARSED_ENV_KEYS.to_vec();
+    parsed.sort_unstable();
+    assert_eq!(found, parsed);
+}
+
+#[test]
 fn secrets_can_come_from_files() {
     let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
     figment::Jail::expect_with(|jail| {

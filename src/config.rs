@@ -3,7 +3,8 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use figment::Figment;
-use figment::providers::{Env, Format, Toml};
+use figment::providers::{Format, Toml};
+use figment::value::Value;
 use ipnet::IpNet;
 use serde::Deserialize;
 use url::Url;
@@ -14,6 +15,22 @@ use crate::domain::expiry::{self, Expiry};
 use crate::error::Error;
 
 const ENV_PREFIX: &str = "BITVAULT__";
+/// The keys whose environment values are parsed as TOML-like values: the switches, numbers and
+/// lists. `tests/config.rs` checks the list against the defaults.
+pub const PARSED_ENV_KEYS: [&str; 12] = [
+    "insecure_http",
+    "trusted_proxies",
+    "app.listing",
+    "app.editable",
+    "app.read_stats",
+    "app.highlight",
+    "app.qr",
+    "app.privacy_levels",
+    "app.expiry_choices",
+    "app.default_burn_after",
+    "app.max_file_mb",
+    "app.max_secret_file_mb",
+];
 
 pub const PRIVACY_LEVELS: [&str; 5] = ["public", "unlisted", "readonly", "private", "secret"];
 /// The default `expiry_choices`. The long expiries (`2years` to `16years`) are valid but opt-in.
@@ -121,15 +138,28 @@ pub fn load(file: Option<&Path>) -> Result<Config, Error> {
         }
         fig = fig.merge(Toml::file(path));
     }
-    fig = fig
-        .merge(Env::prefixed(ENV_PREFIX).split("__").filter(|k| !k.as_str().to_ascii_lowercase().ends_with("_file")));
-    for (key, path) in std::env::vars() {
-        let Some(name) = key.strip_prefix(ENV_PREFIX).and_then(|rest| rest.strip_suffix("_FILE")) else {
+    let mut files = Vec::new();
+    for (name, value) in std::env::vars() {
+        let Some(name) = name.strip_prefix(ENV_PREFIX) else { continue };
+        let key = |name: &str| name.to_ascii_lowercase().replace("__", ".");
+        if let Some(name) = name.strip_suffix("_FILE") {
+            let secret = std::fs::read_to_string(&value)
+                .map_err(|e| Error::Invalid(format!("Cannot read the secret file {value}: {e}.")))?;
+            files.push((key(name), secret.trim().to_owned()));
             continue;
+        }
+        let key = key(name);
+        // Only the keys that are no text are parsed. Everything else stays the string it is, so a
+        // password of digits is not read as a number (which would also drop its leading zeros).
+        fig = if PARSED_ENV_KEYS.contains(&key.as_str()) {
+            fig.merge((key, value.parse::<Value>().unwrap_or_else(|never| match never {})))
+        } else {
+            fig.merge((key, value))
         };
-        let secret = std::fs::read_to_string(&path)
-            .map_err(|e| Error::Invalid(format!("Cannot read the secret file {path}: {e}.")))?;
-        fig = fig.merge((name.to_ascii_lowercase().replace("__", "."), secret.trim().to_owned()));
+    }
+    // A `_FILE` variable wins over the plain one, whatever order the environment lists them in.
+    for pair in files {
+        fig = fig.merge(pair);
     }
     fig.extract().map_err(|e| Error::Invalid(format!("Invalid configuration: {e}.")))
 }

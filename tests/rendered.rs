@@ -158,7 +158,7 @@ async fn plain_http_pages_are_clean() {
         app_with(&GATE_CONFIG.replace("public_url = \"https://paste.example\"\n", "insecure_http = true\n")).await;
     app.origin = ("192.168.1.5:8080".into(), "http://192.168.1.5:8080".into());
     let public = create(&app, NewPaste { editable: true, ..new("hello there", Privacy::Public) }).await;
-    let secret = create(&app, secret()).await;
+    let secret = paste::create(&app.https_state(), secret(), None, domain::now()).await.unwrap().words();
     check("plain home", app.get("/").await, StatusCode::OK).await;
     check("plain public paste", app.get(&format!("/{public}")).await, StatusCode::OK).await;
     check("plain secret notice", app.get(&format!("/{secret}")).await, StatusCode::OK).await;

@@ -39,7 +39,13 @@ async fn create(st: &AppState, p: NewPaste) -> PasteId {
 }
 
 async fn read(st: &AppState, id: PasteId, access: Access) -> Result<paste::Opened, Error> {
-    paste::read(st, id, access, IP, NOW).await
+    read_at(st, id, access, IP, NOW).await
+}
+
+/// Loads the paste and reads it, as every caller of `paste::read` does.
+async fn read_at(st: &AppState, id: PasteId, access: Access, ip: IpAddr, now: i64) -> Result<paste::Opened, Error> {
+    let found = paste::meta(st, id, now).await?;
+    paste::read(st, &found, access, ip, now).await
 }
 
 fn text(body: &Body) -> &str {
@@ -170,10 +176,10 @@ async fn wrong_passwords_are_rate_limited_but_right_ones_are_not() {
         assert!(matches!(read(&app.st, id, Access::Password("wrong".into())).await, Err(Error::WrongPassword)));
     }
     assert!(matches!(read(&app.st, id, Access::Password("right".into())).await, Err(Error::TooManyAttempts)));
-    let elsewhere = paste::read(&app.st, id, Access::Password("right".into()), OTHER_IP, NOW).await.unwrap();
+    let elsewhere = read_at(&app.st, id, Access::Password("right".into()), OTHER_IP, NOW).await.unwrap();
     assert_eq!(text(&elsewhere.body), "limited");
     for _ in 0..10 {
-        paste::read(&app.st, id, Access::Password("right".into()), OTHER_IP, NOW).await.unwrap();
+        read_at(&app.st, id, Access::Password("right".into()), OTHER_IP, NOW).await.unwrap();
     }
 }
 
@@ -244,7 +250,7 @@ async fn parallel_wrong_passwords_cannot_outrun_the_limit() {
             let start = start.clone();
             tokio::spawn(async move {
                 start.wait().await;
-                paste::read(&st, id, Access::Password("wrong".into()), IP, NOW).await
+                read_at(&st, id, Access::Password("wrong".into()), IP, NOW).await
             })
         })
         .collect();
@@ -425,7 +431,7 @@ async fn concurrent_reads_of_a_burn_after_one_paste_succeed_exactly_once() {
             let start = start.clone();
             tokio::spawn(async move {
                 start.wait().await;
-                paste::read(&st, id, Access::Anonymous, IP, NOW).await
+                read_at(&st, id, Access::Anonymous, IP, NOW).await
             })
         })
         .collect();
@@ -465,7 +471,7 @@ async fn burn_after_three_reads_counts_reads_not_metadata_views() {
 async fn reads_record_the_count_and_the_last_read_time() {
     let app = support::app().await;
     let id = create(&app.st, new("counted", Privacy::Public)).await;
-    paste::read(&app.st, id, Access::Anonymous, IP, NOW + 5).await.unwrap();
+    read_at(&app.st, id, Access::Anonymous, IP, NOW + 5).await.unwrap();
     let p = paste::meta(&app.st, id, NOW + 6).await.unwrap();
     assert_eq!(p.read_count, 1);
     assert_eq!(p.last_read_at, Some(NOW + 5));
@@ -476,8 +482,8 @@ async fn reads_record_the_count_and_the_last_read_time() {
 async fn an_expired_paste_is_gone_immediately() {
     let app = support::app().await;
     let id = create(&app.st, NewPaste { expiry: Expiry::Min1, ..new("brief", Privacy::Public) }).await;
-    paste::read(&app.st, id, Access::Anonymous, IP, NOW + 59).await.unwrap();
-    assert!(matches!(paste::read(&app.st, id, Access::Anonymous, IP, NOW + 61).await, Err(Error::NotFound)));
+    read_at(&app.st, id, Access::Anonymous, IP, NOW + 59).await.unwrap();
+    assert!(matches!(read_at(&app.st, id, Access::Anonymous, IP, NOW + 61).await, Err(Error::NotFound)));
     assert!(matches!(paste::meta(&app.st, id, NOW + 61).await, Err(Error::NotFound)));
     assert!(paste::list_public(&app.st, 1, NOW + 61).await.unwrap().is_empty());
     assert!(paste::list_all(&app.st, 1, NOW + 61).await.unwrap().is_empty());
@@ -605,7 +611,7 @@ async fn editing_a_readonly_or_private_paste_needs_its_password() {
         assert!(matches!(res, Err(Error::Forbidden)));
         paste::edit(&app.st, id, Access::Password("pw".into()), IP, "v2".into(), None, NOW).await.unwrap();
         let access = if privacy == Privacy::Private { Access::Password("pw".into()) } else { Access::Anonymous };
-        let opened = paste::read(&app.st, id, access, OTHER_IP, NOW).await.unwrap();
+        let opened = read_at(&app.st, id, access, OTHER_IP, NOW).await.unwrap();
         assert_eq!(text(&opened.body), "v2");
         if privacy == Privacy::Private {
             assert!(!stored_content(&app.st, id).await.windows(2).any(|w| w == b"v2"));
@@ -741,4 +747,21 @@ async fn the_admin_list_comes_a_page_at_a_time_with_totals_for_all() {
     // "paste 0" to "paste 9" are 7 bytes each, the other 41 are 8.
     assert_eq!(totals.content_bytes, 10 * 7 + 41 * 8);
     assert_eq!(totals.file_bytes, 0);
+}
+
+#[tokio::test]
+async fn create_refuses_a_level_the_instance_does_not_offer() {
+    let invalid = |r: Result<PasteId, Error>| match r {
+        Err(Error::Invalid(m)) => m,
+        other => panic!("expected an Invalid error, got {other:?}"),
+    };
+    // Plain HTTP has no Web Crypto, so no browser could open a Secret paste stored there.
+    let plain = support::app_with("insecure_http = true\n").await;
+    let refused = paste::create(&plain.st, secret_paste(PBKDF2_ITERATIONS), None, NOW).await;
+    assert_eq!(invalid(refused), "Secret pastes need https.");
+    assert!(paste::exists(&plain.st, create(&plain.st, new("fine", Privacy::Public)).await, NOW).await.unwrap());
+    let few = support::app_with("[app]\nprivacy_levels = [\"unlisted\"]\n").await;
+    let refused = paste::create(&few.st, new("x", Privacy::Public), None, NOW).await;
+    assert_eq!(invalid(refused), "That privacy level is not offered here. Choose another one.");
+    assert_eq!(row_count(&few.st).await, 0);
 }

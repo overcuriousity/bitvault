@@ -37,7 +37,6 @@ const AUTO: &str = "auto";
 /// Each text field of the create form, and the text of an API create.
 pub(crate) const TEXT_LIMIT: usize = paste::TEXT_LIMIT;
 const SECRET_IN_BROWSER: &str = "Secret pastes are encrypted in the browser. Create them on the web page instead.";
-const SECRET_NEEDS_HTTPS: &str = "Secret pastes need https.";
 // A secret paste's content container holds JSON of up to TEXT_LIMIT of text, which escaping can
 // grow sixfold (a control character becomes \u00XX), plus 64 KiB of file names and the container
 // overhead.
@@ -161,19 +160,10 @@ async fn open(
     UrlForm(form): UrlForm<OpenForm>,
 ) -> Result<Response, Error> {
     let id = words::parse_typed(&form.words)?;
-    if !exists(&st, id, domain::now()).await? {
+    if !paste::exists(&st, id, domain::now()).await? {
         return Err(invalid("No paste has these words. Check them and try again."));
     }
     Ok(go_to(&format!("/{}", id.words()), headers.contains_key("hx-request")))
-}
-
-/// Whether a paste has this address now.
-async fn exists(st: &AppState, id: words::PasteId, now: i64) -> Result<bool, Error> {
-    match paste::meta(st, id, now).await {
-        Ok(_) => Ok(true),
-        Err(Error::NotFound) => Ok(false),
-        Err(e) => Err(e),
-    }
 }
 
 /// The uploader password, when one is configured, must arrive before any file.
@@ -238,11 +228,8 @@ pub(crate) struct CreateRules {
 
 impl CreateRules {
     fn allows(self, cfg: &Config, privacy: Privacy) -> Result<(), Error> {
-        match privacy {
-            Privacy::Secret if cfg.insecure_http => Err(invalid(SECRET_NEEDS_HTTPS)),
-            Privacy::Secret if !self.allow_secret => Err(invalid(SECRET_IN_BROWSER)),
-            _ => Ok(()),
-        }
+        paste::check_level(cfg, privacy)?;
+        if privacy == Privacy::Secret && !self.allow_secret { Err(invalid(SECRET_IN_BROWSER)) } else { Ok(()) }
     }
 }
 
@@ -335,15 +322,11 @@ pub(crate) fn syntax_options(app: &AppConfig, chosen: Option<&str>) -> Vec<(Stri
 }
 
 impl Form {
-    fn set(&mut self, name: &str, value: Vec<u8>, staged: bool, offered: &[String]) -> Result<(), Error> {
+    fn set(&mut self, name: &str, value: Vec<u8>, staged: bool) -> Result<(), Error> {
         match name {
             "content" => self.content = text(value)?,
             "privacy" => {
                 let privacy = parse_privacy(&text(value)?)?;
-                // Checked here as well as on create, so files never stream in for a refused level.
-                if !offered.iter().any(|l| l == privacy.as_str()) {
-                    return Err(invalid("That privacy level is not offered here. Choose another one."));
-                }
                 // Files are stored the way the level needs while they stream, so the level
                 // cannot change once one has arrived.
                 if staged && self.privacy != Some(privacy) {
@@ -458,7 +441,7 @@ async fn existing_paste(
     if let Some(ip) = ip {
         st.lookups.take(ip)?;
     }
-    let found = exists(st, id, now).await;
+    let found = paste::exists(st, id, now).await;
     if let (Some(ip), false) = (ip, matches!(found, Ok(false))) {
         st.lookups.refund(ip);
     }
@@ -508,9 +491,14 @@ async fn read_form(
             let limit = if name == "content_container" { CONTAINER_LIMIT } else { TEXT_LIMIT };
             let value = read_field(field, limit).await?;
             if name == "uploader_password" {
-                gate.check(&value)?;
+                // The form always sends the field; left empty it is no attempt, so opening a
+                // paste from the box needs no password and costs no failed-attempt token.
+                if !value.is_empty() {
+                    gate.check(&value)?;
+                }
             } else {
-                form.set(&name, value, staging.is_some(), &app.privacy_levels)?;
+                form.set(&name, value, staging.is_some())?;
+                // Asked here as well as on create, so files never stream in for a refused level.
                 if let Some(privacy) = form.privacy {
                     rules.allows(&st.cfg, privacy)?;
                 }

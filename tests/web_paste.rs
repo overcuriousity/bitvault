@@ -442,6 +442,20 @@ async fn code_just_over_the_highlight_limit_renders_plain_and_quickly() {
 }
 
 #[tokio::test]
+async fn a_page_number_that_is_none_gets_the_error_page() {
+    let mut app = app_with("[app]\nadmin_password = \"admin-pw-123\"\n").await;
+    app.sign_in_admin().await;
+    for uri in ["/list?page=abc", "/list?page=99999999999", "/admin?page=-1"] {
+        let res = app.get(uri).await;
+        assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY, "{uri}");
+        let html = body_text(res).await;
+        assert!(html.contains("<!doctype html") || html.contains("<!DOCTYPE html"), "{uri}: {html}");
+        assert!(html.contains("Give the page as a whole number from 1."), "{uri}: {html}");
+        assert!(!html.contains("deserialize"), "{uri}: {html}");
+    }
+}
+
+#[tokio::test]
 async fn list_is_404_and_out_of_the_navigation_when_listing_is_off() {
     let app = app().await;
     let public = create(&app, new("listed", Privacy::Public)).await;
@@ -583,6 +597,24 @@ async fn the_right_password_on_raw_is_never_limited() {
     for _ in 0..12 {
         assert_eq!(get_with(&app, &format!("/{w}/raw"), "x-paste-password", "right").await.status(), StatusCode::OK);
     }
+}
+
+#[tokio::test]
+async fn the_edit_form_counts_a_read_and_the_burning_one_shows_the_paste_instead() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let w = create(&app, NewPaste { burn_after_reads: 2, editable: true, ..new("twice", Privacy::Unlisted) }).await;
+    let html = body_text(app.get(&format!("/{w}/edit")).await).await;
+    assert!(html.contains(&format!("action=\"/{w}/edit\"")), "the first read shows the form: {html}");
+    assert_eq!(read_count(&app, &w).await, 1);
+    let res = app.post_form(&format!("/{w}/edit"), "content=edited&syntax=plain").await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    // The last read: nothing could be saved any more, so no form is offered.
+    let res = app.get(&format!("/{w}/edit")).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let html = body_text(res).await;
+    assert!(html.contains("edited"), "{html}");
+    assert!(!html.contains(&format!("action=\"/{w}/edit\"")), "{html}");
+    assert_eq!(app.get(&format!("/{w}")).await.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -1158,7 +1190,7 @@ async fn plain_app(extra: &str) -> App {
 #[tokio::test]
 async fn over_plain_http_a_secret_paste_shows_the_https_notice_instead_of_the_open_form() {
     let app = plain_app("").await;
-    let w = create(&app, secret(0)).await;
+    let w = paste::create(&app.https_state(), secret(0), None, domain::now()).await.unwrap().words();
     let res = app.get(&format!("/{w}")).await;
     assert_eq!(res.status(), StatusCode::OK);
     let html = body_text(res).await;

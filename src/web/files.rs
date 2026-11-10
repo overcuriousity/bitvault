@@ -136,7 +136,7 @@ pub async fn download(
     dek: Option<&Dek>,
     req: &HeaderMap,
 ) -> Result<Response, Error> {
-    let meta = files::meta(st, id, position).await?;
+    let meta = p.files.iter().find(|f| f.position == position).ok_or(Error::NotFound)?;
     let (content_type, kind) = if p.privacy == Privacy::Secret {
         (PLACEHOLDER_MIME, "attachment")
     } else if inline_image(&meta.mime) {
@@ -153,7 +153,7 @@ pub async fn download(
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
 
     if p.privacy == Privacy::Private {
-        let (_, body) = files::open(st, id, position, dek).await?;
+        let (_, body) = files::open(st, p, position, dek).await?;
         headers.insert(header::CONTENT_LENGTH, HeaderValue::from(meta.size));
         // A body that fails to decrypt part-way ends in an error, so the client sees a broken transfer.
         return Ok((headers, body).into_response());
@@ -178,7 +178,7 @@ pub async fn download(
             Ok((StatusCode::PARTIAL_CONTENT, headers, body).into_response())
         }
         RangeAsk::Full => {
-            let (_, body) = files::open(st, id, position, None).await?;
+            let (_, body) = files::open(st, p, position, None).await?;
             headers.insert(header::CONTENT_LENGTH, HeaderValue::from(total));
             Ok((headers, body).into_response())
         }
@@ -198,7 +198,7 @@ async fn zip(
     if p.privacy == Privacy::Secret || p.files.is_empty() {
         return Err(Error::NotFound);
     }
-    let body = files::zip(&st, id, dek.as_ref()).await?;
+    let body = files::zip(&st, &p, dek.as_ref()).await?;
     let headers = [
         (header::CONTENT_TYPE, HeaderValue::from_static("application/zip")),
         (header::CONTENT_DISPOSITION, disposition("attachment", &format!("{}.zip", id.words()))?),

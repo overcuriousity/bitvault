@@ -118,7 +118,10 @@ impl Deployment {
             return (self.fixed_origin && origin == self.origin) || origin == format!("http://{host}");
         }
         if self.loopback_dev {
-            return LOOPBACK_NAMES.iter().any(|n| origin == format!("http://{n}:{}", self.port));
+            // Browsers leave the scheme's default port out of an Origin, as out of a Host.
+            return LOOPBACK_NAMES.iter().any(|n| {
+                origin == format!("http://{n}:{}", self.port) || (self.port == 80 && origin == format!("http://{n}"))
+            });
         }
         origin == self.origin
     }

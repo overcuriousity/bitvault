@@ -54,6 +54,14 @@ async fn app_from(cfg: Config, dir: tempfile::TempDir, extra: Router<AppState>) 
 }
 
 impl App {
+    /// The state this instance had while it still ran on https. A create refuses Secret pastes
+    /// under `insecure_http`, so tests of the ones stored before the switch create them with this.
+    pub fn https_state(&self) -> AppState {
+        let mut st = self.st.clone();
+        st.cfg = std::sync::Arc::new(Config { insecure_http: false, ..(*self.st.cfg).clone() });
+        st
+    }
+
     pub async fn send(&self, r: Request<Body>) -> Response<Body> {
         self.router.clone().oneshot(r).await.unwrap()
     }

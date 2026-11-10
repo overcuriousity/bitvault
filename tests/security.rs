@@ -295,6 +295,22 @@ fn post_from(host: &str, origin: &str) -> Request<Body> {
 }
 
 #[tokio::test]
+async fn loopback_on_port_80_accepts_the_origin_browsers_send() {
+    let app = app_with_test_routes("bind = \"127.0.0.1:80\"\n").await;
+    // A browser leaves the default port out of both Host and Origin.
+    for (host, origin) in [("localhost", "http://localhost"), ("127.0.0.1", "http://127.0.0.1")] {
+        assert_eq!(app.send(post_from(host, origin)).await.status(), StatusCode::OK, "{origin}");
+    }
+    assert_eq!(app.send(post_from("localhost", "http://localhost:80")).await.status(), StatusCode::OK);
+    for origin in ["http://localhost:8080", "https://localhost", "http://evil.example"] {
+        assert_eq!(app.send(post_from("localhost", origin)).await.status(), StatusCode::FORBIDDEN, "{origin}");
+    }
+    // Any other port keeps needing it.
+    let app = app_with_test_routes("").await;
+    assert_eq!(app.send(post_from("localhost:8080", "http://localhost")).await.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn plain_http_answers_any_host_without_hsts() {
     let app = app_with_test_routes(PLAIN).await;
     for host in [LAN_HOST, "bitvault.lan", "localhost:8080"] {
