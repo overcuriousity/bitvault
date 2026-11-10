@@ -258,9 +258,10 @@ impl std::io::Write for Captured {
     }
 }
 
-#[tokio::test]
-async fn request_traces_carry_the_path_but_never_the_query() {
-    let app = app_with_test_routes("").await;
+/// Runs on its own current-thread runtime inside a scoped subscriber, so nothing here depends on a
+/// global subscriber or on what tests running in parallel have registered.
+#[test]
+fn request_traces_carry_the_path_but_never_the_query() {
     let captured = Captured::default();
     let writer = captured.clone();
     let subscriber = tracing_subscriber::fmt()
@@ -268,9 +269,17 @@ async fn request_traces_carry_the_path_but_never_the_query() {
         .with_ansi(false)
         .with_writer(move || writer.clone())
         .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
-    let res = app.send(plain(app.req("GET", "/test/ip?g=GRANT-MUST-NOT-BE-LOGGED&x=1"))).await;
-    assert_eq!(res.status(), StatusCode::OK);
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    tracing::subscriber::with_default(subscriber, || {
+        runtime.block_on(async {
+            let app = app_with_test_routes("").await;
+            // Callsites that parallel tests reached first cached "no interest"; ask again, now that
+            // this thread's subscriber exists and the app is built.
+            tracing::callsite::rebuild_interest_cache();
+            let res = app.send(plain(app.req("GET", "/test/ip?g=GRANT-MUST-NOT-BE-LOGGED&x=1"))).await;
+            assert_eq!(res.status(), StatusCode::OK);
+        });
+    });
     let logs = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
     assert!(logs.contains("path=/test/ip"), "{logs}");
     assert!(!logs.contains("GRANT-MUST-NOT-BE-LOGGED"), "{logs}");
