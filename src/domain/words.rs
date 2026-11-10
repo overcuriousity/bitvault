@@ -26,8 +26,8 @@ impl PasteId {
 pub const PREFIX_LEN: usize = 4;
 
 /// Accepts words separated by spaces and/or hyphens, in any case, each in full or as a prefix of
-/// at least [`PREFIX_LEN`] letters. Paths use this strict form, which the lookup budget can tell
-/// apart from other paths by its hyphens.
+/// at least [`PREFIX_LEN`] letters. Paths use this strict form, and the lookup budget uses
+/// it to tell an address from any other path.
 pub fn parse(input: &str) -> Result<PasteId, Error> {
     parse_with(input, false)
 }

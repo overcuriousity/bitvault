@@ -1,3 +1,4 @@
+{% import "components/pager.html" as pager %}
 {% import "components/empty.html" as empty %}
 {% import "components/notice.html" as notice %}
 {% import "components/time.html" as time %}
@@ -63,10 +64,5 @@
 </table>
 </div>
 {% endif %}
-{%- if newer.is_some() || older.is_some() %}
-<nav class="bv-pager" aria-label="Pages">
-  {%- if let Some(n) = newer %}<a href="/admin?page={{ n }}" rel="prev">Newer pastes</a>{% endif %}
-  {%- if let Some(n) = older %}<a href="/admin?page={{ n }}" rel="next">Older pastes</a>{% endif %}
-</nav>
-{%- endif %}
+{%- call pager::pager("/admin", newer, older) %}{% endcall %}
 </div>

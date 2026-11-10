@@ -5,6 +5,8 @@
 // Four letters always name one word in this list.
 const PREFIX_LEN = 4;
 const SEPARATORS = /[\s-]+/;
+// Three words of at most eight letters, with room for separators and spaces around them.
+export const MAX_TYPED = 64;
 // Chips start at the second letter; one letter fits too many words to be a useful list.
 const CHIPS_FROM = 2;
 const CHIP_LIMIT = 6;
@@ -50,7 +52,7 @@ function readParts(words, parts, done, out) {
  * run together that read two ways, or null when it is not three paste words.
  */
 export function readAddress(value, words) {
-  if (value.length > 64) return null;
+  if (value.length > MAX_TYPED) return null;
   const parts = value.toLowerCase().split(SEPARATORS).filter(Boolean);
   if (parts.length === 3) {
     const found = parts.map((p) => findIn(words, p));
@@ -69,7 +71,7 @@ export function readAddress(value, words) {
  * Without the word list only the shape is checked.
  */
 export function addressLike(value, words) {
-  if (value.includes("\n") || value.length > 64 || /[^\sa-z-]/i.test(value)) return false;
+  if (value.includes("\n") || value.length > MAX_TYPED || /[^\sa-z-]/i.test(value)) return false;
   const parts = value.toLowerCase().split(SEPARATORS).filter(Boolean);
   if (parts.length > 3) return false;
   if (!words) return true;
@@ -79,6 +81,14 @@ export function addressLike(value, words) {
   if (!finished.every(readable)) return false;
   const last = ended ? null : parts[parts.length - 1];
   return !(last && parts.length === 3 && !words.some((w) => w.startsWith(last)));
+}
+
+/** Whether the last word of `value` can only be one word, so more letters cannot change the address. */
+export function settled(value, words) {
+  const last = value.trim().toLowerCase().split(SEPARATORS).pop() ?? "";
+  let fits = 0;
+  for (const w of words) if (w.startsWith(last) && ++fits > 1) return false;
+  return fits === 1;
 }
 
 /**
@@ -102,7 +112,7 @@ export function chips(value, words, limit = CHIP_LIMIT) {
   }
   // A finished last word needs no list.
   if (fits.length === 0 || (fits.length === 1 && fits[0] === prefix && finished.length === 2)) return null;
-  return { done, part, fits, count: finished.length + 1 };
+  return { done, fits, count: finished.length + 1 };
 }
 
 /**

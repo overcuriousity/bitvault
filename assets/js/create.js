@@ -146,29 +146,28 @@ function bindDropZone(form) {
   input.addEventListener("change", () => {
     if (attach && input.files.length > 0) attach.open = true;
   });
-  const zone = form;
   let depth = 0;
   const hasFiles = (e) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
-  zone.addEventListener("dragenter", (e) => {
+  form.addEventListener("dragenter", (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
     depth++;
-    zone.dataset.dragging = "";
+    form.dataset.dragging = "";
   });
-  zone.addEventListener("dragover", (e) => {
+  form.addEventListener("dragover", (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
   });
-  zone.addEventListener("dragleave", () => {
+  form.addEventListener("dragleave", () => {
     depth = Math.max(0, depth - 1);
-    if (depth === 0) delete zone.dataset.dragging;
+    if (depth === 0) delete form.dataset.dragging;
   });
-  zone.addEventListener("drop", (e) => {
+  form.addEventListener("drop", (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
     depth = 0;
-    delete zone.dataset.dragging;
+    delete form.dataset.dragging;
     // The input keeps its earlier choice and gains the dropped files.
     addFiles(input, e.dataTransfer.files);
   });

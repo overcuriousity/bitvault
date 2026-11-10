@@ -13,9 +13,6 @@
 <link rel="stylesheet" href="{{ css }}">
 {%- endfor %}
 <script src="{{ self.asset("vendor/oc/htmx/htmx.min.js") }}" defer></script>
-{%- for js in extra_scripts %}
-<script src="{{ js }}" defer></script>
-{%- endfor %}
 {%- for js in self.modules() %}
 <script type="module" src="{{ js }}"></script>
 {%- endfor %}

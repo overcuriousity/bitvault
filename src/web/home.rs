@@ -161,16 +161,18 @@ async fn open(
     UrlForm(form): UrlForm<OpenForm>,
 ) -> Result<Response, Error> {
     let id = words::parse_typed(&form.words)?;
-    match paste::meta(&st, id, domain::now()).await {
-        Ok(_) => {}
-        Err(Error::NotFound) => return Err(invalid("No paste has these words. Check them and try again.")),
-        Err(e) => return Err(e),
+    if !exists(&st, id, domain::now()).await? {
+        return Err(invalid("No paste has these words. Check them and try again."));
     }
-    let target = format!("/{}", id.words());
-    if headers.contains_key("hx-request") {
-        Ok((StatusCode::OK, [("hx-redirect", target)]).into_response())
-    } else {
-        Ok(Redirect::to(&target).into_response())
+    Ok(go_to(&format!("/{}", id.words()), headers.contains_key("hx-request")))
+}
+
+/// Whether a paste has this address now.
+async fn exists(st: &AppState, id: words::PasteId, now: i64) -> Result<bool, Error> {
+    match paste::meta(st, id, now).await {
+        Ok(_) => Ok(true),
+        Err(Error::NotFound) => Ok(false),
+        Err(e) => Err(e),
     }
 }
 
@@ -422,7 +424,7 @@ async fn create(State(st): State<AppState>, req: Request) -> Result<Response, Er
     {
         return Ok(go_to(&format!("/{}", id.words()), htmx));
     }
-    gate.require()?;
+    gate?;
     let id = paste::create(&st, form.into_new(&st, rules)?, staging, now).await?;
     let words = id.words();
     let token = grant::issue_creator(&st.grant_key, id, now);
@@ -456,15 +458,11 @@ async fn existing_paste(
     if let Some(ip) = ip {
         st.lookups.take(ip)?;
     }
-    let found = paste::meta(st, id, now).await;
-    if let (Some(ip), false) = (ip, matches!(found, Err(Error::NotFound))) {
+    let found = exists(st, id, now).await;
+    if let (Some(ip), false) = (ip, matches!(found, Ok(false))) {
         st.lookups.refund(ip);
     }
-    match found {
-        Ok(_) => Ok(Some(id)),
-        Err(Error::NotFound) => Ok(None),
-        Err(e) => Err(e),
-    }
+    Ok(found?.then_some(id))
 }
 
 /// Reads a multipart create in order, streaming each file into a staging directory (encrypted
@@ -476,28 +474,18 @@ pub(crate) async fn read_multipart(
     rules: CreateRules,
 ) -> Result<(NewPaste, Option<Staging>), Error> {
     let (form, staging, gate) = read_form(st, req, rules).await?;
-    gate.require()?;
+    gate?;
     Ok((form.into_new(st, rules)?, staging))
-}
-
-/// Whether the uploader password was given, once a form is read.
-struct GateResult {
-    passed: bool,
-}
-
-impl GateResult {
-    fn require(&self) -> Result<(), Error> {
-        if self.passed { Ok(()) } else { Err(Error::UploaderPassword) }
-    }
 }
 
 /// [`read_multipart`] without its last two steps, so the web form can open an existing paste
 /// before asking for the uploader password. A file still needs the password before it streams.
+/// The third value says whether the uploader password was given.
 async fn read_form(
     st: &AppState,
     req: Request,
     rules: CreateRules,
-) -> Result<(Form, Option<Staging>, GateResult), Error> {
+) -> Result<(Form, Option<Staging>, Result<(), Error>), Error> {
     let ip = req.extensions().get::<ClientIp>().map(|c| c.0);
     let boundary = req
         .headers()
@@ -574,6 +562,5 @@ async fn read_form(
             other => other?,
         };
     }
-    let passed = gate.require().is_ok();
-    Ok((form, staging, GateResult { passed }))
+    Ok((form, staging, gate.require()))
 }

@@ -327,7 +327,7 @@ fn render_paste(st: &AppState, admin: bool, view: &PasteView, words: &str) -> Re
     if view.secret && !view.https_only {
         js.push(Assets::url("js/secret.js"));
     }
-    let extras = Extras { css: vec![Assets::url("css/syntax.css")], js, ..Extras::default() };
+    let extras = Extras { css: vec![Assets::url("css/syntax.css")], js };
     Ok(no_store(page_with(st, admin, "", words, body, extras)?.into_response()))
 }
 
@@ -552,7 +552,7 @@ async fn raw(
         (Privacy::Private, None) => {
             // As UTF-8, like the API: `to_str` would refuse every password beyond ASCII.
             let pw = headers
-                .get("x-paste-password")
+                .get(crate::api::PASSWORD_HEADER)
                 .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
                 .ok_or(Error::PasswordRequired)?;
             Access::Password(pw.to_owned())

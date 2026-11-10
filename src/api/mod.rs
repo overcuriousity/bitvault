@@ -34,7 +34,7 @@ use crate::web::{paste_id, paste_urls};
 /// A JSON create body: the text may grow sixfold when escaped (a control character becomes
 /// `\u00XX`), plus room for the other fields.
 pub const JSON_LIMIT: usize = 6 * TEXT_LIMIT + (64 << 10);
-const PASSWORD_HEADER: &str = "x-paste-password";
+pub(crate) const PASSWORD_HEADER: &str = "x-paste-password";
 const VERIFIER_HEADER: &str = "x-paste-verifier";
 const UPLOADER_HEADER: &str = "x-uploader-password";
 const GRANT_HEADER: &str = "x-paste-grant";
@@ -74,7 +74,7 @@ pub struct Routes {
 }
 
 /// The API's routers by group, and the OpenAPI document they make up.
-fn assemble() -> (Router<AppState>, Router<AppState>, Router<AppState>, utoipa::openapi::OpenApi) {
+fn assemble() -> (Routes, utoipa::openapi::OpenApi) {
     let (uploads, upload_spec) = OpenApiRouter::new().routes(routes!(create_paste)).split_for_parts();
     let (edits, edit_spec) = OpenApiRouter::new().routes(routes!(update_paste)).split_for_parts();
     let (rest, mut spec) = OpenApiRouter::with_openapi(Doc::openapi())
@@ -85,16 +85,16 @@ fn assemble() -> (Router<AppState>, Router<AppState>, Router<AppState>, utoipa::
         .split_for_parts();
     spec.merge(upload_spec);
     spec.merge(edit_spec);
-    (uploads, edits, rest, spec)
+    (Routes { uploads, edits, rest }, spec)
 }
 
 /// The OpenAPI document `/api/v1/openapi.json` serves, which the API page renders.
 pub fn spec() -> utoipa::openapi::OpenApi {
-    assemble().3
+    assemble().1
 }
 
 pub fn routes() -> Result<Routes, Error> {
-    let (uploads, edits, rest, spec) = assemble();
+    let (Routes { uploads, edits, rest }, spec) = assemble();
     let json = Bytes::from(spec.to_json().map_err(Error::internal)?);
     let rest = rest.route(
         "/api/v1/openapi.json",

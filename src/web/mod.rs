@@ -25,8 +25,25 @@ pub struct Extras {
     pub css: Vec<String>,
     /// ES modules.
     pub js: Vec<String>,
-    /// Classic deferred scripts, run before the modules.
-    pub scripts: Vec<String>,
+}
+
+/// `?page=` on a paged list; pages count from 1.
+#[derive(serde::Deserialize)]
+pub struct PageQuery {
+    page: Option<u32>,
+}
+
+impl PageQuery {
+    pub fn number(&self) -> u32 {
+        self.page.unwrap_or(1).max(1)
+    }
+}
+
+/// The newer and the older page beside page `number`, which shows `shown` pastes: a full page
+/// may have an older one after it.
+pub fn neighbours(number: u32, shown: usize) -> (Option<u32>, Option<u32>) {
+    let full = shown == crate::domain::paste::PAGE_SIZE as usize;
+    ((number > 1).then(|| number - 1), full.then(|| number.saturating_add(1)))
 }
 
 /// Wraps `body` (already-escaped HTML) in the page shell.
@@ -56,7 +73,6 @@ pub fn page_with(
         admin,
         extra_css: extras.css,
         extra_js: extras.js,
-        extra_scripts: extras.scripts,
         cfg: st.cfg.clone(),
     };
     layout.render().map(Html).map_err(Error::internal)

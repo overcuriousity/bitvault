@@ -1,3 +1,4 @@
+{% import "components/copy.html" as copy %}
 {%- macro runs(list) -%}
 {%- for r in list.iter() -%}{%- if r.code -%}<code>{{ r.text }}</code>{%- else -%}{{ r.text }}{%- endif -%}{%- endfor -%}
 {%- endmacro -%}
@@ -26,14 +27,14 @@
 <nav class="bv-api-toc" aria-label="Calls">
   <ul>
     {%- for op in reference.operations %}
-    <li><a href="#{{ op.id }}"><span class="bv-method bv-method--{{ op.method_class() }}">{{ op.method }}</span> <code>{{ op.path }}</code></a> <span class="bv-api-toc__summary">{% call runs(op.summary) %}{% endcall %}</span></li>
+    <li><a href="#{{ op.id }}"><span class="bv-method bv-method--{{ op.method_class }}">{{ op.method }}</span> <code>{{ op.path }}</code></a> <span class="bv-api-toc__summary">{% call runs(op.summary) %}{% endcall %}</span></li>
     {%- endfor %}
   </ul>
 </nav>
 
 {%- for op in reference.operations %}
 <section class="bv-api-op" id="{{ op.id }}" aria-labelledby="{{ op.id }}-title">
-  <h2 id="{{ op.id }}-title"><span class="bv-method bv-method--{{ op.method_class() }}">{{ op.method }}</span> <code>{{ op.path }}</code></h2>
+  <h2 id="{{ op.id }}-title"><span class="bv-method bv-method--{{ op.method_class }}">{{ op.method }}</span> <code>{{ op.path }}</code></h2>
   <p class="bv-api-op__summary">{% call runs(op.summary) %}{% endcall %}</p>
   {%- for p in op.description %}
   <p>{% call runs(p) %}{% endcall %}</p>
@@ -41,7 +42,7 @@
   {%- for ex in op.examples(base) %}
   <div class="bv-api-example">
     <pre><code>{{ ex }}</code></pre>
-    <button type="button" class="oc-btn oc-btn--icon oc-btn--row oc-copy" aria-label="Copy command" data-oc-tip="Copy command" data-oc-copy="{{ ex }}">{{ copy_icons|safe }}</button>
+    {% call copy::copy("command", ex, copy_icons) %}{% endcall %}
   </div>
   {%- endfor %}
   {%- if !op.params.is_empty() %}

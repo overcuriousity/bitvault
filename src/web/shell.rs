@@ -25,8 +25,6 @@ pub struct Layout {
     pub extra_css: Vec<String>,
     /// ES modules.
     pub extra_js: Vec<String>,
-    /// Classic scripts, deferred, run in order before the modules (e.g. a UMD bundle).
-    pub extra_scripts: Vec<String>,
     pub cfg: Arc<Config>,
 }
 

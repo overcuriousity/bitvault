@@ -53,7 +53,12 @@ type Paragraph = Vec<Run>;
 
 /// Paragraphs split on blank lines; single line breaks inside one are spaces.
 fn paragraphs(text: &str) -> Vec<Paragraph> {
-    text.split("\n\n").map(|p| runs(&p.replace('\n', " "))).filter(|p| !p.is_empty()).collect()
+    text.split("\n\n").map(one_line).filter(|p| !p.is_empty()).collect()
+}
+
+/// One paragraph: its line breaks are spaces.
+fn one_line(text: &str) -> Paragraph {
+    runs(&text.replace('\n', " "))
 }
 
 fn runs(text: &str) -> Paragraph {
@@ -76,6 +81,8 @@ pub struct Field {
     pub ty: TypeRef,
     pub required: bool,
     pub description: Paragraph,
+    /// The spec's example value, for the `curl` lines.
+    example: Option<Value>,
 }
 
 pub struct Body {
@@ -94,6 +101,7 @@ pub struct Answer {
 pub struct Operation {
     pub id: String,
     pub method: &'static str,
+    pub method_class: &'static str,
     pub path: String,
     pub summary: Paragraph,
     pub description: Vec<Paragraph>,
@@ -105,10 +113,6 @@ pub struct Operation {
 }
 
 impl Operation {
-    pub fn method_class(&self) -> String {
-        self.method.to_ascii_lowercase()
-    }
-
     pub fn examples(&self, base: &str) -> Vec<String> {
         self.examples.iter().map(|e| e.replace(ORIGIN, base)).collect()
     }
@@ -127,7 +131,9 @@ pub struct Reference {
     pub schemas: Vec<Schema>,
 }
 
-const METHODS: [&str; 5] = ["get", "post", "patch", "put", "delete"];
+/// As the spec keys them and as the page shows them.
+const METHODS: [(&str, &str); 5] =
+    [("get", "GET"), ("post", "POST"), ("patch", "PATCH"), ("put", "PUT"), ("delete", "DELETE")];
 /// Stands for the instance's origin in the stored `curl` lines.
 const ORIGIN: &str = "\u{0}origin\u{0}";
 
@@ -137,9 +143,9 @@ impl Reference {
         let schemas = spec.pointer("/components/schemas").and_then(Value::as_object).unwrap_or(&empty);
         let mut operations = Vec::new();
         for (path, item) in spec.get("paths").and_then(Value::as_object).unwrap_or(&empty) {
-            for method in METHODS {
-                if let Some(op) = item.get(method) {
-                    operations.push(operation(path, method, op, schemas));
+            for (key, method) in METHODS {
+                if let Some(op) = item.get(key) {
+                    operations.push(operation(path, key, method, op, schemas));
                 }
             }
         }
@@ -186,16 +192,20 @@ fn type_ref(v: &Value) -> TypeRef {
     TypeRef { text, link: None }
 }
 
-/// The description, with the example and the minimum where the spec gives them.
+/// A value as text: a string without its quotes, anything else as JSON.
+fn shown(v: &Value) -> String {
+    v.as_str().map_or_else(|| v.to_string(), str::to_owned)
+}
+
+/// The description, with the example where the spec gives one.
 fn described(v: &Value) -> Paragraph {
-    let mut out = runs(&text_of(v, "description").replace('\n', " "));
+    let mut out = one_line(&text_of(v, "description"));
     if let Some(example) = v.get("example") {
-        let shown = example.as_str().map_or_else(|| example.to_string(), str::to_owned);
         if !out.is_empty() {
             out.push(Run { code: false, text: " ".into() });
         }
         out.push(Run { code: false, text: "Example: ".into() });
-        out.push(Run { code: true, text: shown });
+        out.push(Run { code: true, text: shown(example) });
     }
     out
 }
@@ -216,6 +226,7 @@ fn fields(v: &Value, schemas: &Map<String, Value>) -> Vec<Field> {
             ty: type_ref(p),
             required: required.contains(&name.as_str()),
             description: described(p),
+            example: p.get("example").cloned(),
         })
         .collect()
 }
@@ -229,7 +240,13 @@ fn schema(name: &str, v: &Value, schemas: &Map<String, Value>) -> Schema {
     }
 }
 
-fn operation(path: &str, method: &str, op: &Value, schemas: &Map<String, Value>) -> Operation {
+fn operation(
+    path: &str,
+    method_class: &'static str,
+    method: &'static str,
+    op: &Value,
+    schemas: &Map<String, Value>,
+) -> Operation {
     let params: Vec<Field> = op
         .get("parameters")
         .and_then(Value::as_array)
@@ -241,6 +258,7 @@ fn operation(path: &str, method: &str, op: &Value, schemas: &Map<String, Value>)
                     ty: p.get("schema").map(type_ref).unwrap_or(TypeRef { text: "string".into(), link: None }),
                     required: p.get("required").and_then(Value::as_bool).unwrap_or(false),
                     description: described(p),
+                    example: p.get("example").cloned(),
                 })
                 .collect()
         })
@@ -267,7 +285,7 @@ fn operation(path: &str, method: &str, op: &Value, schemas: &Map<String, Value>)
                     let content = r.get("content").and_then(Value::as_object).and_then(|c| c.iter().next());
                     Answer {
                         status: status.clone(),
-                        description: runs(&text_of(r, "description").replace('\n', " ")),
+                        description: one_line(&text_of(r, "description")),
                         media: content.map(|(m, _)| m.clone()),
                         ty: content.and_then(|(_, c)| c.get("schema")).map(type_ref),
                     }
@@ -275,20 +293,14 @@ fn operation(path: &str, method: &str, op: &Value, schemas: &Map<String, Value>)
                 .collect()
         })
         .unwrap_or_default();
-    let method_upper = match method {
-        "get" => "GET",
-        "post" => "POST",
-        "patch" => "PATCH",
-        "put" => "PUT",
-        _ => "DELETE",
-    };
     Operation {
         id: text_of(op, "operationId").replace('_', "-"),
-        method: method_upper,
+        method,
+        method_class,
         path: path.to_owned(),
         summary: runs(&text_of(op, "summary")),
         description: paragraphs(&text_of(op, "description")),
-        examples: examples(method_upper, path, &params, &bodies, schemas, op),
+        examples: examples(method, path, &params, &bodies),
         params,
         bodies,
         answers,
@@ -297,11 +309,7 @@ fn operation(path: &str, method: &str, op: &Value, schemas: &Map<String, Value>)
 
 /// Example values for path parameters, which the spec does not give.
 fn path_value(name: &str) -> &'static str {
-    match name {
-        "words" => "apple-banana-cherry",
-        "position" => "1",
-        _ => "1",
-    }
+    if name == "words" { "apple-banana-cherry" } else { "1" }
 }
 
 fn quote(s: &str) -> String {
@@ -309,12 +317,12 @@ fn quote(s: &str) -> String {
 }
 
 /// A value for a field in an example body: its example, or a plain one of its type.
-fn example_value(name: &str, p: &Value) -> Value {
-    if let Some(example) = p.get("example") {
+fn example_value(f: &Field) -> Value {
+    if let Some(example) = &f.example {
         return example.clone();
     }
-    let ty = type_ref(p).text;
-    if name == "content" {
+    let ty = &f.ty.text;
+    if f.name == "content" {
         Value::String("Hello from curl".into())
     } else if ty.starts_with("integer") {
         Value::from(1)
@@ -327,14 +335,7 @@ fn example_value(name: &str, p: &Value) -> Value {
 
 /// One `curl` line per request body type (or one without a body): required parameters and
 /// fields only, the rest is in the tables.
-fn examples(
-    method: &str,
-    path: &str,
-    params: &[Field],
-    bodies: &[Body],
-    schemas: &Map<String, Value>,
-    op: &Value,
-) -> Vec<String> {
+fn examples(method: &str, path: &str, params: &[Field], bodies: &[Body]) -> Vec<String> {
     let mut url = format!("{ORIGIN}{path}");
     for p in params.iter().filter(|p| p.place.as_deref() == Some("path")) {
         url = url.replace(&format!("{{{}}}", p.name), path_value(&p.name));
@@ -361,34 +362,22 @@ fn examples(
     bodies
         .iter()
         .map(|b| {
-            let schema = op
-                .pointer("/requestBody/content")
-                .and_then(|c| c.get(&b.media))
-                .and_then(|c| c.get("schema"))
-                .map(|s| resolve(s, schemas))
-                .unwrap_or(&Value::Null);
-            let props = schema.get("properties").and_then(Value::as_object);
             // The required fields, or the text when nothing is required.
             let wanted: Vec<&Field> = match b.fields.iter().filter(|f| f.required).collect::<Vec<_>>() {
                 some if !some.is_empty() => some,
                 _ => b.fields.iter().filter(|f| f.name == "content").collect(),
             };
-            let value = |f: &Field| example_value(&f.name, props.and_then(|p| p.get(&f.name)).unwrap_or(&Value::Null));
             if b.media == "multipart/form-data" {
                 let mut body: Vec<String> = wanted
                     .iter()
-                    .map(|f| {
-                        let v = value(f);
-                        let shown = v.as_str().map_or_else(|| v.to_string(), str::to_owned);
-                        format!("-F {}", quote(&format!("{}={shown}", f.name)))
-                    })
+                    .map(|f| format!("-F {}", quote(&format!("{}={}", f.name, shown(&example_value(f))))))
                     .collect();
                 if b.fields.iter().any(|f| f.name == "file") {
                     body.push(format!("-F {}", quote("file=@notes.txt")));
                 }
                 line(body)
             } else {
-                let object: Map<String, Value> = wanted.iter().map(|f| (f.name.clone(), value(f))).collect();
+                let object: Map<String, Value> = wanted.iter().map(|f| (f.name.clone(), example_value(f))).collect();
                 let json = Value::Object(object).to_string();
                 line(vec![format!("-H {}", quote("Content-Type: application/json")), format!("-d {}", quote(&json))])
             }

@@ -799,10 +799,14 @@ pub async fn delete(st: &AppState, id: PasteId, auth: DeleteAuth, ip: IpAddr, no
     Ok(())
 }
 
+/// The SQL `LIMIT` and `OFFSET` of a page.
+fn page_window(page: u32) -> (i64, i64) {
+    (i64::from(PAGE_SIZE), i64::from(page.saturating_sub(1)) * i64::from(PAGE_SIZE))
+}
+
 /// Live public pastes, newest first, [`PAGE_SIZE`] per page; pages count from 1 (0 is page 1).
 pub async fn list_public(st: &AppState, page: u32, now: i64) -> Result<Vec<Paste>, Error> {
-    let offset = i64::from(page.saturating_sub(1)) * i64::from(PAGE_SIZE);
-    let limit = i64::from(PAGE_SIZE);
+    let (limit, offset) = page_window(page);
     let rows = sqlx::query_as!(
         Row,
         r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", length(content) AS "content_len!: i64",
@@ -826,8 +830,7 @@ pub async fn list_public(st: &AppState, page: u32, now: i64) -> Result<Vec<Paste
 /// Live pastes of every level, newest first, [`PAGE_SIZE`] per page like [`list_public`], for
 /// the admin table.
 pub async fn list_all(st: &AppState, page: u32, now: i64) -> Result<Vec<Paste>, Error> {
-    let offset = i64::from(page.saturating_sub(1)) * i64::from(PAGE_SIZE);
-    let limit = i64::from(PAGE_SIZE);
+    let (limit, offset) = page_window(page);
     let rows = sqlx::query_as!(
         Row,
         r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", length(content) AS "content_len!: i64",

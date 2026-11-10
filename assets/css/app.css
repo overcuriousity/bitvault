@@ -89,7 +89,7 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-mono { font-family: var(--font-mono); }
 .bv-check { display: flex; align-items: center; gap: var(--space-2); }
 .bv-hint { margin-top: var(--space-1); color: var(--color-fg-muted); font-size: var(--text-micro); }
-.bv-hint[hidden], .bv-hint:empty { display: none; }
+.bv-hint:empty { display: none; }
 
 /* A label with its "?" link to the guide. */
 .bv-label { display: flex; align-items: center; gap: var(--space-1); }
@@ -100,18 +100,15 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-create { padding-top: var(--space-5); }
 .bv-box { gap: var(--space-1); }
 .bv-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-.bv-chips[hidden] { display: none; }
 .bv-chip { height: auto; min-height: 1.75rem; padding: 0 var(--space-2); font-family: var(--font-mono); font-size: var(--text-dense); }
 .bv-chip:first-child { border-color: var(--color-accent); }
-.bv-options > summary { width: fit-content; padding-block: var(--space-1); font-weight: 500; color: var(--color-fg-secondary); cursor: pointer; }
-.bv-options__summary { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
+.bv-options > summary, .bv-attach > summary { width: fit-content; padding-block: var(--space-1); font-weight: 500; color: var(--color-fg-secondary); cursor: pointer; }
+.bv-options__summary, .bv-attach__hint { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
 .bv-options__body { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); }
 .bv-options[open] > .bv-options__body { animation: bv-reveal var(--motion-panel) var(--ease); }
 .bv-options__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: var(--space-3); align-items: end; }
 @keyframes bv-reveal { from { opacity: 0; translate: 0 calc(-1 * var(--space-2)); } }
-.bv-attach > summary { width: fit-content; padding-block: var(--space-1); font-weight: 500; color: var(--color-fg-secondary); cursor: pointer; }
 .bv-attach > .bv-files { margin-top: var(--space-2); }
-.bv-attach__hint { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
 
 /* What the box will do, without words. box.js sets data-box: "open" when Enter or the button
    opens the paste the words name (green, and the button's plus turns into an arrow),

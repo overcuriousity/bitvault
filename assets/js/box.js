@@ -5,7 +5,7 @@
 //
 // Enter on a box that is one line of three words opens that paste, the quick way in. It only ever
 // opens: words no paste has stay in the box with a note, and keeping them takes the button.
-import { accept, addressLike, chips, choose, readAddress } from "./words.js";
+import { accept, addressLike, chips, choose, MAX_TYPED, readAddress, settled } from "./words.js";
 
 // Long enough that a lookup waits for a pause in typing, short enough to answer before a press.
 const LOOKUP_DELAY = 350;
@@ -53,7 +53,6 @@ export function bindBox(form) {
   const files = form.querySelector("#files");
   if (!box || !echo || !submit) return { decide: async () => ({}) };
 
-  const idleEcho = echo.textContent;
   const label = submit.querySelector(".bv-go__label") ?? submit;
   const idleLabel = label.textContent;
   const results = new Map();
@@ -90,32 +89,35 @@ export function bindBox(form) {
     if (el.textContent !== text) el.textContent = text;
   };
 
+  // The words now in the chip row, so a key or click that changes nothing rebuilds nothing.
+  let shownChips = "";
   const renderChips = () => {
-    const found = words && box.selectionEnd === box.value.length ? chips(box.value, words) : null;
     if (!chipRow) return;
-    if (!found) {
-      chipRow.hidden = true;
-      chipRow.replaceChildren();
-      return;
-    }
+    const found = words && box.selectionEnd === box.value.length ? chips(box.value, words) : null;
+    const fits = found ? found.fits : [];
+    const key = fits.join(" ");
+    if (key === shownChips) return;
+    shownChips = key;
     chipRow.replaceChildren(
-      ...found.fits.map((word) => {
+      ...fits.map((word) => {
         const b = document.createElement("button");
         b.type = "button";
         b.className = "oc-btn bv-chip";
         b.textContent = word;
-        b.addEventListener("click", () => {
-          const next = choose(box.value, words, word);
-          if (next !== null) box.value = next;
-          box.focus();
-          box.setSelectionRange(box.value.length, box.value.length);
-          update();
-        });
         return b;
       }),
     );
-    chipRow.hidden = false;
+    chipRow.hidden = fits.length === 0;
   };
+  chipRow?.addEventListener("click", (event) => {
+    const chip = event.target.closest(".bv-chip");
+    if (!chip) return;
+    const next = choose(box.value, words, chip.textContent);
+    if (next !== null) box.value = next;
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+    update();
+  });
 
   // The form's look follows the box, for those who never read the line under it: "open" turns
   // the box and the button green with an arrow, "attention" amber. See app.css.
@@ -140,10 +142,12 @@ export function bindBox(form) {
     }
   };
 
+  // Returns the reading it drew.
   function render() {
     size();
-    const { state, address } = reading();
-    setText(echo, echoFor(state, address) ?? idleEcho);
+    const read = reading();
+    const { state, address } = read;
+    setText(echo, echoFor(state, address) ?? "");
     const opens = state === "found";
     setText(label, opens ? "Open paste" : idleLabel);
     if (keep) keep.hidden = !opens;
@@ -151,6 +155,7 @@ export function bindBox(form) {
     if (shown) form.dataset.box = shown;
     else delete form.dataset.box;
     renderChips();
+    return read;
   }
 
   // A short shake when Enter cannot open what is in the box.
@@ -170,19 +175,27 @@ export function bindBox(form) {
     if (event.persisted) render();
   });
 
-  function update() {
-    render();
+  // The lookup's answer for `address`, asked once and remembered; null when it could not be asked.
+  // Asking now replaces the lookup that was waiting for a pause in typing.
+  const resolve = async (address) => {
     clearTimeout(timer);
-    const { state, address } = reading();
+    const known = results.get(address);
+    if (known) return known;
+    try {
+      const result = await lookup(address);
+      results.set(address, result);
+      return result;
+    } catch {
+      return null;
+    }
+  };
+
+  function update() {
+    const { state, address } = render();
+    clearTimeout(timer);
     if (state !== "checking") return;
-    const last = box.value.trim().toLowerCase().split(/[\s-]+/).pop() ?? "";
-    const settled = words.filter((w) => w.startsWith(last)).length === 1;
-    timer = setTimeout(() => {
-      lookup(address)
-        .then((result) => results.set(address, result))
-        .catch(() => results.delete(address))
-        .finally(render);
-    }, settled ? SETTLED_DELAY : LOOKUP_DELAY);
+    const delay = settled(box.value, words) ? SETTLED_DELAY : LOOKUP_DELAY;
+    timer = setTimeout(() => resolve(address).then(render), delay);
   }
 
   // Enter in an address-shaped box: open the paste, or say why not. Anything else gets its new
@@ -200,23 +213,14 @@ export function bindBox(form) {
       render();
       return nudge();
     }
-    clearTimeout(timer);
-    let result = results.get(read.address);
-    if (!result) {
-      try {
-        result = await lookup(read.address);
-        results.set(read.address, result);
-      } catch {
-        return render();
-      }
-    }
+    const result = await resolve(read.address);
     if (result === "found") return opening(read.address);
     render();
-    nudge();
+    if (result) nudge();
   };
   box.addEventListener("beforeinput", (event) => {
     if (event.inputType !== "insertLineBreak" || event.isComposing) return;
-    const looksLikeWords = /^\s*[a-z]+(?:[\s-]+[a-z]+){0,2}\s*$/i.test(box.value) && box.value.length <= 64;
+    const looksLikeWords = /^\s*[a-z]+(?:[\s-]+[a-z]+){0,2}\s*$/i.test(box.value) && box.value.length <= MAX_TYPED;
     if (!looksLikeWords || box.selectionEnd !== box.value.length) return;
     event.preventDefault();
     enter();
@@ -265,17 +269,9 @@ export function bindBox(form) {
       const read = readAddress(box.value.trim(), words);
       if (!read) return {};
       if (read.ambiguous) return { intent: "create" };
-      clearTimeout(timer);
-      let result = results.get(read.address);
-      if (!result) {
-        try {
-          result = await lookup(read.address);
-          results.set(read.address, result);
-        } catch {
-          // Unknown: leave it to the server.
-          return {};
-        }
-      }
+      const result = await resolve(read.address);
+      // Unknown: leave it to the server.
+      if (!result) return {};
       render();
       if (result === "found") form.dataset.box = "opening";
       return result === "found" ? { open: `/${read.address}` } : { intent: "create" };

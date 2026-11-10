@@ -14,7 +14,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use serde::Deserialize;
 
-use super::{DeletedQuery, Extras, TimeView, date, icon, page, page_with, privacy_label, render, size};
+use super::{DeletedQuery, Extras, PageQuery, TimeView, date, icon, page, page_with, privacy_label, render, size};
 use crate::assets::Assets;
 use crate::config::Config;
 use crate::domain::admin::{COOKIE, PLAIN_COOKIE};
@@ -210,11 +210,6 @@ struct Table {
     settings: Vec<(&'static str, String)>,
 }
 
-#[derive(Deserialize)]
-struct PageQuery {
-    page: Option<u32>,
-}
-
 async fn table(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
@@ -225,10 +220,9 @@ async fn table(
         return Ok(Redirect::to("/admin/sign-in").into_response());
     }
     let now = domain::now();
-    let number = at.page.unwrap_or(1).max(1);
-    let pastes = paste::list_all(&st, number, now).await?;
-    let totals = paste::totals(&st, now).await?;
-    let full = pastes.len() == paste::PAGE_SIZE as usize;
+    let number = at.number();
+    let (pastes, totals) = tokio::try_join!(paste::list_all(&st, number, now), paste::totals(&st, now))?;
+    let (newer, older) = super::neighbours(number, pastes.len());
     let rows = pastes
         .iter()
         .map(|p| Row {
@@ -246,8 +240,8 @@ async fn table(
         .collect();
     let body = render(&Table {
         count: totals.pastes,
-        newer: (number > 1).then(|| number - 1),
-        older: full.then(|| number.saturating_add(1)),
+        newer,
+        older,
         rows,
         deleted: q.notice(),
         content_size: size(totals.content_bytes),
