@@ -73,3 +73,48 @@ async fn the_migration_creates_both_tables() {
     assert!(names.contains(&"pastes".to_string()));
     assert!(names.contains(&"paste_files".to_string()));
 }
+
+#[test]
+fn an_unambiguous_prefix_of_four_letters_or_more_stands_for_its_word() {
+    let full = words::parse("happy-apple-banana").unwrap();
+    assert_eq!(words::parse("happ appl bana").unwrap(), full);
+    assert_eq!(words::parse("HAPPY appl-banan").unwrap(), full);
+}
+
+#[test]
+fn every_word_is_found_from_its_first_four_letters() {
+    for (i, word) in words::list().iter().enumerate() {
+        let prefix: String = word.chars().take(4).collect();
+        let id = words::parse(&format!("{prefix} abandon abandon")).unwrap();
+        assert_eq!(id.0 >> 22, i as u64, "{prefix} must stand for {word}");
+    }
+}
+
+#[test]
+fn a_word_shorter_than_four_letters_must_be_typed_in_full() {
+    assert_eq!(words::parse("act add zoo").unwrap(), words::parse("act-add-zoo").unwrap());
+    match words::parse("hap apple banana") {
+        Err(Error::Invalid(m)) => assert_eq!(m, "\"hap\" is too short. Type at least four letters of each word."),
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+#[test]
+fn a_prefix_that_fits_several_words_is_named_in_the_error() {
+    let list = ["happen", "happy", "harbor"];
+    match words::find_in(&list, "happ") {
+        Err(Error::Invalid(m)) => assert_eq!(m, "\"happ\" fits more than one paste word. Type more letters."),
+        other => panic!("unexpected {other:?}"),
+    }
+    assert_eq!(words::find_in(&list, "happy").unwrap(), 1);
+    assert_eq!(words::find_in(&list, "harb").unwrap(), 2);
+}
+
+#[test]
+fn the_browser_word_list_matches_the_server_list() {
+    let asset = bitvault::assets::Assets::get("bip39-english.txt").expect("the word list asset");
+    let text = std::str::from_utf8(&asset.data).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines, words::list());
+    assert!(text.ends_with('\n') && !text.ends_with("\n\n"));
+}

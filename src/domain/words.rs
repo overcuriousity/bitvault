@@ -21,7 +21,12 @@ impl PasteId {
     }
 }
 
-/// Accepts words separated by spaces and/or hyphens, in any case.
+/// The shortest prefix that may stand for a word. BIP39 English words differ in their first
+/// four letters, so four letters always name one word.
+pub const PREFIX_LEN: usize = 4;
+
+/// Accepts words separated by spaces and/or hyphens, in any case, each in full or as a prefix of
+/// at least [`PREFIX_LEN`] letters.
 pub fn parse(input: &str) -> Result<PasteId, Error> {
     let lowered = input.to_lowercase();
     let parts: Vec<&str> = lowered.split(|c: char| c.is_whitespace() || c == '-').filter(|p| !p.is_empty()).collect();
@@ -30,12 +35,31 @@ pub fn parse(input: &str) -> Result<PasteId, Error> {
     }
     let mut id = 0u64;
     for part in parts {
-        let index = WORDS
-            .binary_search(&part)
-            .map_err(|_| Error::Invalid(format!("\"{part}\" is not one of the paste words. Check the spelling.")))?;
-        id = (id << WORD_BITS) | index as u64;
+        id = (id << WORD_BITS) | find_in(&WORDS, part)? as u64;
     }
     Ok(PasteId(id))
+}
+
+/// The index in the sorted `list` of the word that `part` spells in full or begins.
+pub fn find_in(list: &[&str], part: &str) -> Result<usize, Error> {
+    if let Ok(index) = list.binary_search(&part) {
+        return Ok(index);
+    }
+    let start = list.partition_point(|w| *w < part);
+    let fits = list[start..].iter().take_while(|w| w.starts_with(part)).count();
+    match fits {
+        0 => Err(Error::Invalid(format!("\"{part}\" is not one of the paste words. Check the spelling."))),
+        _ if part.chars().count() < PREFIX_LEN => {
+            Err(Error::Invalid(format!("\"{part}\" is too short. Type at least four letters of each word.")))
+        }
+        1 => Ok(start),
+        _ => Err(Error::Invalid(format!("\"{part}\" fits more than one paste word. Type more letters."))),
+    }
+}
+
+/// The 2048 words in index order.
+pub fn list() -> &'static [&'static str] {
+    &WORDS
 }
 
 /// Lookup relies on the list being alphabetical.
@@ -43,6 +67,8 @@ pub fn word_list_is_sorted() -> bool {
     WORDS.windows(2).all(|w| w[0] < w[1])
 }
 
+// `assets/bip39-english.txt` is this list, one word per line, for the browser's suggestions;
+// a test keeps the two equal.
 static WORDS: [&str; 2048] = [
     "abandon", "ability", "able", "about", "above", "absent", "absorb", "abstract", "absurd", "abuse", "access",
     "accident", "account", "accuse", "achieve", "acid", "acoustic", "acquire", "across", "act", "action", "actor",
