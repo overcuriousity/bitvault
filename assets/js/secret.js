@@ -82,17 +82,10 @@ function save(bytes, name) {
   setTimeout(() => URL.revokeObjectURL(url), REVOKE_AFTER_MS);
 }
 
-// The server renders no Copy text button for a secret paste, as it has no text; once opened,
-// the button is added to the toolbar, shaped like its neighbour.
-function addCopyText(view) {
-  const toolbar = view.querySelector(".bv-actions");
-  const model = toolbar?.querySelector("[data-oc-copy]");
-  if (!toolbar || !model || toolbar.querySelector("[data-bv-copy-target]")) return;
-  const button = model.cloneNode(true);
-  button.removeAttribute("data-oc-copy");
-  button.dataset.bvCopyTarget = "paste-text";
-  button.lastChild.textContent = "Copy text";
-  toolbar.append(button);
+// The server renders the Copy text button hidden for a secret paste; it has no text to copy until now.
+function showCopyText(view) {
+  const button = view.querySelector(".bv-actions [data-bv-copy-target]");
+  if (button) button.hidden = false;
 }
 
 function setBusy(form, busy) {
@@ -197,7 +190,7 @@ function bind(view) {
       state.names = files;
       fillLines(target, text);
       target.hidden = false;
-      addCopyText(view);
+      showCopyText(view);
       form.hidden = true;
       if (state.grant) {
         showNotice(

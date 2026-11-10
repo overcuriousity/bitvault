@@ -962,10 +962,20 @@ async fn the_toolbar_has_copy_link_share_qr_raw_and_copy_text() {
 }
 
 #[tokio::test]
-async fn copy_text_is_absent_for_secret_url_and_file_only_pastes() {
+async fn a_secret_page_has_a_hidden_copy_text_button_until_decrypted() {
     let app = app().await;
     let secret = create(&app, secret(0)).await;
-    assert!(!body_text(app.get(&format!("/{secret}")).await).await.contains("data-bv-copy-target"));
+    let html = body_text(app.get(&format!("/{secret}")).await).await;
+    let at = position(&html, "data-bv-copy-target=\"paste-text\"");
+    let tag = &html[html[..at].rfind("<button").unwrap()..at + html[at..].find('>').unwrap()];
+    assert!(tag.ends_with(" hidden"), "{tag}");
+    assert!(html[at..].contains("Copy text") && tag.contains("oc-btn"), "{tag}");
+    assert!(html.contains("id=\"paste-text\" hidden"), "the text itself is hidden too");
+}
+
+#[tokio::test]
+async fn copy_text_is_absent_for_url_and_file_only_pastes() {
+    let app = app().await;
     let url = create(&app, new("https://example.com/x", Privacy::Public)).await;
     assert!(!body_text(app.get(&format!("/{url}?view")).await).await.contains("data-bv-copy-target"));
     let files = create_with_file(&app, new("", Privacy::Public), "a.bin", b"x").await;
