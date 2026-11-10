@@ -346,32 +346,38 @@ fn redirect_to(target: &str) -> Result<Response, Error> {
     Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response())
 }
 
-/// The query of `GET /{words}`, read leniently: anything unknown or malformed is ignored.
-struct ViewQuery {
-    /// `?c=`, the creator token of a web create's redirect.
-    creator: Option<String>,
-    /// `?view`: a URL paste's page instead of its redirect.
-    page: bool,
+/// The cookie that carries a creator token from `POST /` to the paste page it redirects to.
+/// Unlike a query parameter, it is not in the address the creator might share.
+pub(crate) const CREATED_COOKIE: &str = "bitvault-created";
+
+/// `Set-Cookie` for the creator cookie, scoped to `/{words}`: `token` for `max_age` seconds, or
+/// cleared with an empty token and 0.
+pub(crate) fn created_cookie(st: &AppState, words: &str, token: &str, max_age: i64) -> Result<HeaderValue, Error> {
+    let secure = if st.dep.secure { "; Secure" } else { "" };
+    let cookie = format!("{CREATED_COOKIE}={token}; Path=/{words}; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}");
+    HeaderValue::from_str(&cookie).map_err(Error::internal)
 }
 
-impl ViewQuery {
-    fn parse(raw: Option<&str>) -> Self {
-        let mut q = Self { creator: None, page: false };
-        for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
-            match &*key {
-                "c" if q.creator.is_none() => q.creator = Some(value.into_owned()),
-                "view" => q.page = true,
-                _ => {}
-            }
-        }
-        q
-    }
+/// Every creator cookie value the request carries.
+fn created_tokens(headers: &HeaderMap) -> Vec<&str> {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|pair| pair.trim().strip_prefix(CREATED_COOKIE)?.strip_prefix('='))
+        .collect()
+}
+
+/// `?view` in the query of `GET /{words}`, read leniently: anything else is ignored.
+fn wants_page(query: Option<&str>) -> bool {
+    url::form_urlencoded::parse(query.unwrap_or_default().as_bytes()).any(|(key, _)| key == "view")
 }
 
 /// `GET /{words}`: content for plaintext levels (a read), the unlock form for private (no
 /// read), and an empty shell for secret, which the browser fills from `/raw`. A URL paste
-/// redirects, or shows its page with `?view`; both count a read. A valid creator token shows
-/// the creator view instead; an invalid one is ignored.
+/// redirects, or shows its page with `?view`; both count a read. A valid creator cookie shows
+/// the creator view instead, once: any creator cookie, valid or not, is cleared.
 async fn view(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
@@ -379,27 +385,45 @@ async fn view(
     method: Method,
     Path(words): Path<String>,
     RawQuery(query): RawQuery,
+    headers: HeaderMap,
 ) -> Result<Response, Error> {
     let id = paste_id(&words)?;
     let now = domain::now();
-    let q = ViewQuery::parse(query.as_deref());
-    if q.creator.is_some_and(|c| grant::check_creator(&st.grant_key, &c, id, now)) {
-        return render_creator(&st, admin, id, now).await;
+    let tokens = created_tokens(&headers);
+    let mut res = if tokens.iter().any(|t| grant::check_creator(&st.grant_key, t, id, now)) {
+        render_creator(&st, admin, id, now).await?
+    } else {
+        ordinary_view(&st, admin, ip, &method, id, now, wants_page(query.as_deref())).await?
+    };
+    if !tokens.is_empty() {
+        res.headers_mut().append(header::SET_COOKIE, created_cookie(&st, &id.words(), "", 0)?);
     }
-    let p = paste::meta(&st, id, now).await?;
+    Ok(res)
+}
+
+async fn ordinary_view(
+    st: &AppState,
+    admin: bool,
+    ip: std::net::IpAddr,
+    method: &Method,
+    id: PasteId,
+    now: i64,
+    page: bool,
+) -> Result<Response, Error> {
+    let p = paste::meta(st, id, now).await?;
     match p.privacy {
         // Only the form: a private paste's file names and sizes are private as well.
-        Privacy::Private => unlock_page(&st, admin, id.words(), None, StatusCode::OK),
+        Privacy::Private => unlock_page(st, admin, id.words(), None, StatusCode::OK),
         Privacy::Secret => {
-            let view = paste_view(&st, admin, &p, Shown::Secret, None, false);
-            render_paste(&st, admin, &view, &id.words())
+            let view = paste_view(st, admin, &p, Shown::Secret, None, false);
+            render_paste(st, admin, &view, &id.words())
         }
-        _ if method == Method::HEAD => Ok(head_only(HTML)),
+        _ if *method == Method::HEAD => Ok(head_only(HTML)),
         _ => {
-            let opened = paste::read(&st, id, Access::Anonymous, ip, now).await?;
+            let opened = paste::read(st, id, Access::Anonymous, ip, now).await?;
             match &opened.body {
-                Body::Url(target) if !q.page => redirect_to(target),
-                _ => render_opened(&st, admin, &opened).await,
+                Body::Url(target) if !page => redirect_to(target),
+                _ => render_opened(st, admin, &opened).await,
             }
         }
     }

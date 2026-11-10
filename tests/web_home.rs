@@ -23,14 +23,15 @@ async fn the_form_offers_only_configured_privacy_levels_and_expiries() {
 }
 
 #[tokio::test]
-async fn creating_a_text_paste_redirects_to_its_words_with_a_creator_token() {
+async fn creating_a_text_paste_redirects_to_its_words_with_a_creator_cookie() {
     let app = app().await;
     let res = app.post_multipart("/", &[("content", None, b"hello"), ("privacy", None, b"unlisted")]).await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     let location = res.headers()[header::LOCATION].to_str().unwrap();
-    let (path, token) = location.split_once("?c=").unwrap();
-    assert!(words_shape(path), "{location}");
-    let id = bitvault::domain::words::parse(path.trim_start_matches('/')).unwrap();
+    assert!(words_shape(location), "{location}");
+    let (words, cookie) = support::created(&res);
+    let id = bitvault::domain::words::parse(&words).unwrap();
+    let token = cookie.split_once('=').unwrap().1;
     assert!(bitvault::domain::grant::check_creator(&app.st.grant_key, token, id, bitvault::domain::now()));
 }
 

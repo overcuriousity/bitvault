@@ -81,6 +81,17 @@ impl App {
         self.send(self.req("GET", uri).header(header::ACCEPT, "text/html").body(Body::empty()).unwrap()).await
     }
 
+    /// A page GET that also sends `cookie` (`name=value`), next to any session cookie.
+    pub async fn get_with_cookie(&self, uri: &str, cookie: &str) -> Response<Body> {
+        let all = match &self.cookie {
+            Some(session) => format!("{session}; {cookie}"),
+            None => cookie.to_owned(),
+        };
+        let mut r = Request::builder().method("GET").uri(uri).header(header::HOST, &self.origin.0);
+        r = r.header(header::ACCEPT, "text/html").header(header::COOKIE, all);
+        self.send(r.body(Body::empty()).unwrap()).await
+    }
+
     pub async fn post_form(&self, uri: &str, form: &str) -> Response<Body> {
         let r = self
             .req("POST", uri)
@@ -135,13 +146,19 @@ pub fn multipart_parts(parts: &[(&str, Option<&str>, &[u8])]) -> Vec<u8> {
     body
 }
 
-/// The paste words and the `?c=` creator token of a web create's redirect.
+/// The name of the creator cookie a web create sets.
+pub const CREATED_COOKIE: &str = "bitvault-created";
+
+/// The paste words of a web create's redirect, and its creator cookie as `name=value` for a
+/// `Cookie` header.
 pub fn created(res: &Response<Body>) -> (String, String) {
     assert_eq!(res.status(), axum::http::StatusCode::SEE_OTHER, "the create did not redirect");
     let location = res.headers()[header::LOCATION].to_str().unwrap();
-    let (path, query) = location.split_once('?').unwrap_or((location, ""));
-    let token = query.strip_prefix("c=").unwrap_or_else(|| panic!("no creator token in {location}"));
-    (path.trim_start_matches('/').to_owned(), token.to_owned())
+    assert!(!location.contains('?'), "the redirect carries no query: {location}");
+    let set = res.headers().get(header::SET_COOKIE).expect("the create sets the creator cookie").to_str().unwrap();
+    let pair = set.split(';').next().unwrap().trim();
+    assert!(pair.starts_with(&format!("{CREATED_COOKIE}=")), "{set}");
+    (location.trim_start_matches('/').to_owned(), pair.to_owned())
 }
 
 pub async fn body_text(res: Response<Body>) -> String {

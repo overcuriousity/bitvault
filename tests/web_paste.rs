@@ -625,21 +625,49 @@ async fn an_edit_of_almost_a_mebibyte_of_text_is_saved_and_a_larger_one_refused(
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
 
-fn location(res: &axum::http::Response<Body>) -> String {
-    res.headers()[header::LOCATION].to_str().unwrap().to_owned()
-}
-
 fn id_of(words: &str) -> bitvault::domain::words::PasteId {
     bitvault::domain::words::parse(words).unwrap()
+}
+
+fn creator_cookie(app: &App, words: &str, now: i64) -> String {
+    let token = bitvault::domain::grant::issue_creator(&app.st.grant_key, id_of(words), now);
+    format!("{}={token}", support::CREATED_COOKIE)
+}
+
+fn set_cookie(res: &axum::http::Response<Body>) -> Option<String> {
+    res.headers().get(header::SET_COOKIE).map(|v| v.to_str().unwrap().to_owned())
+}
+
+fn cleared(words: &str) -> String {
+    format!("{}=; Path=/{words}; HttpOnly; SameSite=Lax; Max-Age=0", support::CREATED_COOKIE)
+}
+
+#[tokio::test]
+async fn a_web_create_sets_a_creator_cookie_for_the_paste_path_only() {
+    let app = app().await;
+    let res = app.post_multipart("/", &[("content", None, b"hello")]).await;
+    let (w, cookie) = support::created(&res);
+    assert_eq!(res.headers()[header::LOCATION], format!("/{w}").as_str());
+    let token = cookie.split_once('=').unwrap().1;
+    assert!(bitvault::domain::grant::check_creator(&app.st.grant_key, token, id_of(&w), domain::now()));
+    assert_eq!(set_cookie(&res).unwrap(), format!("{cookie}; Path=/{w}; HttpOnly; SameSite=Lax; Max-Age=600"));
+
+    let mut secure = app_with("public_url = \"https://paste.example\"\n").await;
+    secure.origin = ("paste.example".into(), "https://paste.example".into());
+    let res = secure.post_multipart("/", &[("content", None, b"hello")]).await;
+    let (w, cookie) = support::created(&res);
+    let expected = format!("{cookie}; Path=/{w}; HttpOnly; SameSite=Lax; Max-Age=600; Secure");
+    assert_eq!(set_cookie(&res).unwrap(), expected);
+    let res = secure.get_with_cookie(&format!("/{w}"), &cookie).await;
+    assert_eq!(set_cookie(&res).unwrap(), format!("{}; Secure", cleared(&w)));
 }
 
 #[tokio::test]
 async fn creating_a_url_paste_shows_its_words_instead_of_redirecting() {
     let app = app().await;
     let res = app.post_multipart("/", &[("content", None, b"https://example.com/target?a=1&b=2")]).await;
-    let (w, token) = support::created(&res);
-    assert_eq!(location(&res), format!("/{w}?c={token}"));
-    let res = app.get(&location(&res)).await;
+    let (w, cookie) = support::created(&res);
+    let res = app.get_with_cookie(&format!("/{w}"), &cookie).await;
     assert_eq!(res.status(), StatusCode::OK);
     let html = body_text(res).await;
     assert!(html.contains("Paste created."), "{html}");
@@ -655,48 +683,87 @@ async fn creating_a_url_paste_shows_its_words_instead_of_redirecting() {
 }
 
 #[tokio::test]
+async fn the_creator_view_is_single_use_and_clears_its_cookie() {
+    let app = app().await;
+    let res = app.post_multipart("/", &[("content", None, b"plain words")]).await;
+    let (w, cookie) = support::created(&res);
+    let res = app.get_with_cookie(&format!("/{w}"), &cookie).await;
+    assert_eq!(set_cookie(&res).unwrap(), cleared(&w));
+    assert!(body_text(res).await.contains("Paste created."));
+    assert_eq!(read_count(&app, &w).await, 0);
+    // The browser has dropped the cleared cookie, so the next visit is an ordinary read.
+    let res = app.get(&format!("/{w}")).await;
+    assert!(set_cookie(&res).is_none());
+    let html = body_text(res).await;
+    assert!(html.contains("plain words") && !html.contains("Paste created."), "{html}");
+    assert_eq!(read_count(&app, &w).await, 1);
+}
+
+#[tokio::test]
 async fn the_creator_view_does_not_burn_a_burn_after_one_paste() {
     let app = app().await;
     let res = app.post_multipart("/", &[("content", None, b"only once"), ("burn_after_reads", None, b"1")]).await;
-    let (w, _) = support::created(&res);
-    let creator = location(&res);
-    for _ in 0..2 {
-        let html = body_text(app.get(&creator).await).await;
-        assert!(html.contains("only once") && html.contains("Paste created."), "{html}");
-        assert!(!html.contains("That was the last read"));
-    }
+    let (w, cookie) = support::created(&res);
+    let html = body_text(app.get_with_cookie(&format!("/{w}"), &cookie).await).await;
+    assert!(html.contains("only once") && html.contains("Paste created."), "{html}");
+    assert!(!html.contains("That was the last read"));
     assert_eq!(read_count(&app, &w).await, 0);
     let html = body_text(app.get(&format!("/{w}")).await).await;
     assert!(html.contains("only once") && html.contains("That was the last read"), "{html}");
     assert!(!html.contains("Paste created."));
     assert_eq!(app.get(&format!("/{w}")).await.status(), StatusCode::NOT_FOUND);
-    assert_eq!(app.get(&creator).await.status(), StatusCode::NOT_FOUND);
+    assert_eq!(app.get_with_cookie(&format!("/{w}"), &cookie).await.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
-async fn a_forged_or_expired_creator_token_is_ignored() {
+async fn a_forged_expired_or_misplaced_creator_cookie_is_ignored_and_cleared() {
     use bitvault::domain::grant;
     let app = app().await;
     let url = create(&app, new("https://example.com/target", Privacy::Unlisted)).await;
     let text = create(&app, new("plain words", Privacy::Unlisted)).await;
-    let key = &app.st.grant_key;
     let now = domain::now();
+    let name = support::CREATED_COOKIE;
     let refused = [
-        "forged".to_owned(),
-        String::new(),
-        grant::issue_creator(key, id_of(&url), now - 601),
-        grant::issue(key, id_of(&url), None, now),
-        grant::issue_creator(key, id_of(&text), now),
+        format!("{name}=forged"),
+        format!("{name}="),
+        creator_cookie(&app, &url, now - 601),
+        format!("{name}={}", grant::issue(&app.st.grant_key, id_of(&url), None, now)),
+        // Another paste's cookie, as if sent to this paste's path.
+        creator_cookie(&app, &text, now),
     ];
-    for c in &refused {
-        let res = app.get(&format!("/{url}?c={c}")).await;
-        assert_eq!(res.status(), StatusCode::FOUND, "{c}");
+    for cookie in &refused {
+        let res = app.get_with_cookie(&format!("/{url}"), cookie).await;
+        assert_eq!(res.status(), StatusCode::FOUND, "{cookie}");
         assert_eq!(res.headers()[header::LOCATION], "https://example.com/target");
+        assert_eq!(set_cookie(&res).unwrap(), cleared(&url), "{cookie}");
     }
     assert_eq!(read_count(&app, &url).await, refused.len() as u64);
-    let html = body_text(app.get(&format!("/{text}?c=forged")).await).await;
+    let res = app.get_with_cookie(&format!("/{text}"), &creator_cookie(&app, &url, now)).await;
+    assert_eq!(set_cookie(&res).unwrap(), cleared(&text));
+    let html = body_text(res).await;
     assert!(html.contains("plain words") && !html.contains("Paste created."), "{html}");
     assert_eq!(read_count(&app, &text).await, 1);
+}
+
+#[tokio::test]
+async fn without_the_cookie_a_url_paste_redirects_and_a_text_paste_counts() {
+    let app = app().await;
+    let res = app.post_multipart("/", &[("content", None, b"https://example.com/target")]).await;
+    let (url, _) = support::created(&res);
+    let res = app.post_multipart("/", &[("content", None, b"plain words")]).await;
+    let (text, _) = support::created(&res);
+    let res = app.get(&format!("/{url}")).await;
+    assert_eq!(res.status(), StatusCode::FOUND);
+    assert!(set_cookie(&res).is_none());
+    let html = body_text(app.get(&format!("/{text}")).await).await;
+    assert!(html.contains("plain words") && !html.contains("Paste created."), "{html}");
+    assert_eq!((read_count(&app, &url).await, read_count(&app, &text).await), (1, 1));
+    // The query transport is gone: a token in the address is just an unknown parameter.
+    let c = creator_cookie(&app, &text, domain::now());
+    let token = c.split_once('=').unwrap().1;
+    let html = body_text(app.get(&format!("/{text}?c={token}")).await).await;
+    assert!(!html.contains("Paste created."), "{html}");
+    assert_eq!(read_count(&app, &text).await, 2);
 }
 
 #[tokio::test]
@@ -730,14 +797,16 @@ async fn the_creator_view_of_a_private_paste_shows_no_content() {
         ("file", Some("salary-report.pdf"), b"file body"),
     ];
     let res = app.post_multipart("/", parts).await;
-    let (w, _) = support::created(&res);
-    let res = app.get(&location(&res)).await;
+    let (w, cookie) = support::created(&res);
+    let res = app.get_with_cookie(&format!("/{w}"), &cookie).await;
     assert_eq!(res.status(), StatusCode::OK);
     let html = body_text(res).await;
     assert!(html.contains("Paste created.") && html.contains("Encrypted. Open it with its password."), "{html}");
     assert!(!html.contains("quietly kept text"));
     assert!(!html.contains("salary-report"));
-    assert!(!html.contains(&format!("/{w}/raw")), "raw text needs the password");
+    for hidden in ["/raw", "/file/", "/zip"] {
+        assert!(!html.contains(&format!("/{w}{hidden}")), "no {hidden} link without the password");
+    }
     assert!(grant_links(&html).is_empty());
     assert!(html.contains(&format!("action=\"/{w}/delete\"")), "the creator can still delete it");
     assert_eq!(read_count(&app, &w).await, 0);
@@ -747,7 +816,8 @@ async fn the_creator_view_of_a_private_paste_shows_no_content() {
 async fn the_creator_view_carries_no_store() {
     let app = app().await;
     let res = app.post_multipart("/", &[("content", None, b"hello")]).await;
-    let res = app.get(&location(&res)).await;
+    let (w, cookie) = support::created(&res);
+    let res = app.get_with_cookie(&format!("/{w}"), &cookie).await;
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
     assert!(body_text(res).await.contains("Paste created."));
@@ -757,8 +827,7 @@ async fn the_creator_view_carries_no_store() {
 async fn the_creator_view_of_a_secret_paste_is_the_secret_shell() {
     let app = app().await;
     let w = create(&app, secret(1)).await;
-    let c = bitvault::domain::grant::issue_creator(&app.st.grant_key, id_of(&w), domain::now());
-    let res = app.get(&format!("/{w}?c={c}")).await;
+    let res = app.get_with_cookie(&format!("/{w}"), &creator_cookie(&app, &w, domain::now())).await;
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
     let html = body_text(res).await;

@@ -109,13 +109,14 @@ async fn every_rendered_page_and_fragment_is_clean() {
     check_url_page("url paste page", app.get(&format!("/{url}?view")).await, TARGET).await;
     let creator = |words: &str| {
         let id = bitvault::domain::words::parse(words).unwrap();
-        format!("/{words}?c={}", grant::issue_creator(&app.st.grant_key, id, domain::now()))
+        format!("{}={}", support::CREATED_COOKIE, grant::issue_creator(&app.st.grant_key, id, domain::now()))
     };
     for (what, words) in [("public", &public), ("readonly", &readonly), ("private", &private), ("secret", &secret)] {
-        let res = app.get(&creator(words)).await;
+        let res = app.get_with_cookie(&format!("/{words}"), &creator(words)).await;
         check(&format!("creator view of the {what} paste"), res, StatusCode::OK).await;
     }
-    check_url_page("creator view of the url paste", app.get(&creator(&url)).await, TARGET).await;
+    let res = app.get_with_cookie(&format!("/{url}"), &creator(&url)).await;
+    check_url_page("creator view of the url paste", res, TARGET).await;
     check("private locked", app.get(&format!("/{private}")).await, StatusCode::OK).await;
     let unlock = app.post_form(&format!("/{private}/unlock"), "password=pw").await;
     check("private unlocked", unlock, StatusCode::OK).await;

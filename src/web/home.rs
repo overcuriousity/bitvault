@@ -316,14 +316,17 @@ impl Form {
     }
 }
 
-/// `POST /`: to the new paste's creator view, which shows it without counting a read.
-async fn create(State(st): State<AppState>, req: Request) -> Result<Redirect, Error> {
+/// `POST /`: to the new paste, with the creator cookie that shows it once without counting a read.
+async fn create(State(st): State<AppState>, req: Request) -> Result<Response, Error> {
     let rules = CreateRules { uploader_checked: false, allow_secret: true };
     let (new, staging) = read_multipart(&st, req, rules).await?;
     let now = domain::now();
     let id = paste::create(&st, new, staging, now).await?;
+    let words = id.words();
     let token = grant::issue_creator(&st.grant_key, id, now);
-    Ok(Redirect::to(&format!("/{}?c={token}", id.words())))
+    let mut res = Redirect::to(&format!("/{words}")).into_response();
+    res.headers_mut().insert(header::SET_COOKIE, super::paste::created_cookie(&st, &words, &token, grant::TTL_SECS)?);
+    Ok(res)
 }
 
 /// Reads a multipart create in order, streaming each file into a staging directory (encrypted

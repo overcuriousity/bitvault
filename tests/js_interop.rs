@@ -186,7 +186,6 @@ async fn a_secret_paste_created_with_javascript_parts_deletes_with_its_verifier(
     let res = app.post_form(&format!("/{words}/delete"), &format!("verifier={}", f.verifier_hex)).await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     assert_eq!(app.get(&location).await.status(), StatusCode::NOT_FOUND);
-    assert_eq!(app.get(&format!("/{words}")).await.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
