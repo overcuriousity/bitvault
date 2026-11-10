@@ -3,16 +3,18 @@
 set -eu
 
 usage() {
-  echo "Usage: install.sh --archive FILE [--system] [--prefix DIR]" >&2
+  echo "Usage: install.sh --archive FILE [--sha256 HEX] [--system] [--prefix DIR]" >&2
   exit 2
 }
 
 archive=""
+expected=""
 system=0
 prefix=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --archive) [ $# -ge 2 ] || usage; archive=$2; shift 2 ;;
+    --sha256) [ $# -ge 2 ] || usage; expected=$2; shift 2 ;;
     --system) system=1; shift ;;
     --prefix) [ $# -ge 2 ] || usage; prefix=$2; shift 2 ;;
     -h|--help) usage ;;
@@ -34,6 +36,16 @@ if [ "$system" -eq 1 ] && [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+# The bundle's own SHA256SUMS only shows damage: whoever alters a bundle can rewrite it too.
+# A checksum from the release's SHA256SUMS, obtained apart from the bundle, shows tampering.
+if [ -n "$expected" ]; then
+  actual=$(sha256sum "$archive" | cut -d' ' -f1)
+  if [ "$actual" != "$(printf '%s' "$expected" | tr 'A-F' 'a-f')" ]; then
+    echo "The archive does not match --sha256. Download it again and compare with the release's SHA256SUMS." >&2
+    exit 1
+  fi
+fi
+
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 tar -C "$work" -xzf "$archive"
@@ -47,7 +59,7 @@ bundle=${1%/}
 cd "$bundle"
 if ! sha256sum -c --quiet SHA256SUMS > "$work/check.log" 2>&1; then
   bad=$(grep -v ': OK$' "$work/check.log" | head -n 1 | cut -d: -f1)
-  echo "Checksum mismatch: ${bad:-SHA256SUMS}. The bundle is damaged or was altered." >&2
+  echo "Checksum mismatch: ${bad:-SHA256SUMS}. The bundle is damaged." >&2
   exit 1
 fi
 

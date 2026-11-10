@@ -178,3 +178,11 @@ fn the_long_expiries_last_whole_years() {
         assert_eq!((e.as_str(), e.label(), e.seconds()), (token, label, Some(years * YEAR)));
     }
 }
+
+#[test]
+fn a_default_expiry_longer_than_max_expiry_is_rejected() {
+    let m = invalid(
+        "[app]\nexpiry_choices = [\"1hour\", \"1week\", \"1month\"]\ndefault_expiry = \"1month\"\nmax_expiry = \"1week\"\n",
+    );
+    assert!(m.contains("default_expiry"), "{m}");
+}

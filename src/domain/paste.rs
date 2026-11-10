@@ -823,8 +823,11 @@ pub async fn list_public(st: &AppState, page: u32, now: i64) -> Result<Vec<Paste
     with_files_of_all(st, rows).await
 }
 
-/// Every live paste of any level, newest first, for the admin table.
-pub async fn list_all(st: &AppState, now: i64) -> Result<Vec<Paste>, Error> {
+/// Live pastes of every level, newest first, [`PAGE_SIZE`] per page like [`list_public`], for
+/// the admin table.
+pub async fn list_all(st: &AppState, page: u32, now: i64) -> Result<Vec<Paste>, Error> {
+    let offset = i64::from(page.saturating_sub(1)) * i64::from(PAGE_SIZE);
+    let limit = i64::from(PAGE_SIZE);
     let rows = sqlx::query_as!(
         Row,
         r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", length(content) AS "content_len!: i64",
@@ -834,12 +837,50 @@ pub async fn list_all(st: &AppState, now: i64) -> Result<Vec<Paste>, Error> {
                   created_at AS "created_at!", expires_at AS "expires_at?"
            FROM pastes
            WHERE burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
-           ORDER BY created_at DESC, id DESC"#,
+           ORDER BY created_at DESC, id DESC
+           LIMIT ? OFFSET ?"#,
         now,
+        limit,
+        offset,
     )
     .fetch_all(&st.pool)
     .await?;
     with_files_of_all(st, rows).await
+}
+
+/// How much the live pastes hold together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Totals {
+    pub pastes: u64,
+    /// Stored bytes of text and links.
+    pub content_bytes: u64,
+    pub file_bytes: u64,
+}
+
+/// Counts and sizes over every live paste, for the admin page, without loading any of them.
+pub async fn totals(st: &AppState, now: i64) -> Result<Totals, Error> {
+    let pastes = sqlx::query!(
+        r#"SELECT COUNT(*) AS "pastes!: i64", COALESCE(SUM(length(content)), 0) AS "content_bytes!: i64"
+           FROM pastes
+           WHERE burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)"#,
+        now,
+    )
+    .fetch_one(&st.pool)
+    .await?;
+    let file_bytes = sqlx::query_scalar!(
+        r#"SELECT COALESCE(SUM(f.size), 0) AS "file_bytes!: i64"
+           FROM paste_files f JOIN pastes p ON p.id = f.paste_id
+           WHERE p.burned_at IS NULL AND (p.expires_at IS NULL OR p.expires_at > ?)"#,
+        now,
+    )
+    .fetch_one(&st.pool)
+    .await?;
+    let count = |n: i64| u64::try_from(n).map_err(Error::internal);
+    Ok(Totals {
+        pastes: count(pastes.pastes)?,
+        content_bytes: count(pastes.content_bytes)?,
+        file_bytes: count(file_bytes)?,
+    })
 }
 
 /// Removes expired rows and rows burned more than [`BURNED_TTL_SECS`] ago, with their files.

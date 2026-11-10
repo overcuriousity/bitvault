@@ -19,7 +19,7 @@ sh install.sh --archive bitvault-<version>-x86_64-unknown-linux-musl-offline.tar
 sh install.sh --archive bitvault-<version>-x86_64-unknown-linux-musl-offline.tar.gz --system  # as root: systemd service
 ```
 
-The installer works offline, checks every file against `SHA256SUMS` and never calls sudo itself. [AIRGAP.md](AIRGAP.md) covers TLS, secrets and building without network.
+The installer works offline, checks the bundle for damage and never calls sudo itself. Add `--sha256 <checksum>` from the release's `SHA256SUMS` to refuse an altered bundle. [AIRGAP.md](AIRGAP.md) covers TLS, secrets and building without network.
 
 ## Run behind nginx
 

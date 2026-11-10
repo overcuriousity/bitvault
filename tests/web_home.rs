@@ -375,3 +375,18 @@ async fn a_box_lookup_that_misses_spends_the_lookup_budget() {
     let res = post_box(&app, &bitvault::domain::words::PasteId(12).words(), &[]).await;
     assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS, "a dry budget refuses the box lookup too");
 }
+
+#[tokio::test]
+async fn wrong_uploader_passwords_count_as_failed_attempts() {
+    let app = app_with("[app]\nuploader_password = \"letmein\"\n").await;
+    async fn guess(app: &support::App, pw: &[u8]) -> StatusCode {
+        app.post_multipart("/", &[("uploader_password", None, pw), ("content", None, b"hello")]).await.status()
+    }
+    for _ in 0..3 {
+        assert_eq!(guess(&app, b"letmein").await, StatusCode::SEE_OTHER);
+    }
+    for _ in 0..5 {
+        assert_eq!(guess(&app, b"wrong").await, StatusCode::FORBIDDEN);
+    }
+    assert_eq!(guess(&app, b"wrong").await, StatusCode::TOO_MANY_REQUESTS);
+}

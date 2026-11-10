@@ -10,7 +10,7 @@ use url::Url;
 
 use crate::deployment::Deployment;
 use crate::domain::Privacy;
-use crate::domain::expiry::Expiry;
+use crate::domain::expiry::{self, Expiry};
 use crate::error::Error;
 
 const ENV_PREFIX: &str = "BITVAULT__";
@@ -162,6 +162,9 @@ impl Config {
         }
         if !a.expiry_choices.contains(&a.max_expiry) {
             return Err(Error::Invalid("max_expiry must be one of expiry_choices.".into()));
+        }
+        if !Expiry::parse(&a.default_expiry).is_some_and(|e| expiry::within_max(a, e)) {
+            return Err(Error::Invalid("default_expiry must not be longer than max_expiry.".into()));
         }
         if let Some(raw) = &a.short_url {
             match Url::parse(raw) {

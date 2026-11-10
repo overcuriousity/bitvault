@@ -678,7 +678,7 @@ async fn lists_carry_each_pastes_files_and_content_size_without_the_content() {
     assert!(listed[0].files.is_empty());
     assert_eq!((listed[0].content_len, listed[1].content_len), (13, 9));
 
-    let all = paste::list_all(&app.st, NOW + 10).await.unwrap();
+    let all = paste::list_all(&app.st, 1, NOW + 10).await.unwrap();
     assert_eq!(all.iter().map(|p| p.id).collect::<Vec<_>>(), [hidden, none, two]);
     assert_eq!(names(&all[0]), ["c.txt"]);
     assert_eq!(all[2].files.iter().map(|f| f.size).sum::<u64>(), 8);

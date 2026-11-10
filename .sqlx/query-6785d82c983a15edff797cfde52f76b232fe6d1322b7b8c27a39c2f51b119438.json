@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COALESCE(SUM(f.size), 0) AS \"file_bytes!: i64\"\n           FROM paste_files f JOIN pastes p ON p.id = f.paste_id\n           WHERE p.burned_at IS NULL AND (p.expires_at IS NULL OR p.expires_at > ?)",
+  "describe": {
+    "columns": [
+      {
+        "name": "file_bytes!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6785d82c983a15edff797cfde52f76b232fe6d1322b7b8c27a39c2f51b119438"
+}

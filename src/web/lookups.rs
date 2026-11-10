@@ -10,6 +10,7 @@ use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
+use crate::domain::words;
 use crate::error::Error;
 use crate::security::ClientIp;
 use crate::state::AppState;
@@ -45,14 +46,10 @@ fn lookup_kind(method: &Method, path: &str) -> Option<Kind> {
     }
     let rest = path.strip_prefix("/api/v1/pastes/").unwrap_or_else(|| path.trim_start_matches('/'));
     let first = rest.split('/').next().unwrap_or_default();
-    looks_like_words(first).then_some(Kind::Path)
-}
-
-/// Reserved paths have no hyphen, so a segment of three hyphen-joined letter runs is a lookup.
-fn looks_like_words(segment: &str) -> bool {
-    let mut parts = segment.split('-');
-    let three = parts.by_ref().take(3).filter(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphabetic())).count();
-    three == 3 && parts.next().is_none()
+    // Decided by the parser the handlers use, on the decoded segment as they see it, so no
+    // spelling of an address ("a--b-c", "a%20b%20c") is looked up without being counted.
+    let decoded = percent_encoding::percent_decode_str(first).decode_utf8().ok()?;
+    words::parse(&decoded).is_ok().then_some(Kind::Path)
 }
 
 #[cfg(test)]
@@ -66,6 +63,11 @@ mod tests {
         assert!(lookup_kind(get, "/happy-apple-banana/raw").is_some());
         assert!(lookup_kind(get, "/Happy-Apple-Banana/file/1").is_some());
         assert!(lookup_kind(get, "/api/v1/pastes/happy-apple-banana/files/1").is_some());
+        for path in
+            ["/happy--apple-banana", "/happy%20apple%20banana", "/happy-apple-banana-", "/happy%2Dapple%2Dbanana"]
+        {
+            assert!(lookup_kind(get, path).is_some(), "{path}");
+        }
         assert!(lookup_kind(&Method::POST, "/open") == Some(Kind::Open));
         for path in ["/", "/list", "/admin", "/api/v1/pastes", "/api/v1/health", "/nope", "/a-b", "/a-b-c-d", "/a--b"] {
             assert!(lookup_kind(get, path).is_none(), "{path}");

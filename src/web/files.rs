@@ -142,7 +142,9 @@ pub async fn download(
     } else if inline_image(&meta.mime) {
         (meta.mime.as_str(), "inline")
     } else {
-        (meta.mime.as_str(), "attachment")
+        // Never the stored type: a page here could load an upload served as script or style,
+        // which the CSP's 'self' would allow.
+        (PLACEHOLDER_MIME, "attachment")
     };
     let content_type = HeaderValue::from_str(content_type).unwrap_or(HeaderValue::from_static(PLACEHOLDER_MIME));
     let mut headers = HeaderMap::new();

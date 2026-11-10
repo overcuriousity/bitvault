@@ -25,13 +25,16 @@ This is a rewrite and a fresh start. There is no compatibility with 1.6.0: no da
 - Secret file encryption: files in a Secret paste are encrypted in the browser.
 - Three-word canonical URLs: every paste lives at `/{three-words}`.
 - A generated OpenAPI document at `/api/v1/openapi.json`, and an API reference at `/docs` rendered from it on the server, with a `curl` line for each call.
-- Per-address rate limits: creates 30 per minute (burst 10), other API calls 120 (burst 30), wrong passwords 10 (burst 5), and lookups of words that match no paste 20 (burst 10), so unlisted pastes cannot be enumerated.
+- Per-address rate limits: creates 30 per minute (burst 10), other API calls 120 (burst 30), wrong passwords (the uploader password included) 10 (burst 5), and lookups of words that match no paste 20 (burst 10), so unlisted pastes cannot be enumerated.
 - After creating on the web you see the new paste with its words, address, Copy link, Share, QR code and delete; creating on the home page shows upload progress and you can paste images from the clipboard.
 - One box on the home page: text or a link becomes a new paste, and three words open the paste they name, with Enter. The words may be separated by spaces or hyphens, run together, or cut to their first four letters; Tab completes a word. The options fold away until the box holds text.
 - Add `?view` to a link's address to see where it goes before following it.
 - Syntax "Automatic" (the default) detects the language from the first line, such as a shebang; code gets line numbers.
 - Copy text and Share (where the browser has it) on paste pages; raw text, link and QR stay in one toolbar.
 - File downloads send `Content-Length` and resume with byte ranges, except in private pastes and zip downloads.
+- `install.sh --sha256 <checksum>` refuses a bundle that does not match the release's `SHA256SUMS`.
+- The admin table shows 50 pastes a page; its totals still cover every paste.
+- Files other than raster images download as `application/octet-stream`, whatever their name.
 - Guide and API in the navigation, help links on the create form, a version footer, and an admin settings summary.
 
 ### Removed

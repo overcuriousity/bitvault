@@ -36,7 +36,11 @@ As a system service, run as root. This installs to `/usr/local/bin`, sets up a h
 sh install.sh --archive bitvault-<version>-x86_64-unknown-linux-musl-offline.tar.gz --system
 ```
 
-The installer checks every file against the bundle's `SHA256SUMS`. If any file has changed, it stops with "Checksum mismatch".
+The installer checks every file against the bundle's own `SHA256SUMS` and stops with "Checksum mismatch" if one is damaged. That list travels inside the bundle, so it cannot show tampering. For that, pass the bundle's checksum from the release's `SHA256SUMS`, which you checked above, and the installer refuses any other archive:
+
+```sh
+sh install.sh --archive bitvault-<version>-x86_64-unknown-linux-musl-offline.tar.gz --sha256 <checksum from SHA256SUMS>
+```
 
 ## TLS on an airgapped network
 

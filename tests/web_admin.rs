@@ -298,3 +298,21 @@ async fn over_plain_http_a_signed_in_post_with_a_null_origin_is_refused() {
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
     assert_eq!(native_post(&app, "/admin/sign-out", "null", "").await.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn the_admin_table_is_paged_and_its_totals_cover_every_paste() {
+    let mut app = app_with(ADMIN_CONFIG).await;
+    for n in 0..paste::PAGE_SIZE + 1 {
+        create(&app, new(&format!("paste {n}"), Privacy::Unlisted, None)).await;
+    }
+    app.sign_in_admin().await;
+    let first = body_text(app.get("/admin").await).await;
+    assert_eq!(first.matches("/delete\"").count(), paste::PAGE_SIZE as usize);
+    assert!(first.contains("<span class=\"oc-value\">51</span>"), "the total counts every paste");
+    assert!(first.contains("href=\"/admin?page=2\""));
+    assert!(!first.contains("href=\"/admin?page=0\""));
+    let second = body_text(app.get("/admin?page=2").await).await;
+    assert_eq!(second.matches("/delete\"").count(), 1);
+    assert!(second.contains("href=\"/admin?page=1\""));
+    assert!(!second.contains("href=\"/admin?page=3\""));
+}

@@ -200,7 +200,9 @@ fn settings(cfg: &Config) -> Vec<(&'static str, String)> {
 struct Table {
     rows: Vec<Row>,
     deleted: Option<String>,
-    count: usize,
+    count: u64,
+    newer: Option<u32>,
+    older: Option<u32>,
     content_size: String,
     file_size: String,
     trash: String,
@@ -208,18 +210,25 @@ struct Table {
     settings: Vec<(&'static str, String)>,
 }
 
+#[derive(Deserialize)]
+struct PageQuery {
+    page: Option<u32>,
+}
+
 async fn table(
     State(st): State<AppState>,
     MaybeAdmin(admin): MaybeAdmin,
     Query(q): Query<DeletedQuery>,
+    Query(at): Query<PageQuery>,
 ) -> Result<Response, Error> {
     if !admin {
         return Ok(Redirect::to("/admin/sign-in").into_response());
     }
-    let pastes = paste::list_all(&st, domain::now()).await?;
-    let content: u64 = pastes.iter().map(|p| p.content_len).sum();
-    let files: u64 = pastes.iter().flat_map(|p| &p.files).map(|f| f.size).sum();
     let now = domain::now();
+    let number = at.page.unwrap_or(1).max(1);
+    let pastes = paste::list_all(&st, number, now).await?;
+    let totals = paste::totals(&st, now).await?;
+    let full = pastes.len() == paste::PAGE_SIZE as usize;
     let rows = pastes
         .iter()
         .map(|p| Row {
@@ -236,11 +245,13 @@ async fn table(
         })
         .collect();
     let body = render(&Table {
-        count: pastes.len(),
+        count: totals.pastes,
+        newer: (number > 1).then(|| number - 1),
+        older: full.then(|| number.saturating_add(1)),
         rows,
         deleted: q.notice(),
-        content_size: size(content),
-        file_size: size(files),
+        content_size: size(totals.content_bytes),
+        file_size: size(totals.file_bytes),
         trash: icon("trash-2", super::IconSize::Row),
         version: env!("CARGO_PKG_VERSION"),
         settings: settings(&st.cfg),

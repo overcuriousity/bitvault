@@ -134,3 +134,23 @@ async fn an_exhausted_budget_renders_a_page_for_browsers_and_json_for_the_api() 
     let json = support::body_text(app.send(r.body(Body::empty()).unwrap()).await).await;
     assert!(json.contains("TOO_MANY_ATTEMPTS"), "{json}");
 }
+
+#[tokio::test]
+async fn other_spellings_of_an_address_spend_the_budget_too() {
+    let app = app().await;
+    type Spell = fn(&str) -> String;
+    let spellings: [(&str, Spell); 4] = [
+        ("203.0.113.21", |w| w.replacen('-', "--", 1)),
+        ("203.0.113.22", |w| w.replace('-', "%20")),
+        ("203.0.113.23", |w| format!("{w}-")),
+        ("203.0.113.24", |w| w.replace('-', "%2D")),
+    ];
+    for (ip, spell) in spellings {
+        for n in 0..10 {
+            let uri = format!("/{}", spell(&missing(n)));
+            assert_eq!(get_from(&app, &uri, ip).await, StatusCode::NOT_FOUND, "{uri}");
+        }
+        let uri = format!("/{}", spell(&missing(10)));
+        assert_eq!(get_from(&app, &uri, ip).await, StatusCode::TOO_MANY_REQUESTS, "{uri}");
+    }
+}

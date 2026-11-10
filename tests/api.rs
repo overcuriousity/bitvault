@@ -583,3 +583,19 @@ async fn over_plain_http_the_api_refuses_secret_and_answers_with_the_request_hos
     let v = json_of(res).await;
     assert_eq!(v["url"], format!("http://192.168.1.5:8080/{}", v["words"].as_str().unwrap()));
 }
+
+#[tokio::test]
+async fn wrong_uploader_passwords_count_as_failed_attempts() {
+    let app = app_with("[app]\nuploader_password = \"letmein\"\n").await;
+    let body = json!({"content": "hello"});
+    for _ in 0..3 {
+        let res = send_json(&app, "POST", "/api/v1/pastes", &body, &[("x-uploader-password", "letmein")]).await;
+        assert_eq!(res.status(), StatusCode::CREATED);
+    }
+    for _ in 0..5 {
+        let res = send_json(&app, "POST", "/api/v1/pastes", &body, &[("x-uploader-password", "wrong")]).await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+    let res = send_json(&app, "POST", "/api/v1/pastes", &body, &[("x-uploader-password", "wrong")]).await;
+    assert_eq!(error_code(res).await, "TOO_MANY_ATTEMPTS");
+}

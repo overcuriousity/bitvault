@@ -550,7 +550,11 @@ async fn raw(
     let access = match (p.privacy, q.g) {
         (Privacy::Private, Some(g)) => Access::Grant(g),
         (Privacy::Private, None) => {
-            let pw = headers.get("x-paste-password").and_then(|v| v.to_str().ok()).ok_or(Error::PasswordRequired)?;
+            // As UTF-8, like the API: `to_str` would refuse every password beyond ASCII.
+            let pw = headers
+                .get("x-paste-password")
+                .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+                .ok_or(Error::PasswordRequired)?;
             Access::Password(pw.to_owned())
         }
         _ => Access::Anonymous,

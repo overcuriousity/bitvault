@@ -480,7 +480,7 @@ async fn an_expired_paste_is_gone_immediately() {
     assert!(matches!(paste::read(&app.st, id, Access::Anonymous, IP, NOW + 61).await, Err(Error::NotFound)));
     assert!(matches!(paste::meta(&app.st, id, NOW + 61).await, Err(Error::NotFound)));
     assert!(paste::list_public(&app.st, 1, NOW + 61).await.unwrap().is_empty());
-    assert!(paste::list_all(&app.st, NOW + 61).await.unwrap().is_empty());
+    assert!(paste::list_all(&app.st, 1, NOW + 61).await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -656,7 +656,7 @@ async fn the_admin_list_holds_every_live_paste_but_no_burned_ones() {
     let b = create(&app.st, new("y", Privacy::Unlisted)).await;
     let burned = create(&app.st, NewPaste { burn_after_reads: 1, ..new("z", Privacy::Public) }).await;
     read(&app.st, burned, Access::Anonymous).await.unwrap();
-    let mut ids: Vec<u64> = paste::list_all(&app.st, NOW).await.unwrap().iter().map(|p| p.id.0).collect();
+    let mut ids: Vec<u64> = paste::list_all(&app.st, 1, NOW).await.unwrap().iter().map(|p| p.id.0).collect();
     ids.sort_unstable();
     let mut want = vec![a.0, b.0];
     want.sort_unstable();
@@ -726,4 +726,19 @@ async fn the_creator_view_refuses_burned_and_expired_pastes() {
     let brief = create(&app.st, NewPaste { expiry: Expiry::Min1, ..new("brief", Privacy::Public) }).await;
     assert!(matches!(paste::creator_view(&app.st, brief, NOW + 61).await, Err(Error::NotFound)));
     assert!(matches!(paste::creator_view(&app.st, PasteId(12345), NOW).await, Err(Error::NotFound)));
+}
+
+#[tokio::test]
+async fn the_admin_list_comes_a_page_at_a_time_with_totals_for_all() {
+    let app = support::app().await;
+    for n in 0..paste::PAGE_SIZE + 1 {
+        create(&app.st, new(&format!("paste {n}"), Privacy::Unlisted)).await;
+    }
+    assert_eq!(paste::list_all(&app.st, 1, NOW).await.unwrap().len(), paste::PAGE_SIZE as usize);
+    assert_eq!(paste::list_all(&app.st, 2, NOW).await.unwrap().len(), 1);
+    let totals = paste::totals(&app.st, NOW).await.unwrap();
+    assert_eq!(totals.pastes, u64::from(paste::PAGE_SIZE) + 1);
+    // "paste 0" to "paste 9" are 7 bytes each, the other 41 are 8.
+    assert_eq!(totals.content_bytes, 10 * 7 + 41 * 8);
+    assert_eq!(totals.file_bytes, 0);
 }

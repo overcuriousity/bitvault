@@ -1197,3 +1197,23 @@ async fn over_plain_http_the_creator_cookie_is_not_secure_even_with_an_https_pub
     let html = body_text(app.get(&format!("/{w}")).await).await;
     assert!(html.contains(&format!(">https://paste.example/{w}<")), "the public_url wins over the Host: {html}");
 }
+
+#[tokio::test]
+async fn files_a_page_could_load_as_code_are_served_as_plain_bytes() {
+    let app = app().await;
+    for name in ["run.js", "look.css", "page.html", "drawing.svg"] {
+        let w = create_with_file(&app, new("", Privacy::Public), name, b"alert(1)").await;
+        let res = app.get(&format!("/{w}/file/1")).await;
+        assert_eq!(res.headers()[header::CONTENT_TYPE], "application/octet-stream", "{name}");
+    }
+}
+
+#[tokio::test]
+async fn private_raw_takes_a_password_with_letters_beyond_ascii() {
+    let app = app().await;
+    let w = create(&app, with_password("hidden", Privacy::Private, "p\u{e4}ssword")).await;
+    let r = app.req("GET", &format!("/{w}/raw")).header("x-paste-password", "p\u{e4}ssword".as_bytes());
+    let res = app.send(r.body(Body::empty()).unwrap()).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(bytes_of(res).await, b"hidden");
+}

@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -177,16 +178,30 @@ async fn open(
 struct Gate<'a> {
     expected: Option<&'a str>,
     passed: bool,
+    /// The failed-attempt limiter and the caller's address, when known.
+    attempts: Option<(&'a RateLimiter, IpAddr)>,
 }
 
-impl Gate<'_> {
+impl<'a> Gate<'a> {
+    fn new(st: &'a AppState, ip: Option<IpAddr>, passed: bool) -> Self {
+        Self { expected: st.cfg.app.uploader_password.as_deref(), passed, attempts: ip.map(|ip| (&*st.failures, ip)) }
+    }
+
+    /// A wrong password counts as a failed attempt, like a wrong paste password: the token is
+    /// taken before the comparison and given back when the password is right.
     fn check(&mut self, given: &[u8]) -> Result<(), Error> {
         let Some(expected) = self.expected else { return Ok(()) };
+        if let Some((failures, ip)) = self.attempts {
+            failures.take(ip)?;
+        }
         // Both sides in NFC, like every other password; bytes that are not UTF-8 are compared as sent.
         let given = std::str::from_utf8(given).map_or_else(|_| Zeroizing::new(given.to_vec()), crypto::password_bytes);
         // Hashing first makes the comparison independent of both lengths.
         if bool::from(Sha256::digest(&*given).ct_eq(&Sha256::digest(&*crypto::password_bytes(expected)))) {
             self.passed = true;
+            if let Some((failures, ip)) = self.attempts {
+                failures.refund(ip);
+            }
             Ok(())
         } else {
             Err(Error::UploaderPassword)
@@ -199,8 +214,8 @@ impl Gate<'_> {
 }
 
 /// Checks an uploader password given up front (the API's header) against the configured one.
-pub(crate) fn check_uploader(st: &AppState, given: Option<&[u8]>) -> Result<(), Error> {
-    let mut gate = Gate { expected: st.cfg.app.uploader_password.as_deref(), passed: false };
+pub(crate) fn check_uploader(st: &AppState, ip: Option<IpAddr>, given: Option<&[u8]>) -> Result<(), Error> {
+    let mut gate = Gate::new(st, ip, false);
     if let Some(given) = given {
         gate.check(given)?;
     }
@@ -483,6 +498,7 @@ async fn read_form(
     req: Request,
     rules: CreateRules,
 ) -> Result<(Form, Option<Staging>, GateResult), Error> {
+    let ip = req.extensions().get::<ClientIp>().map(|c| c.0);
     let boundary = req
         .headers()
         .get(header::CONTENT_TYPE)
@@ -495,7 +511,7 @@ async fn read_form(
     let budget = app.max_file_mb.saturating_mul(MIB);
     // The browser limits plaintext; the server sees the container, which is slightly larger.
     let secret_limit = crypto::browser_container_max_len(app.max_secret_file_mb.saturating_mul(MIB));
-    let mut gate = Gate { expected: app.uploader_password.as_deref(), passed: rules.uploader_checked };
+    let mut gate = Gate::new(st, ip, rules.uploader_checked);
     let mut form = Form::default();
     let mut staging: Option<Staging> = None;
     while let Some(field) = multipart.next_field().await.map_err(|e| multipart_error(&e))? {

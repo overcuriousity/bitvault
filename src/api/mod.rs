@@ -381,7 +381,8 @@ async fn create_paste(
     base: BaseUrl,
     req: Request,
 ) -> Result<(StatusCode, Json<CreateResponse>), ApiError> {
-    home::check_uploader(&st, req.headers().get(UPLOADER_HEADER).map(HeaderValue::as_bytes))?;
+    let ip = req.extensions().get::<ClientIp>().map(|c| c.0);
+    home::check_uploader(&st, ip, req.headers().get(UPLOADER_HEADER).map(HeaderValue::as_bytes))?;
     let rules = CreateRules { uploader_checked: true, allow_secret: false, default_editable: st.cfg.app.editable };
     // Media types are case-insensitive.
     let content_type =
