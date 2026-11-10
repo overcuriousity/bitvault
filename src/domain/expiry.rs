@@ -5,6 +5,7 @@ use crate::config::AppConfig;
 const MINUTE: i64 = 60;
 const HOUR: i64 = 60 * MINUTE;
 const DAY: i64 = 24 * HOUR;
+const YEAR: i64 = 365 * DAY;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Expiry {
@@ -17,11 +18,15 @@ pub enum Expiry {
     Month1,
     Months6,
     Year1,
+    Years2,
+    Years4,
+    Years8,
+    Years16,
     Never,
 }
 
 impl Expiry {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 14] = [
         Self::Min1,
         Self::Min10,
         Self::Hour1,
@@ -31,6 +36,10 @@ impl Expiry {
         Self::Month1,
         Self::Months6,
         Self::Year1,
+        Self::Years2,
+        Self::Years4,
+        Self::Years8,
+        Self::Years16,
         Self::Never,
     ];
 
@@ -49,6 +58,10 @@ impl Expiry {
             Self::Month1 => "1month",
             Self::Months6 => "6months",
             Self::Year1 => "1year",
+            Self::Years2 => "2years",
+            Self::Years4 => "4years",
+            Self::Years8 => "8years",
+            Self::Years16 => "16years",
             Self::Never => "never",
         }
     }
@@ -65,6 +78,10 @@ impl Expiry {
             Self::Month1 => "1 month",
             Self::Months6 => "6 months",
             Self::Year1 => "1 year",
+            Self::Years2 => "2 years",
+            Self::Years4 => "4 years",
+            Self::Years8 => "8 years",
+            Self::Years16 => "16 years",
             Self::Never => "never",
         }
     }
@@ -80,7 +97,11 @@ impl Expiry {
             Self::Week1 => 7 * DAY,
             Self::Month1 => 30 * DAY,
             Self::Months6 => 180 * DAY,
-            Self::Year1 => 365 * DAY,
+            Self::Year1 => YEAR,
+            Self::Years2 => 2 * YEAR,
+            Self::Years4 => 4 * YEAR,
+            Self::Years8 => 8 * YEAR,
+            Self::Years16 => 16 * YEAR,
             Self::Never => return None,
         })
     }

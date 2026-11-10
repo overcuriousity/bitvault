@@ -9,11 +9,13 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::deployment::Deployment;
+use crate::domain::expiry::Expiry;
 use crate::error::Error;
 
 const ENV_PREFIX: &str = "BITVAULT__";
 
 pub const PRIVACY_LEVELS: [&str; 5] = ["public", "unlisted", "readonly", "private", "secret"];
+/// The default `expiry_choices`. The long expiries (`2years` to `16years`) are valid but opt-in.
 pub const EXPIRY_CHOICES: [&str; 10] =
     ["1min", "10min", "1hour", "24hour", "3days", "1week", "1month", "6months", "1year", "never"];
 
@@ -143,7 +145,7 @@ impl Config {
             return Err(Error::Invalid("default_privacy must be one of privacy_levels.".into()));
         }
         for choice in &a.expiry_choices {
-            if !EXPIRY_CHOICES.contains(&choice.as_str()) {
+            if Expiry::parse(choice).is_none() {
                 return Err(Error::Invalid(format!("expiry_choices has an unknown choice '{choice}'.")));
             }
         }

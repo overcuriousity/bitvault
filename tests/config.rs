@@ -130,3 +130,28 @@ fn an_absurd_upload_limit_is_rejected() {
     assert!(invalid("[app]\nmax_file_mb = 2000000").contains("max_file_mb"));
     assert!(invalid("[app]\nmax_secret_file_mb = 2000000").contains("max_secret_file_mb"));
 }
+
+#[test]
+fn the_long_expiries_are_accepted_but_not_offered_by_default() {
+    let defaults = from_toml("").unwrap();
+    for long in ["2years", "4years", "8years", "16years"] {
+        assert!(!defaults.app.expiry_choices.iter().any(|c| c == long), "{long} must be opt-in");
+    }
+    let cfg = from_toml(
+        "[app]\nexpiry_choices = [\"24hour\", \"1year\", \"2years\", \"4years\", \"8years\", \"16years\"]\nmax_expiry = \"16years\"\n",
+    )
+    .unwrap();
+    assert_eq!(cfg.app.max_expiry, "16years");
+}
+
+#[test]
+fn the_long_expiries_last_whole_years() {
+    use bitvault::domain::expiry::Expiry;
+    const YEAR: i64 = 365 * 24 * 3600;
+    for (token, label, years) in
+        [("2years", "2 years", 2), ("4years", "4 years", 4), ("8years", "8 years", 8), ("16years", "16 years", 16)]
+    {
+        let e = Expiry::parse(token).unwrap();
+        assert_eq!((e.as_str(), e.label(), e.seconds()), (token, label, Some(years * YEAR)));
+    }
+}
