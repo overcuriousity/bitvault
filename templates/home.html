@@ -10,10 +10,20 @@
 <form class="oc-form bv-create" id="create-form" method="post" action="/" enctype="multipart/form-data" data-compact data-max-file-mb="{{ max_file_mb }}" data-max-secret-mb="{{ max_secret_mb }}">
   <div class="oc-field bv-box">
     <label for="content">Text, a link, or three words</label>
-    <textarea class="oc-input bv-mono" id="content" name="content" rows="8" spellcheck="false" autocomplete="off" autofocus aria-describedby="box-echo" data-words-src="{{ words_src }}"></textarea>
-    <p class="bv-hint" id="box-echo" aria-live="polite">Text or a link is kept as a new paste. Type three words, such as apple banana cherry, and press Enter to open the paste they name.</p>
+    {#- The placeholder is an example of the words, the label says text goes here too. #}
+    <textarea class="oc-input bv-mono" id="content" name="content" rows="8" spellcheck="false" autocomplete="off" autofocus placeholder="apple-banana-cherry" aria-describedby="box-echo" data-words-src="{{ words_src }}"></textarea>
+    {#- Empty until there is something to say: box.js names what Enter or the button will do. #}
+    <p class="bv-hint" id="box-echo" aria-live="polite"></p>
     {#- box.js fills this with the paste words that fit what is being typed. #}
     <div class="bv-chips" id="box-chips" hidden></div>
+  </div>
+  {#- Right under the box, where the options opening below cannot move it. #}
+  <div id="create-notice" aria-live="polite"></div>
+  <div class="oc-form__actions">
+    {#- box.js names the action: Open paste when the box holds the words of a paste that exists. #}
+    {#- The icon says it without words: a plus keeps a new paste, an arrow opens one. #}
+    <button type="submit" class="oc-btn oc-btn--primary bv-go" id="box-submit"><span class="bv-go__icon bv-go__icon--create">{{ create_icon|safe }}</span><span class="bv-go__icon bv-go__icon--open">{{ open_icon|safe }}</span><span class="bv-go__label">Create paste</span></button>
+    <button type="submit" class="oc-btn oc-btn--default" id="box-keep" name="intent" value="create" hidden>Keep as a new paste</button>
   </div>
   {#- Open as rendered, so without scripts the options are always in view. box.js folds them to their
       summary while the box is empty or holds words, and opens them once it holds text or files.
@@ -90,11 +100,4 @@
       <input class="oc-input" id="files" name="file" type="file" multiple>
     </div>
   </details>
-  <div id="create-notice" aria-live="polite"></div>
-  <div class="oc-form__actions">
-    {#- box.js names the action: Open paste when the box holds the words of a paste that exists. #}
-    {#- The icon says it without words: a plus keeps a new paste, an arrow opens one. #}
-    <button type="submit" class="oc-btn oc-btn--primary bv-go" id="box-submit"><span class="bv-go__icon bv-go__icon--create">{{ create_icon|safe }}</span><span class="bv-go__icon bv-go__icon--open">{{ open_icon|safe }}</span><span class="bv-go__label">Create paste</span></button>
-    <button type="submit" class="oc-btn oc-btn--default" id="box-keep" name="intent" value="create" hidden>Keep as a new paste</button>
-  </div>
 </form>

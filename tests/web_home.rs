@@ -210,12 +210,14 @@ async fn privacy_levels_are_grouped_by_how_they_are_protected() {
 }
 
 #[tokio::test]
-async fn the_content_is_focused_and_has_no_placeholder() {
+async fn the_content_is_focused_with_an_address_as_its_example() {
     let html = body_text(app().await.get("/").await).await;
     let at = html.find("<textarea").unwrap();
     let tag = &html[at..at + html[at..].find('>').unwrap()];
     assert!(tag.contains(" autofocus"), "{tag}");
-    assert!(!tag.contains("placeholder"), "{tag}");
+    // The example shows the words; the visible label says text belongs here as well.
+    assert!(tag.contains("placeholder=\"apple-banana-cherry\""), "{tag}");
+    assert!(html.contains("<label for=\"content\">Text, a link, or three words</label>"));
     assert!(html.contains("data-max-file-mb=\"2048\"") && html.contains("data-max-secret-mb=\"256\""));
 }
 
@@ -271,9 +273,9 @@ async fn one_box_carries_the_word_list_and_says_what_it_does() {
     let src = bitvault::assets::Assets::url("bip39-english.txt");
     assert!(html.contains(&format!("data-words-src=\"{src}\"")), "{html}");
     assert!(html.contains("aria-describedby=\"box-echo\""));
-    assert!(
-        html.contains("Type three words, such as apple banana cherry, and press Enter to open the paste they name.")
-    );
+    assert!(html.contains("<p class=\"bv-hint\" id=\"box-echo\" aria-live=\"polite\"></p>"), "no prose until needed");
+    let actions = html.find("id=\"box-submit\"").unwrap();
+    assert!(actions < html.find("id=\"options\"").unwrap(), "the button sits right under the box");
     assert!(html.contains("id=\"box-keep\" name=\"intent\" value=\"create\" hidden>"));
 }
 

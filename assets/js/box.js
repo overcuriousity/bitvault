@@ -9,21 +9,20 @@ import { accept, addressLike, chips, choose, readAddress } from "./words.js";
 
 // Long enough that a lookup waits for a pause in typing, short enough to answer before a press.
 const LOOKUP_DELAY = 350;
+// Once the last word can only be one word, more letters cannot change the address: look it up now.
+const SETTLED_DELAY = 0;
 
+// As few words as will do: the colours and the button's icon carry the rest.
 function echoFor(state, address) {
   switch (state) {
-    case "files":
-      return "With files attached, this is kept as a new paste.";
-    case "checking":
-      return `Looking for the paste ${address}…`;
     case "found":
-      return `Enter opens the paste ${address}.`;
+      return `Enter opens ${address}.`;
     case "missing":
-      return `No paste has the words ${address}, so they are kept as a new paste.`;
+      return `No paste at ${address}.`;
     case "ambiguous":
-      return "These letters read as more than one address, so they are kept as a new paste. Put spaces or hyphens between the words to open one.";
+      return "Reads two ways: add spaces or hyphens.";
     case "busy":
-      return "Too many lookups from this address for now, so this is kept as a new paste. Wait a minute to open one.";
+      return "Too many lookups. Try again in a minute.";
     default:
       return null;
   }
@@ -176,12 +175,14 @@ export function bindBox(form) {
     clearTimeout(timer);
     const { state, address } = reading();
     if (state !== "checking") return;
+    const last = box.value.trim().toLowerCase().split(/[\s-]+/).pop() ?? "";
+    const settled = words.filter((w) => w.startsWith(last)).length === 1;
     timer = setTimeout(() => {
       lookup(address)
         .then((result) => results.set(address, result))
         .catch(() => results.delete(address))
         .finally(render);
-    }, LOOKUP_DELAY);
+    }, settled ? SETTLED_DELAY : LOOKUP_DELAY);
   }
 
   // Enter in an address-shaped box: open the paste, or say why not. Anything else gets its new
@@ -202,7 +203,6 @@ export function bindBox(form) {
     clearTimeout(timer);
     let result = results.get(read.address);
     if (!result) {
-      setText(echo, echoFor("checking", read.address));
       try {
         result = await lookup(read.address);
         results.set(read.address, result);
@@ -213,9 +213,6 @@ export function bindBox(form) {
     if (result === "found") return opening(read.address);
     render();
     nudge();
-    if (result === "missing") {
-      setText(echo, `No paste has the words ${read.address}. Check them, or press Create paste to keep them as text.`);
-    }
   };
   box.addEventListener("beforeinput", (event) => {
     if (event.inputType !== "insertLineBreak" || event.isComposing) return;

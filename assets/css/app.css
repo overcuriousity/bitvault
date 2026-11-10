@@ -89,7 +89,7 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-mono { font-family: var(--font-mono); }
 .bv-check { display: flex; align-items: center; gap: var(--space-2); }
 .bv-hint { margin-top: var(--space-1); color: var(--color-fg-muted); font-size: var(--text-micro); }
-.bv-hint[hidden] { display: none; }
+.bv-hint[hidden], .bv-hint:empty { display: none; }
 
 /* A label with its "?" link to the guide. */
 .bv-label { display: flex; align-items: center; gap: var(--space-1); }
