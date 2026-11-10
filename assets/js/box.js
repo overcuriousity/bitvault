@@ -2,6 +2,9 @@
 // paste they name. The server decides on submit (see `web::home::create`); this script says which
 // it will be before the button is pressed, names the button after it, offers the words that fit
 // the one being typed (Tab takes the first), and tells create.js what to do on submit.
+//
+// Enter on a box that is one line of three words opens that paste, the quick way in. It only ever
+// opens: words no paste has stay in the box with a note, and keeping them takes the button.
 import { accept, chips, choose, readAddress } from "./words.js";
 
 // Long enough that a lookup waits for a pause in typing, short enough to answer before a press.
@@ -14,7 +17,7 @@ function echoFor(state, address) {
     case "checking":
       return `Looking for the paste ${address}…`;
     case "found":
-      return `Opens the paste ${address}.`;
+      return `Enter opens the paste ${address}.`;
     case "missing":
       return `No paste has the words ${address}, so they are kept as a new paste.`;
     case "ambiguous":
@@ -135,6 +138,46 @@ export function bindBox(form) {
         .finally(render);
     }, LOOKUP_DELAY);
   }
+
+  // Enter in an address-shaped box: open the paste, or say why not. Anything else gets its new
+  // line. Decided before the word list or the lookup may be ready, so the line break is held back
+  // first and put in by hand when the box turns out not to be an address.
+  const newLine = () => {
+    box.setRangeText("\n", box.selectionStart, box.selectionEnd, "end");
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const enter = async () => {
+    await load();
+    const read = words ? readAddress(box.value.trim(), words) : null;
+    if (!read || hasFiles()) return newLine();
+    if (read.ambiguous) return render();
+    clearTimeout(timer);
+    let result = results.get(read.address);
+    if (!result) {
+      setText(echo, echoFor("checking", read.address));
+      try {
+        result = await lookup(read.address);
+        results.set(read.address, result);
+      } catch {
+        return render();
+      }
+    }
+    if (result === "found") {
+      window.location.assign(`/${read.address}`);
+      return;
+    }
+    render();
+    if (result === "missing") {
+      setText(echo, `No paste has the words ${read.address}. Check them, or press Create paste to keep them as text.`);
+    }
+  };
+  box.addEventListener("beforeinput", (event) => {
+    if (event.inputType !== "insertLineBreak" || event.isComposing) return;
+    const looksLikeWords = /^\s*[a-z]+(?:[\s-]+[a-z]+){0,2}\s*$/i.test(box.value) && box.value.length <= 64;
+    if (!looksLikeWords || box.selectionEnd !== box.value.length) return;
+    event.preventDefault();
+    enter();
+  });
 
   box.addEventListener("focus", load);
   if (document.activeElement === box) load();
