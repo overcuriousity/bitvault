@@ -4,7 +4,6 @@ mod support;
 
 use axum::body::Body;
 use axum::http::{StatusCode, header};
-use bitvault::assets::Assets;
 use bitvault::domain::crypto::{self, PBKDF2_ITERATIONS};
 use bitvault::domain::expiry::Expiry;
 use bitvault::domain::files::Staging;
@@ -455,10 +454,29 @@ async fn list_is_404_and_out_of_the_navigation_when_listing_is_off() {
 }
 
 #[tokio::test]
-async fn docs_serves_swagger_from_vendored_files() {
+async fn docs_renders_every_call_of_the_openapi_document_on_the_server() {
     let html = body_text(app().await.get("/docs").await).await;
-    assert!(html.contains(&Assets::url("vendor/swagger-ui/swagger-ui-bundle.js")));
-    assert!(html.contains(&Assets::url("js/docs.js")));
+    let spec = serde_json::to_value(bitvault::api::spec()).unwrap();
+    for (path, item) in spec["paths"].as_object().unwrap() {
+        for (method, op) in item.as_object().unwrap() {
+            let id = op["operationId"].as_str().unwrap().replace('_', "-");
+            assert!(html.contains(&format!("<section class=\"bv-api-op\" id=\"{id}\"")), "{id}");
+            let title = format!(">{}</span> <code>{}</code></h2>", method.to_uppercase(), path.replace('{', "&#123;"));
+            assert!(html.contains(&title) || html.contains(&title.replace("&#123;", "{")), "{method} {path}");
+        }
+    }
+    for name in spec["components"]["schemas"].as_object().unwrap().keys() {
+        assert!(html.contains(&format!("id=\"type-{name}\"")), "{name}");
+    }
+    // Every link inside the page lands on something.
+    for link in html.split("href=\"#").skip(1).map(|s| &s[..s.find('"').unwrap()]) {
+        assert!(html.contains(&format!("id=\"{link}\"")), "#{link}");
+    }
+    // The curl lines use this instance's address, ready to run.
+    assert!(html.contains("curl -sS &#39;http://localhost:8080/api/v1/health&#39;"), "{html}");
+    assert!(html.contains("-F &#39;file=@notes.txt&#39;"));
+    // No script of its own: only the shell's.
+    assert!(!html.contains("swagger"), "{html}");
     for tag in html.split("<script").skip(1) {
         let open = &tag[..tag.find('>').unwrap()];
         assert!(open.contains("src="), "<script{open}>");

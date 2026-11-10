@@ -1,5 +1,5 @@
 #!/bin/sh
-# Writes THIRD-PARTY-LICENSES to stdout: the Rust crates (cargo-about), then the copied design files and Swagger UI.
+# Writes THIRD-PARTY-LICENSES to stdout: the Rust crates (cargo-about), then the copied design files.
 set -eu
 
 cargo about generate --locked about.hbs
@@ -15,7 +15,6 @@ Copied design files and vendored browser code
 - htmx: Zero-Clause BSD (0BSD), text below.
 - Design CSS and JavaScript from overcuriousity-dev-manifest v2026.11.0: MIT OR Apache-2.0,
   Copyright (c) 2026 overcuriousity.
-- Swagger UI 5.18.2: Apache-2.0, notice below.
 NOTICE
 
 cat <<'END_OF_MIT_TEXT'
@@ -50,8 +49,7 @@ for f in \
   assets/vendor/oc/fonts/OFL-AtkinsonHyperlegibleNext.txt \
   assets/vendor/oc/fonts/OFL-JetBrainsMono.txt \
   assets/vendor/oc/icons/LICENSE-lucide.txt \
-  assets/vendor/oc/htmx/LICENSE-htmx.txt \
-  assets/vendor/swagger-ui/LICENSE; do
+  assets/vendor/oc/htmx/LICENSE-htmx.txt; do
   printf '\n\n==== %s ====\n\n' "$f"
   cat "$f"
 done

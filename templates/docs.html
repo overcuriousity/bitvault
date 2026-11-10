@@ -1,3 +1,81 @@
+{%- macro runs(list) -%}
+{%- for r in list.iter() -%}{%- if r.code -%}<code>{{ r.text }}</code>{%- else -%}{{ r.text }}{%- endif -%}{%- endfor -%}
+{%- endmacro -%}
+{%- macro type_ref(t) -%}
+{%- if let Some(link) = t.link -%}<a href="#{{ link }}">{{ t.text }}</a>{%- else -%}{{ t.text }}{%- endif -%}
+{%- endmacro -%}
+{%- macro fields(list) -%}
+<dl class="bv-fields">
+  {%- for f in list.iter() %}
+  <div class="bv-field">
+    <dt><code>{{ f.name }}</code> <span class="bv-field__type">{% call type_ref(f.ty) %}{% endcall %}{% if let Some(place) = f.place %} · {{ place }}{% endif %}</span>{% if f.required %} <span class="bv-field__required">required</span>{% endif %}</dt>
+    {%- if !f.description.is_empty() %}
+    <dd>{% call runs(f.description) %}{% endcall %}</dd>
+    {%- endif %}
+  </div>
+  {%- endfor %}
+</dl>
+{%- endmacro -%}
 <div class="oc-page-head"><h1>API</h1></div>
-<p class="bv-lead">The REST API at /api/v1 needs no key. Try each call below.</p>
-<div class="bv-docs" id="swagger-ui" data-spec-url="/api/v1/openapi.json"></div>
+<div class="bv-api">
+<p class="bv-lead">REST calls under <code>/api/v1</code>, the same reference as the <a href="/api/v1/openapi.json">OpenAPI document</a>.</p>
+{%- for p in reference.intro %}
+<p>{% call runs(p) %}{% endcall %}</p>
+{%- endfor %}
+
+<nav class="bv-api-toc" aria-label="Calls">
+  <ul>
+    {%- for op in reference.operations %}
+    <li><a href="#{{ op.id }}"><span class="bv-method bv-method--{{ op.method_class() }}">{{ op.method }}</span> <code>{{ op.path }}</code></a> <span class="bv-api-toc__summary">{% call runs(op.summary) %}{% endcall %}</span></li>
+    {%- endfor %}
+  </ul>
+</nav>
+
+{%- for op in reference.operations %}
+<section class="bv-api-op" id="{{ op.id }}" aria-labelledby="{{ op.id }}-title">
+  <h2 id="{{ op.id }}-title"><span class="bv-method bv-method--{{ op.method_class() }}">{{ op.method }}</span> <code>{{ op.path }}</code></h2>
+  <p class="bv-api-op__summary">{% call runs(op.summary) %}{% endcall %}</p>
+  {%- for p in op.description %}
+  <p>{% call runs(p) %}{% endcall %}</p>
+  {%- endfor %}
+  {%- for ex in op.examples(base) %}
+  <div class="bv-api-example">
+    <pre><code>{{ ex }}</code></pre>
+    <button type="button" class="oc-btn oc-btn--icon oc-btn--row oc-copy" aria-label="Copy command" data-oc-tip="Copy command" data-oc-copy="{{ ex }}">{{ copy_icons|safe }}</button>
+  </div>
+  {%- endfor %}
+  {%- if !op.params.is_empty() %}
+  <h3>Parameters</h3>
+  {% call fields(op.params) %}{% endcall %}
+  {%- endif %}
+  {%- for b in op.bodies %}
+  <h3>Body <span class="bv-api-media">{{ b.media }}</span> {% call type_ref(b.ty) %}{% endcall %}</h3>
+  {% call fields(b.fields) %}{% endcall %}
+  {%- endfor %}
+  <h3>Responses</h3>
+  <dl class="bv-fields">
+    {%- for a in op.answers %}
+    <div class="bv-field">
+      <dt><code class="bv-status bv-status--{{ a.status.chars().next().unwrap_or('0') }}">{{ a.status }}</code>{% if let Some(ty) = a.ty %} <span class="bv-field__type">{% call type_ref(ty) %}{% endcall %}{% if let Some(media) = a.media %} · {{ media }}{% endif %}</span>{% endif %}</dt>
+      <dd>{% call runs(a.description) %}{% endcall %}</dd>
+    </div>
+    {%- endfor %}
+  </dl>
+</section>
+{%- endfor %}
+
+<section class="bv-api-types" aria-labelledby="types-title">
+  <h2 id="types-title">Types</h2>
+  {%- for s in reference.schemas %}
+  <section class="bv-api-type" id="type-{{ s.name }}" aria-labelledby="type-{{ s.name }}-title">
+    <h3 id="type-{{ s.name }}-title"><code>{{ s.name }}</code>{% if s.fields.is_empty() %} <span class="bv-field__type">{{ s.ty.text }}</span>{% endif %}</h3>
+    {%- for p in s.description %}
+    <p>{% call runs(p) %}{% endcall %}</p>
+    {%- endfor %}
+    {%- if !s.fields.is_empty() %}
+    {% call fields(s.fields) %}{% endcall %}
+    {%- endif %}
+  </section>
+  {%- endfor %}
+</section>
+</div>

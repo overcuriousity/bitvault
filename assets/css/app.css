@@ -1,4 +1,4 @@
-/* Deliberate deviation from the kit tokens (AGENTS.md exception 9): larger type, and controls
+/* Deliberate deviation from the kit tokens (AGENTS.md exception 8): larger type, and controls
    sized to match it. Later than 00-tokens.css, so these win; compact density still scales them. */
 :root {
   --text-page: 1.625rem;
@@ -14,9 +14,9 @@
 }
 
 /* One centred column for every page, with the top bar's logo and toggles aligned to its edges.
-   The admin and API pages carry tables and Swagger UI, so their column is wider. */
+   The admin page carries a wide table, so its column is wider. */
 .oc-shell--everyday { --bv-column: 50rem; }
-.oc-shell--everyday:has(.bv-admin, .bv-docs) { --bv-column: 72rem; }
+.oc-shell--everyday:has(.bv-admin) { --bv-column: 72rem; }
 .oc-shell--everyday .oc-main {
   width: 100%;
   max-width: calc(var(--bv-column) + 2 * var(--space-4));
@@ -232,7 +232,6 @@ html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
 
 .bv-pager { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) 0; }
 .bv-totals { max-width: 24rem; margin-bottom: var(--space-4); }
-.bv-docs { padding-bottom: var(--space-6); }
 
 .prose { font-size: var(--text-prose); line-height: 1.6; max-width: var(--measure); margin: 0; padding: var(--space-5) 0 var(--space-6); }
 .prose h1 { font-size: var(--text-page); margin-bottom: var(--space-4); }
@@ -257,3 +256,56 @@ html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
 .bv-footer { margin-top: var(--space-6); padding-block: var(--space-3); color: var(--color-fg-muted); font-size: var(--text-micro); text-align: center; }
 .bv-settings { margin-block: var(--space-4); }
 .bv-settings summary { cursor: pointer; font-weight: 600; }
+
+/* The API reference (/docs), rendered on the server from the OpenAPI document. Quiet lists rather
+   than tables, so it reads the same on a phone. */
+.bv-api { padding-bottom: var(--space-6); }
+.bv-api > p, .bv-api-op > p, .bv-api-type > p { max-width: var(--measure); margin-bottom: var(--space-3); line-height: 1.6; }
+.bv-api code { font-family: var(--font-mono); font-size: var(--text-mono); overflow-wrap: anywhere; }
+.bv-api h2 code, .bv-api h3 code { font-size: inherit; }
+.bv-api-toc ul { display: flex; flex-direction: column; gap: var(--space-1); margin: var(--space-4) 0 0; padding: 0; list-style: none; }
+.bv-api-toc a { color: var(--color-fg-primary); text-decoration: none; }
+.bv-api-toc a:hover code { text-decoration: underline; }
+.bv-api-toc__summary { margin-left: var(--space-2); color: var(--color-fg-muted); }
+.bv-method {
+  display: inline-block;
+  min-width: 4.25em;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-dense);
+  font-weight: 600;
+  text-align: center;
+}
+.bv-method--get { color: var(--color-accent); background: var(--color-accent-dim); }
+.bv-method--post { color: var(--color-success); background: var(--color-success-dim); }
+.bv-method--patch, .bv-method--put { color: var(--color-warning); background: var(--color-warning-dim); }
+.bv-method--delete { color: var(--color-danger); background: var(--color-danger-dim); }
+.bv-api-op, .bv-api-types { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--color-border-subtle); }
+.bv-api-op, .bv-api-type { scroll-margin-top: calc(var(--target-touch) + var(--space-3)); }
+.bv-api-op h2 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); font-size: var(--text-section); }
+.bv-api-types > h2 { font-size: var(--text-section); }
+.bv-api-op h3, .bv-api-type h3 { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-ui); font-weight: 600; }
+.bv-api-op__summary { font-weight: 500; }
+.bv-api-media { font-family: var(--font-mono); font-size: var(--text-dense); font-weight: 400; color: var(--color-fg-muted); }
+.bv-api-example { position: relative; margin: var(--space-3) 0; }
+.bv-api-example pre {
+  margin: 0;
+  padding: var(--space-3) calc(var(--space-3) + var(--target-tool)) var(--space-3) var(--space-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  line-height: 1.6;
+  overflow-x: auto;
+}
+.bv-api-example code { overflow-wrap: normal; white-space: pre; }
+.bv-api-example .oc-copy { position: absolute; top: var(--space-2); right: var(--space-2); }
+.bv-fields { display: flex; flex-direction: column; gap: var(--space-3); margin: 0; }
+.bv-field dt { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); }
+.bv-field dd { max-width: var(--measure); margin: var(--space-1) 0 0; color: var(--color-fg-secondary); }
+.bv-field__type { color: var(--color-fg-muted); font-size: var(--text-dense); }
+.bv-field__required { color: var(--color-warning); font-size: var(--text-micro); font-weight: 600; }
+.bv-status { font-weight: 600; }
+.bv-status--2 { color: var(--color-success); }
+.bv-status--4 { color: var(--color-warning); }
+.bv-status--5 { color: var(--color-danger); }
