@@ -7,6 +7,8 @@ const PREFIX_LEN = 4;
 const SEPARATORS = /[\s-]+/;
 // Three words of at most eight letters, with room for separators and spaces around them.
 export const MAX_TYPED = 64;
+// The longest text still read as a link to a paste.
+const MAX_LINK = 512;
 // Chips start at the second letter; one letter fits too many words to be a useful list.
 const CHIPS_FROM = 2;
 const CHIP_LIMIT = 6;
@@ -45,6 +47,23 @@ function readParts(words, parts, done, out) {
   for (let count = 2; count <= 3 - done.length; count++) {
     for (const split of wholeWords(words, part, count)) readParts(words, rest, [...done, ...split], out);
   }
+}
+
+/**
+ * The words in `value` when it is a link to a paste on one of `hosts`: what Copy link and a phone's
+ * share sheet hand out, with or without the scheme, a trailing slash, a query such as `?view` or a
+ * fragment. People paste such a link into the box to open the paste, not to keep the link. Null
+ * otherwise. The server's `words::link_words` reads the same.
+ */
+export function linkWords(value, hosts) {
+  const text = value.trim();
+  if (text.length > MAX_LINK || /\s/.test(text)) return null;
+  const match = /^(?:https?:\/\/)?([^/?#]+)\/([a-z-]+?)\/?(?:[?#].*)?$/i.exec(text);
+  if (!match) return null;
+  const host = match[1].toLowerCase();
+  if (!hosts.some((h) => h && h.toLowerCase() === host)) return null;
+  const parts = match[2].split("-").filter(Boolean);
+  return parts.length === 3 ? parts.join("-").toLowerCase() : null;
 }
 
 /**

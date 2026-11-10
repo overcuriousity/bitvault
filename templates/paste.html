@@ -70,6 +70,15 @@
 <pre class="paste-text{% if highlighted %} bv-code{% endif %}" id="paste-text"><code>{{ html|safe }}</code></pre>
 {%- endif %}
 {%- endif %}
+{#- One quiet line: when it was made, when it goes, and the short address where there is one. #}
+<p class="bv-meta">
+  {%- for fact in facts %}
+  {% if !loop.first %}<span aria-hidden="true">·</span> {% endif %}<span>{{ fact.term }} {{ fact.text }}{% if let Some(t) = fact.time %}<time datetime="{{ t.iso }}" title="{{ t.title }}" data-bv-relative="{{ t.kind }}">{{ t.text }}</time>{% endif %}</span>
+  {%- endfor %}
+  {%- if let Some(short) = short_url %}
+  <span aria-hidden="true">·</span> <span class="bv-meta__short"><span class="oc-mono">{{ short }}</span>{% call copy::copy("short address", short, self.copy_icons()) %}{% endcall %}</span>
+  {%- endif %}
+</p>
 {%- if !files.is_empty() %}
 <section class="bv-files" aria-labelledby="files-heading">
   <div class="bv-files__head">
@@ -95,16 +104,6 @@
   {%- endfor %}
 </section>
 {%- endif %}
-<dl class="oc-facts bv-meta">
-  <dt>Address</dt><dd><span class="oc-mono bv-address-text">{{ full_url }}</span></dd>
-  {%- if let Some(short) = short_url %}
-  <dt>Short address</dt><dd><span class="oc-mono bv-address-text">{{ short }}</span>{% call copy::copy("short address", short, self.copy_icons()) %}{% endcall %}</dd>
-  {%- endif %}
-  <dt>Privacy</dt><dd><span class="oc-status">{{ self.row_icon(privacy_icon)|safe }}{{ privacy_label }}</span></dd>
-  {%- for fact in facts %}
-  <dt>{{ fact.term }}</dt><dd><span class="oc-value">{{ fact.text }}{% if let Some(t) = fact.time %}<time datetime="{{ t.iso }}" title="{{ t.title }}" data-bv-relative="{{ t.kind }}">{{ t.text }}</time>{% endif %}</span></dd>
-  {%- endfor %}
-</dl>
 {#- A secret paste's delete needs secret.js, which plain HTTP does not load; the admin needs no proof. #}
 {%- if !burned && !(https_only && delete.secret()) %}
 {% call delete_form::form(delete, self.icon("trash-2")) %}{% endcall %}

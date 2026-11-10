@@ -363,6 +363,39 @@ async fn opening_from_the_box_needs_no_uploader_password_but_keeping_does() {
 }
 
 #[tokio::test]
+async fn a_pasted_link_to_a_paste_here_opens_it_and_any_other_link_is_kept() {
+    let mut app = app_with("public_url = \"https://paste.example\"\n[app]\nshort_url = \"https://s.example\"\n").await;
+    app.origin = ("paste.example".into(), "https://paste.example".into());
+    let (words, _) = support::created(&post_box(&app, "kept", &[]).await);
+    for link in [
+        format!("https://paste.example/{words}"),
+        format!("https://s.example/{words}"),
+        format!("paste.example/{words}?view"),
+        format!(" https://paste.example/{words}/\n"),
+    ] {
+        let res = post_box(&app, &link, &[]).await;
+        assert_eq!(res.status(), StatusCode::SEE_OTHER, "{link}");
+        assert_eq!(res.headers()[header::LOCATION], format!("/{words}"), "{link}");
+        assert!(res.headers().get(header::SET_COOKIE).is_none(), "{link}: nothing was created");
+    }
+    // The lookup for the browser's box takes the link too.
+    let res = app.post_form("/open", &format!("words=https://paste.example/{words}")).await;
+    assert_eq!(res.headers()["hx-redirect"], format!("/{words}"));
+    // A link elsewhere, and one to a paste nobody made, become pastes of their own.
+    let missing = bitvault::domain::words::PasteId(7).words();
+    for link in [format!("https://evil.example/{words}"), format!("https://paste.example/{missing}")] {
+        let res = post_box(&app, &link, &[]).await;
+        let (made, _) = support::created(&res);
+        assert_ne!(made, words, "{link}");
+    }
+    // Asked to keep it, the link is kept.
+    let res = post_box(&app, &format!("https://paste.example/{words}"), &[("intent", None, b"create")]).await;
+    assert_ne!(support::created(&res).0, words);
+    let html = body_text(app.get("/").await).await;
+    assert!(html.contains("data-short-host=\"s.example\""), "{html}");
+}
+
+#[tokio::test]
 async fn an_empty_uploader_password_field_is_no_attempt() {
     let app = app_with("[app]\nuploader_password = \"up\"\n").await;
     let (words, _) = support::created(

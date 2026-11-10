@@ -983,12 +983,19 @@ async fn the_paste_page_puts_the_content_first_and_delete_last() {
         "class=\"bv-words\"",
         "role=\"toolbar\"",
         "id=\"paste-text\"",
+        "class=\"bv-meta\"",
         "id=\"files-heading\"",
-        "<dt>Expires</dt>",
         "class=\"bv-delete\"",
     ];
     let at: Vec<usize> = order.iter().map(|n| position(&html, n)).collect();
     assert!(at.windows(2).all(|w| w[0] < w[1]), "{order:?} found at {at:?}");
+    // One quiet line under the content: the dates and the reads, not the address or the level.
+    let meta = &html[position(&html, "class=\"bv-meta\"")..position(&html, "id=\"files-heading\"")];
+    for part in ["<span>Created 20", "<span>Expires <time", "<span>Reads 1, last <time"] {
+        assert!(meta.contains(part), "{part}: {meta}");
+    }
+    assert!(!html.contains("<dt>Address</dt>") && !html.contains("<dt>Privacy</dt>"), "{html}");
+    assert!(!meta.contains(&w) && !meta.contains("Public"), "{meta}");
 }
 
 #[tokio::test]
@@ -1056,7 +1063,7 @@ async fn expires_is_a_time_element_with_the_absolute_time_in_its_title() {
     let app = app_with("[app]\nmax_expiry = \"never\"\n").await;
     let never = create(&app, NewPaste { expiry: Expiry::Never, ..new("forever", Privacy::Public) }).await;
     let html = body_text(app.get(&format!("/{never}")).await).await;
-    assert!(html.contains("<dt>Expires</dt><dd><span class=\"oc-value\">Never</span>"), "{html}");
+    assert!(html.contains("<span>Expires Never</span>"), "{html}");
 }
 
 #[tokio::test]
@@ -1207,7 +1214,6 @@ async fn over_plain_http_without_a_public_url_addresses_use_the_request_host() {
     let html = body_text(app.get(&format!("/{w}")).await).await;
     let full = format!("http://{LAN_HOST}/{w}");
     assert!(html.contains(&format!("data-oc-copy=\"{full}\"")), "{html}");
-    assert!(html.contains(&format!(">{full}<")), "{html}");
     assert!(html.contains(&format!("data-oc-copy=\"{full}/file/1\"")), "{html}");
     assert!(html.contains(&bitvault::domain::qr::svg(&full).unwrap()), "the QR code encodes the LAN address");
     let raw: String = url::form_urlencoded::byte_serialize(format!("{full}/raw").as_bytes()).collect();
@@ -1216,7 +1222,7 @@ async fn over_plain_http_without_a_public_url_addresses_use_the_request_host() {
     let mut other = app.req("GET", &format!("/{w}")).body(Body::empty()).unwrap();
     other.headers_mut().insert(header::HOST, "bitvault.lan".parse().unwrap());
     let html = body_text(app.send(other).await).await;
-    assert!(html.contains(&format!(">http://bitvault.lan/{w}<")), "{html}");
+    assert!(html.contains(&format!("data-oc-copy=\"http://bitvault.lan/{w}\"")), "{html}");
 }
 
 #[tokio::test]
@@ -1227,7 +1233,8 @@ async fn over_plain_http_the_creator_cookie_is_not_secure_even_with_an_https_pub
     let (w, cookie) = support::created(&res);
     assert_eq!(set_cookie(&res).unwrap(), format!("{cookie}; Path=/{w}; HttpOnly; SameSite=Lax; Max-Age=600"));
     let html = body_text(app.get(&format!("/{w}")).await).await;
-    assert!(html.contains(&format!(">https://paste.example/{w}<")), "the public_url wins over the Host: {html}");
+    let link = format!("data-oc-copy=\"https://paste.example/{w}\"");
+    assert!(html.contains(&link), "the public_url wins over the Host: {html}");
 }
 
 #[tokio::test]

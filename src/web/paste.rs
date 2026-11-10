@@ -16,8 +16,7 @@ use tokio::sync::Semaphore;
 use super::admin::MaybeAdmin;
 use super::files::{GrantQuery, inline_image};
 use super::{
-    Extras, IconSize, TimeView, copy_icons, date, escape_text, icon, page_with, paste_id, paste_urls, privacy_icon,
-    privacy_label, render, size,
+    Extras, IconSize, TimeView, copy_icons, date, escape_text, icon, page_with, paste_id, paste_urls, render, size,
 };
 use crate::assets::Assets;
 use crate::domain::paste::{self, Access, Body, DeleteAuth, Opened, Paste};
@@ -125,8 +124,6 @@ struct PasteView {
     word_list: Vec<String>,
     full_url: String,
     short_url: Option<String>,
-    privacy_label: &'static str,
-    privacy_icon: &'static str,
     facts: Vec<Fact>,
     burned: bool,
     secret: bool,
@@ -299,8 +296,6 @@ fn paste_view(
         created,
         word_list: words.split('-').map(str::to_owned).collect(),
         short_url,
-        privacy_label: privacy_label(p.privacy),
-        privacy_icon: privacy_icon(p.privacy),
         facts,
         burned,
         secret,

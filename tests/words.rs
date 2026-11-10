@@ -176,3 +176,36 @@ fn the_browser_word_list_matches_the_server_list() {
     assert_eq!(lines, words::list());
     assert!(text.ends_with('\n') && !text.ends_with("\n\n"));
 }
+
+#[test]
+fn a_link_to_a_paste_here_reads_as_its_words() {
+    let hosts = ["paste.example", "s.example:8443"];
+    let w = PasteId(123_456).words();
+    for link in [
+        format!("https://paste.example/{w}"),
+        format!("  https://paste.example/{w}\n"),
+        format!("HTTPS://Paste.Example/{}", w.to_uppercase()),
+        format!("http://paste.example/{w}/"),
+        format!("paste.example/{w}"),
+        format!("https://paste.example/{w}?view"),
+        format!("https://paste.example/{w}#L3"),
+        format!("https://s.example:8443/{w}"),
+    ] {
+        let read = words::link_words(&link, &hosts).unwrap_or_else(|| panic!("{link}"));
+        assert_eq!(words::parse(read).unwrap(), PasteId(123_456), "{link}");
+    }
+    for text in [
+        format!("https://evil.example/{w}"),
+        format!("https://paste.example.evil.example/{w}"),
+        format!("https://paste.example:8080/{w}"),
+        format!("https://paste.example/{w}/raw"),
+        "https://paste.example/guide".to_owned(),
+        "https://paste.example/".to_owned(),
+        format!("see https://paste.example/{w}"),
+        format!("ftp://paste.example/{w}"),
+        w.clone(),
+        String::new(),
+    ] {
+        assert_eq!(words::link_words(&text, &hosts), None, "{text}");
+    }
+}

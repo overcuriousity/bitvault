@@ -157,16 +157,6 @@ pub fn privacy_label(p: Privacy) -> &'static str {
     }
 }
 
-pub fn privacy_icon(p: Privacy) -> &'static str {
-    match p {
-        Privacy::Public => "eye",
-        Privacy::Unlisted => "link",
-        Privacy::Readonly => "file",
-        Privacy::Private => "key-round",
-        Privacy::Secret => "eye-off",
-    }
-}
-
 /// A Unix time as "2026-11-09 14:03 UTC".
 pub fn date(ts: i64) -> String {
     let format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute] UTC");

@@ -62,6 +62,8 @@ struct Home {
     /// Per-file plaintext limit for secret pastes, which `create.js` enforces before encrypting.
     max_secret_mb: u64,
     words_src: String,
+    /// `short_url`'s host, so `box.js` reads a short link to a paste as that paste's words.
+    short_host: Option<String>,
     help_icon: String,
     /// The options' one-line summary as rendered; `create.js` keeps it in sync.
     summary: String,
@@ -142,6 +144,7 @@ async fn index(
         max_file_mb: app.max_file_mb,
         max_secret_mb: app.max_secret_file_mb,
         words_src: Assets::url("bip39-english.txt"),
+        short_host: st.dep.short_host.clone(),
         help_icon: super::icon("circle-question-mark", super::IconSize::Row),
         summary,
         create_icon: super::icon("plus", super::IconSize::Tool),
@@ -159,11 +162,19 @@ async fn open(
     headers: HeaderMap,
     UrlForm(form): UrlForm<OpenForm>,
 ) -> Result<Response, Error> {
-    let id = words::parse_typed(&form.words)?;
+    let hosts = own_hosts(&st, &headers);
+    let id = words::parse_typed(words::link_words(&form.words, &hosts).unwrap_or(&form.words))?;
     if !paste::exists(&st, id, domain::now()).await? {
         return Err(invalid("No paste has these words. Check them and try again."));
     }
     Ok(go_to(&format!("/{}", id.words()), headers.contains_key("hx-request")))
+}
+
+/// The host names a link to a paste here may carry: the one this request came to, which the host
+/// check has vouched for, `public_url`'s and `short_url`'s.
+fn own_hosts<'a>(st: &'a AppState, headers: &'a HeaderMap) -> Vec<&'a str> {
+    let asked = headers.get(header::HOST).and_then(|h| h.to_str().ok());
+    asked.into_iter().chain([st.dep.public_host.as_str()]).chain(st.dep.short_host.as_deref()).collect()
 }
 
 /// The uploader password, when one is configured, must arrive before any file.
@@ -400,10 +411,11 @@ async fn create(State(st): State<AppState>, req: Request) -> Result<Response, Er
     let htmx = req.headers().contains_key("hx-request");
     let ip = req.extensions().get::<ClientIp>().map(|c| c.0);
     let rules = CreateRules { uploader_checked: false, allow_secret: true, default_editable: false };
+    let headers = req.headers().clone();
     let (form, staging, gate) = read_form(&st, req, rules).await?;
     let now = domain::now();
     if staging.is_none()
-        && let Some(id) = existing_paste(&st, &form, ip, now).await?
+        && let Some(id) = existing_paste(&st, &form, &own_hosts(&st, &headers), ip, now).await?
     {
         return Ok(go_to(&format!("/{}", id.words()), htmx));
     }
@@ -425,19 +437,25 @@ fn go_to(target: &str, htmx: bool) -> Response {
     }
 }
 
-/// The paste a box of plain text names, when the text is three paste words and that paste exists.
-/// A lookup that finds nothing keeps its token, like a miss on `/open`.
+/// The paste a box of plain text names, when the text is three paste words, or a link to a paste
+/// on one of `hosts`, and that paste exists. A lookup that finds nothing keeps its token, like a
+/// miss on `/open`.
 async fn existing_paste(
     st: &AppState,
     form: &Form,
+    hosts: &[&str],
     ip: Option<std::net::IpAddr>,
     now: i64,
 ) -> Result<Option<words::PasteId>, Error> {
-    // Three words of at most eight letters, with room for separators and spaces around them.
-    if form.create_only || form.content_container.is_some() || form.content.len() > 64 {
+    if form.create_only || form.content_container.is_some() {
         return Ok(None);
     }
-    let Ok(id) = words::parse_typed(&form.content) else { return Ok(None) };
+    let typed = words::link_words(&form.content, hosts).unwrap_or(&form.content);
+    // Three words of at most eight letters, with room for separators and spaces around them.
+    if typed.len() > 64 {
+        return Ok(None);
+    }
+    let Ok(id) = words::parse_typed(typed) else { return Ok(None) };
     if let Some(ip) = ip {
         st.lookups.take(ip)?;
     }

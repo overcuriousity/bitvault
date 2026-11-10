@@ -5,7 +5,7 @@
 //
 // Enter on a box that is one line of three words opens that paste, the quick way in. It only ever
 // opens: words no paste has stay in the box with a note, and keeping them takes the button.
-import { accept, addressLike, chips, choose, MAX_TYPED, readAddress, settled } from "./words.js";
+import { accept, addressLike, chips, choose, linkWords, MAX_TYPED, readAddress, settled } from "./words.js";
 
 // Long enough that a lookup waits for a pause in typing, short enough to answer before a press.
 const LOOKUP_DELAY = 350;
@@ -117,10 +117,15 @@ export function bindBox(form) {
 
   const hasFiles = () => (files?.files?.length ?? 0) > 0;
 
+  // A pasted link to a paste here stands for that paste's words.
+  const hosts = [window.location.host, box.dataset.shortHost];
+  const linked = () => linkWords(box.value, hosts);
+  const typed = () => linked() ?? box.value.trim();
+
   // What the box reads as now, without waiting for a lookup.
   const reading = () => {
     if (!words) return { state: "idle" };
-    const read = readAddress(box.value.trim(), words);
+    const read = readAddress(typed(), words);
     if (!read) return { state: "idle" };
     if (read.ambiguous) return { state: "ambiguous" };
     if (hasFiles()) return { state: "files", address: read.address };
@@ -175,7 +180,7 @@ export function bindBox(form) {
   let needed = null;
   const size = () => {
     if (!box.value.trim()) grown = false;
-    else if (!grown && !addressLike(box.value, words)) grown = true;
+    else if (!grown && !addressLike(box.value, words) && linked() === null) grown = true;
     form.toggleAttribute("data-compact", !grown);
     const need = grown || hasFiles();
     if (options && need !== needed) {
@@ -227,7 +232,7 @@ export function bindBox(form) {
     const { state, address } = render();
     clearTimeout(timer);
     if (state !== "checking") return;
-    const delay = settled(box.value, words) ? SETTLED_DELAY : LOOKUP_DELAY;
+    const delay = settled(typed(), words) ? SETTLED_DELAY : LOOKUP_DELAY;
     timer = setTimeout(() => resolve(address).then(render), delay);
   }
 
@@ -240,7 +245,7 @@ export function bindBox(form) {
   };
   const enter = async () => {
     await load();
-    const read = words ? readAddress(box.value.trim(), words) : null;
+    const read = words ? readAddress(typed(), words) : null;
     if (!read || hasFiles()) return newLine();
     if (read.ambiguous) {
       render();
@@ -254,7 +259,7 @@ export function bindBox(form) {
   box.addEventListener("beforeinput", (event) => {
     if (event.inputType !== "insertLineBreak" || event.isComposing) return;
     const looksLikeWords = /^\s*[a-z]+(?:[\s-]+[a-z]+){0,2}\s*$/i.test(box.value) && box.value.length <= MAX_TYPED;
-    if (!looksLikeWords || box.selectionEnd !== box.value.length) return;
+    if (!(looksLikeWords || linked() !== null) || box.selectionEnd !== box.value.length) return;
     event.preventDefault();
     enter();
   });
@@ -299,7 +304,7 @@ export function bindBox(form) {
       if (submitter && submitter === keep) return { intent: "create" };
       await load();
       if (!words || hasFiles()) return {};
-      const read = readAddress(box.value.trim(), words);
+      const read = readAddress(typed(), words);
       if (!read) return {};
       if (read.ambiguous) return { intent: "create" };
       const result = await resolve(read.address);

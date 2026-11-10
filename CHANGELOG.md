@@ -27,7 +27,7 @@ This is a rewrite and a fresh start. There is no compatibility with 1.6.0: no da
 - A generated OpenAPI document at `/api/v1/openapi.json`, and an API reference at `/docs` rendered from it on the server, with a `curl` line for each call.
 - Per-address rate limits: creates 30 per minute (burst 10), other API calls 120 (burst 30), wrong passwords (the uploader password included) 10 (burst 5), and lookups of words that match no paste 20 (burst 10), so unlisted pastes cannot be enumerated.
 - After creating on the web you see the new paste with its words, address, Copy link, Share, QR code and delete; creating on the home page shows upload progress and you can paste images from the clipboard.
-- One box on the home page: text or a link becomes a new paste, and three words open the paste they name, with Enter. The words may be separated by spaces or hyphens, run together, or cut to their first four letters; Tab completes a word. The options fold away until the box holds text.
+- One box on the home page: text or a link becomes a new paste, and three words (or a pasted link to a paste here) open the paste they name, with Enter. The words may be separated by spaces or hyphens, run together, or cut to their first four letters; Tab completes a word. The options fold away until the box holds text.
 - Add `?view` to a link's address to see where it goes before following it.
 - Syntax "Automatic" (the default) detects the language from the first line, such as a shebang; code gets line numbers.
 - Copy text and Share (where the browser has it) on paste pages; raw text, link and QR stay in one toolbar.

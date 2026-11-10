@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { accept, addressLike, chips, choose, findIn, readAddress } from "./words.js";
+import { accept, addressLike, chips, choose, findIn, linkWords, readAddress } from "./words.js";
 
 const WORDS = readFileSync(new URL("../bip39-english.txt", import.meta.url), "utf8").split("\n").filter(Boolean);
 
@@ -69,4 +69,39 @@ test("the box grows for anything that cannot be three words", () => {
   // Without the word list, only the shape counts.
   assert.equal(addressLike("lorem ipsum", null), true);
   assert.equal(addressLike("lorem ipsum dolor sit", null), false);
+});
+
+test("a link to a paste here reads as that paste's words", () => {
+  const hosts = ["paste.example", "s.example:8443", undefined];
+  for (const link of [
+    "https://paste.example/happy-apple-banana",
+    "  https://paste.example/happy-apple-banana\n",
+    "HTTPS://Paste.Example/Happy-Apple-Banana",
+    "http://paste.example/happy-apple-banana/",
+    "paste.example/happy-apple-banana",
+    "https://paste.example/happy-apple-banana?view",
+    "https://paste.example/happy-apple-banana#L3",
+    "https://s.example:8443/happy-apple-banana",
+  ]) {
+    assert.equal(linkWords(link, hosts), "happy-apple-banana", link);
+  }
+});
+
+test("other links and other pages stay what they are", () => {
+  const hosts = ["paste.example"];
+  for (const text of [
+    "https://evil.example/happy-apple-banana",
+    "https://paste.example.evil.example/happy-apple-banana",
+    "https://paste.example:8080/happy-apple-banana",
+    "https://paste.example/happy-apple-banana/raw",
+    "https://paste.example/guide",
+    "https://paste.example/happy-apple",
+    "https://paste.example/",
+    "see https://paste.example/happy-apple-banana",
+    "happy-apple-banana",
+    "ftp://paste.example/happy-apple-banana",
+    "",
+  ]) {
+    assert.equal(linkWords(text, hosts), null, text);
+  }
 });

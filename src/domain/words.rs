@@ -38,6 +38,30 @@ pub fn parse_typed(input: &str) -> Result<PasteId, Error> {
     parse_with(input, true)
 }
 
+/// The longest text still read as a link to a paste.
+const MAX_LINK: usize = 512;
+
+/// The words in `text` when it is a link to a paste on one of `hosts` (each a host name, with
+/// its port when the address has one): what Copy link and a phone's share sheet hand out, with
+/// or without the scheme, a trailing slash, a query such as `?view` or a fragment. People paste
+/// such a link into the box to open the paste, not to keep the link. `words.js` reads the same.
+pub fn link_words<'a>(text: &'a str, hosts: &[&str]) -> Option<&'a str> {
+    let text = text.trim();
+    if text.len() > MAX_LINK || text.contains(char::is_whitespace) {
+        return None;
+    }
+    let scheme =
+        ["https://", "http://"].into_iter().find(|s| text.get(..s.len()).is_some_and(|t| t.eq_ignore_ascii_case(s)));
+    let (host, path) = text.get(scheme.map_or(0, str::len)..)?.split_once('/')?;
+    if host.is_empty() || !hosts.iter().any(|h| h.eq_ignore_ascii_case(host)) {
+        return None;
+    }
+    let path = path.split(['?', '#']).next().unwrap_or_default();
+    let segment = path.strip_suffix('/').unwrap_or(path);
+    let shaped = segment.bytes().all(|b| b.is_ascii_alphabetic() || b == b'-');
+    (shaped && parse(segment).is_ok()).then_some(segment)
+}
+
 fn parse_with(input: &str, joined: bool) -> Result<PasteId, Error> {
     let lowered = input.to_lowercase();
     let parts: Vec<&str> = lowered.split(|c: char| c.is_whitespace() || c == '-').filter(|p| !p.is_empty()).collect();

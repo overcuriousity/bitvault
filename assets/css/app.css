@@ -177,14 +177,15 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-address > .oc-mono { overflow-wrap: anywhere; }
 .bv-target { display: flex; flex-direction: column; gap: var(--space-2); }
 .bv-target .bv-address { color: var(--color-fg-primary); }
-/* The paste facts are a quiet list, without the kit's row rules. */
-.bv-meta > dt, .bv-meta > dd { min-height: 0; border-bottom: 0; }
+/* The paste's dates are one quiet line close under its content. */
+.bv-meta { margin-top: calc(-1 * var(--space-2)); color: var(--color-fg-muted); font-size: var(--text-micro); overflow-wrap: anywhere; }
+.bv-meta__short { display: inline-flex; align-items: center; gap: var(--space-1); }
+.bv-meta .oc-mono { font-size: inherit; }
 .bv-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .bv-actions .oc-btn { gap: var(--space-1); }
 .bv-actions .oc-btn[data-copied] { color: var(--color-success); }
 html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
 .bv-copy-scratch { position: fixed; top: 0; left: -9999px; opacity: 0; }
-.bv-address-text { overflow-wrap: anywhere; }
 .bv-delete { display: flex; align-items: flex-end; gap: var(--space-2); margin: 0; }
 .bv-delete .oc-field { flex: 0 1 18rem; }
 .bv-inline { display: inline; margin: 0; }

@@ -11,7 +11,7 @@
   <div class="oc-field bv-box">
     <label for="content">Text, a link, or three words</label>
     {#- The placeholder is an example of the words, the label says text goes here too. #}
-    <textarea class="oc-input bv-mono" id="content" name="content" rows="8" spellcheck="false" autocomplete="off" autofocus placeholder="apple-banana-cherry" aria-describedby="box-echo" data-words-src="{{ words_src }}"></textarea>
+    <textarea class="oc-input bv-mono" id="content" name="content" rows="8" spellcheck="false" autocomplete="off" autofocus placeholder="apple-banana-cherry" aria-describedby="box-echo" data-words-src="{{ words_src }}"{% if let Some(host) = short_host %} data-short-host="{{ host }}"{% endif %}></textarea>
     {#- Empty until there is something to say: box.js names what Enter or the button will do. #}
     <p class="bv-hint" id="box-echo" aria-live="polite"></p>
     {#- box.js fills this with the paste words that fit what is being typed. #}
