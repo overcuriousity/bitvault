@@ -1,6 +1,8 @@
-// The create form: shows the password field the chosen privacy needs, keeps the options summary
-// in sync, accepts dropped and pasted files, checks sizes before anything is sent, and posts with
-// upload progress. A secret paste's text and files are encrypted in the browser first.
+// The create form: shows the password field the chosen privacy needs, accepts dropped and pasted
+// files, checks sizes before anything is sent, and posts with upload progress. A secret paste's
+// text and files are encrypted in the browser first. When the box holds the words of a paste that
+// exists, box.js says so and the submit opens that paste instead.
+import { bindBox } from "./box.js";
 import { seal, toHex, verifier } from "./crypto.js";
 import { serverMessage, showNotice } from "./notice.js";
 
@@ -25,14 +27,6 @@ export function sizeProblem(files, privacy, maxFileMb, maxSecretMb) {
   const total = list.reduce((sum, f) => sum + f.size, 0);
   if (total > maxFileMb * MIB) return `Files can be at most ${maxFileMb} MB together.`;
   return null;
-}
-
-// The options summary, the same line the server renders: "Unlisted · 24 hours".
-export function summaryText(privacy, expiry, burn) {
-  const parts = [privacy, expiry].filter(Boolean);
-  const reads = Number(burn);
-  if (Number.isInteger(reads) && reads > 0) parts.push(reads === 1 ? "Burns after 1 read" : `Burns after ${reads} reads`);
-  return parts.join(" · ");
 }
 
 export function progressText(loaded, total) {
@@ -96,21 +90,6 @@ function bindPrivacy(form) {
   sync();
 }
 
-function bindSummary(form) {
-  const out = form.querySelector("#options-summary");
-  if (!out) return;
-  const chosen = (id) => {
-    const select = form.querySelector(`#${id}`);
-    return select?.options[select.selectedIndex]?.textContent ?? "";
-  };
-  const sync = () => {
-    out.textContent = summaryText(chosen("privacy"), chosen("expiry"), form.querySelector("#burn")?.value);
-  };
-  form.addEventListener("change", sync);
-  form.addEventListener("input", sync);
-  sync();
-}
-
 // The kit's desktop listbox lists options flat; this adds the select's group labels to it.
 function labelGroups(select) {
   const list = select?.nextElementSibling?.querySelector('[role="listbox"]');
@@ -129,15 +108,22 @@ function labelGroups(select) {
   }
 }
 
+// The whole form takes dropped files; the closed "Attach files" opens once there are any.
 function bindDropZone(form) {
   const input = form.querySelector("#files");
-  const zone = input?.closest(".bv-files");
-  if (!zone) return;
-  zone.classList.add("bv-drop");
-  const hint = document.createElement("p");
-  hint.className = "bv-drop__hint";
-  hint.textContent = "Or drop or paste files here.";
-  zone.append(hint);
+  if (!input) return;
+  const attach = form.querySelector("#attach");
+  const summary = attach?.querySelector("summary");
+  if (summary) {
+    const hint = document.createElement("span");
+    hint.className = "bv-attach__hint";
+    hint.textContent = "or drop or paste them here";
+    summary.append(" ", hint);
+  }
+  input.addEventListener("change", () => {
+    if (attach && input.files.length > 0) attach.open = true;
+  });
+  const zone = form;
   let depth = 0;
   const hasFiles = (e) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
   zone.addEventListener("dragenter", (e) => {
@@ -275,22 +261,25 @@ async function secretBody(form, password, files) {
   return body;
 }
 
-function bindSubmit(form) {
+function bindSubmit(form, box) {
   const region = form.querySelector("#create-notice");
-  const options = form.querySelector(".bv-options");
   const privacySelect = form.querySelector("#privacy");
   const passwordInput = form.querySelector("#secret-password");
   const fileInput = form.querySelector("#files");
   const button = form.querySelector("button[type=submit]");
   let running = false;
   let busy = null;
-  const fail = (message) => {
-    if (options) options.open = true;
-    showNotice(region, "danger", message);
-  };
+  const fail = (message) => showNotice(region, "danger", message);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (running || !button) return;
+    running = true;
+    const decision = await box.decide(e.submitter).catch(() => ({}));
+    if (decision.open) {
+      window.location.assign(decision.open);
+      return;
+    }
+    running = false;
     // The live select decides, not the mirrored attribute, which could lag behind it.
     const secret = privacySelect?.value === "secret";
     const files = Array.from(fileInput?.files ?? []);
@@ -306,7 +295,7 @@ function bindSubmit(form) {
       return;
     }
     running = true;
-    busy = busyButton(button);
+    busy = busyButton(e.submitter ?? button);
     try {
       let body;
       if (secret) {
@@ -315,6 +304,7 @@ function bindSubmit(form) {
       } else {
         // In DOM order, so the options come before the files as the server requires.
         body = new FormData(form);
+        if (decision.intent) body.append("intent", decision.intent);
       }
       const xhr = await send(body, busy.progress);
       if (xhr.status >= 200 && xhr.status < 300) {
@@ -331,10 +321,12 @@ function bindSubmit(form) {
     running = false;
     busy.reset();
   });
-  // A page restored from the back-forward cache keeps the busy button of the create that left it.
+  // A page restored from the back-forward cache keeps the busy button of the create that left it,
+  // or the pending submit of a paste it opened.
   window.addEventListener("pageshow", (event) => {
-    if (!event.persisted || !busy) return;
+    if (!event.persisted) return;
     running = false;
+    if (!busy) return;
     busy.reset();
     busy = null;
     showNotice(region, "", "");
@@ -347,11 +339,10 @@ if (typeof document !== "undefined") {
     // The page ships Secret disabled, so a browser without this script cannot post plaintext as secret.
     form.querySelector('#privacy option[value="secret"]')?.removeAttribute("disabled");
     bindPrivacy(form);
-    bindSummary(form);
     labelGroups(form.querySelector("#privacy"));
     bindDropZone(form);
     bindPaste(form);
     bindSizeCheck(form);
-    bindSubmit(form);
+    bindSubmit(form, bindBox(form));
   }
 }

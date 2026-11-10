@@ -25,7 +25,7 @@
 .oc-shell--everyday .oc-topbar { padding-inline: max(var(--space-3), calc((100% - var(--bv-column)) / 2)); }
 /* Inside the column, page blocks use its full width so their edges line up. */
 .oc-columns { max-width: none; }
-.bv-create, .bv-edit, .bv-open .oc-form { max-width: none; }
+.bv-create, .bv-edit { max-width: none; }
 
 .bv-sign-in { margin: 0; }
 html { background: var(--color-bg-base); }
@@ -76,7 +76,8 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
   .oc-topbar__logo { min-height: var(--target-touch); }
   .oc-field select:not(.oc-select-native) { min-height: var(--target-touch); font-size: 16px; }
   .bv-check { min-height: var(--target-touch); }
-  .bv-create .bv-options > summary { padding-block: var(--space-3); }
+  .bv-attach > summary { padding-block: var(--space-3); }
+  .bv-chip { min-height: var(--target-touch); }
   .bv-settings summary { padding-block: var(--space-3); }
   .bv-check input { width: 1.5rem; height: 1.5rem; }
   .bv-admin-table td a { display: flex; align-items: center; min-height: var(--target-touch); }
@@ -87,12 +88,6 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 
 .bv-mono { font-family: var(--font-mono); }
 .bv-check { display: flex; align-items: center; gap: var(--space-2); }
-.bv-open { padding-top: var(--space-5); margin-bottom: var(--space-6); }
-.bv-open h2, .bv-new h2 { margin-bottom: var(--space-3); }
-.bv-new h2 + .bv-lead { margin-top: calc(-1 * var(--space-2)); }
-/* One row: the words field grows, the button sits at its end, and wraps below when narrow. */
-.bv-open .oc-form { flex-direction: row; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2); }
-.bv-open .oc-field { flex: 1 1 12rem; }
 .bv-hint { margin-top: var(--space-1); color: var(--color-fg-muted); font-size: var(--text-micro); }
 .bv-hint[hidden] { display: none; }
 
@@ -101,10 +96,17 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-label > label:not(.bv-check) { font-weight: 500; color: var(--color-fg-secondary); }
 .bv-help { color: var(--color-fg-muted); }
 
-/* The create options: closed by default behind a one-line summary of the choices. */
-.bv-options > summary { padding-block: var(--space-1); font-weight: 500; color: var(--color-fg-secondary); cursor: pointer; }
-.bv-options__summary { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
-.bv-options__body { display: flex; flex-direction: column; gap: var(--space-4); padding-top: var(--space-3); }
+/* The home page: one box, the options in as few rows as the width allows, files behind a disclosure. */
+.bv-create { padding-top: var(--space-5); }
+.bv-box { gap: var(--space-1); }
+.bv-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.bv-chips[hidden] { display: none; }
+.bv-chip { height: auto; min-height: 1.75rem; padding: 0 var(--space-2); font-family: var(--font-mono); font-size: var(--text-dense); }
+.bv-chip:first-child { border-color: var(--color-accent); }
+.bv-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: var(--space-3); align-items: end; }
+.bv-attach > summary { width: fit-content; padding-block: var(--space-1); font-weight: 500; color: var(--color-fg-secondary); cursor: pointer; }
+.bv-attach > .bv-files { margin-top: var(--space-2); }
+.bv-attach__hint { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
 
 /* The listbox of a grouped select shows the group labels create.js adds. */
 .oc-menu .bv-menu-group { padding: var(--space-2) var(--space-3) var(--space-1); color: var(--color-fg-muted); font-size: var(--text-micro); font-weight: 600; }
@@ -177,10 +179,8 @@ html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
 .bv-secret-open[hidden], .bv-delete[hidden] { display: none; }
 
 /* create.js turns the file field into a drop zone. */
-/* No box until files are dragged over it; an outline, so the page does not shift. */
-.bv-create .bv-drop { border-radius: var(--radius-md); }
-.bv-create .bv-drop[data-dragging] { outline: 2px dashed var(--color-accent); outline-offset: var(--space-2); background: var(--color-accent-dim); }
-.bv-drop__hint { color: var(--color-fg-muted); font-size: var(--text-micro); }
+/* The whole form takes dropped files; an outline while they are over it, so the page does not shift. */
+.bv-create[data-dragging] { outline: 2px dashed var(--color-accent); outline-offset: var(--space-2); border-radius: var(--radius-md); }
 
 .bv-pager { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) 0; }
 .bv-totals { max-width: 24rem; margin-bottom: var(--space-4); }

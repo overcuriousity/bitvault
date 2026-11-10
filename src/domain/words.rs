@@ -26,14 +26,24 @@ impl PasteId {
 pub const PREFIX_LEN: usize = 4;
 
 /// Accepts words separated by spaces and/or hyphens, in any case, each in full or as a prefix of
-/// at least [`PREFIX_LEN`] letters. Words typed without a separator between them are accepted
-/// in full when exactly one reading fits, see [`read_joined`].
+/// at least [`PREFIX_LEN`] letters. Paths use this strict form, which the lookup budget can tell
+/// apart from other paths by its hyphens.
 pub fn parse(input: &str) -> Result<PasteId, Error> {
+    parse_with(input, false)
+}
+
+/// [`parse`], and also words typed without a separator between them, read in full when exactly
+/// one reading fits (see [`read_joined`]). For what people type into the box, never for paths.
+pub fn parse_typed(input: &str) -> Result<PasteId, Error> {
+    parse_with(input, true)
+}
+
+fn parse_with(input: &str, joined: bool) -> Result<PasteId, Error> {
     let lowered = input.to_lowercase();
     let parts: Vec<&str> = lowered.split(|c: char| c.is_whitespace() || c == '-').filter(|p| !p.is_empty()).collect();
     let indexes = match parts.len() {
         3 => parts.iter().map(|p| find_in(&WORDS, p)).collect::<Result<Vec<_>, _>>()?,
-        1 | 2 => read_joined(&parts)?,
+        1 | 2 if joined => read_joined(&parts)?,
         _ => return Err(three_words()),
     };
     Ok(PasteId(indexes.iter().fold(0, |id, &i| (id << WORD_BITS) | i as u64)))

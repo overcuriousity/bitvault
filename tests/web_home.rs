@@ -182,18 +182,6 @@ async fn allow_editing_is_offered_checked_only_when_the_server_allows_editing() 
 }
 
 #[tokio::test]
-async fn opening_a_paste_comes_before_the_create_form() {
-    let html = body_text(app().await.get("/").await).await;
-    let open = html.find("action=\"/open\"").unwrap();
-    let create = html.find("id=\"create-form\"").unwrap();
-    assert!(open < create);
-    assert!(html.contains("list=\"word-list\""));
-    assert!(html.contains("<datalist id=\"word-list\"></datalist>"));
-    let src = bitvault::assets::Assets::url("bip39-english.txt");
-    assert!(html.contains(&format!("data-words-src=\"{src}\"")), "{html}");
-}
-
-#[tokio::test]
 async fn an_open_prefix_of_each_word_finds_the_paste() {
     let app = app().await;
     let res = app.post_multipart("/", &[("content", None, b"hi")]).await;
@@ -222,40 +210,6 @@ async fn privacy_levels_are_grouped_by_how_they_are_protected() {
 }
 
 #[tokio::test]
-async fn the_options_sit_in_a_summary_before_the_file_input() {
-    let html = body_text(app().await.get("/").await).await;
-    let details = html.find("<details class=\"bv-options\">").expect("closed options");
-    let end = html.find("</details>").unwrap();
-    let file = html.find("type=\"file\"").unwrap();
-    assert!(end < file);
-    for name in
-        ["name=\"privacy\"", "name=\"password\"", "name=\"expiry\"", "name=\"burn_after_reads\"", "name=\"syntax\""]
-    {
-        let at = html.find(name).unwrap();
-        assert!(details < at && at < end, "{name} belongs in the options");
-    }
-    assert!(html.find("name=\"content\"").unwrap() < details);
-    assert!(
-        html.contains("<span class=\"bv-options__summary\" id=\"options-summary\">Unlisted · 24 hours</span>"),
-        "{html}"
-    );
-    let burning = app_with("[app]\ndefault_burn_after = 3\ndefault_privacy = \"public\"\n").await;
-    let html = body_text(burning.get("/").await).await;
-    assert!(html.contains(">Public · 24 hours · Burns after 3 reads</span>"), "{html}");
-}
-
-#[tokio::test]
-async fn the_options_open_when_the_uploader_password_is_needed() {
-    let html = body_text(app_with("[app]\nuploader_password = \"x\"\neditable = true\n").await.get("/").await).await;
-    let details = html.find("<details class=\"bv-options\" open>").expect("open options");
-    let end = html.find("</details>").unwrap();
-    for name in ["name=\"uploader_password\"", "name=\"editable\""] {
-        let at = html.find(name).unwrap();
-        assert!(details < at && at < end, "{name} belongs in the options");
-    }
-}
-
-#[tokio::test]
 async fn the_content_is_focused_and_has_no_placeholder() {
     let html = body_text(app().await.get("/").await).await;
     let at = html.find("<textarea").unwrap();
@@ -271,8 +225,8 @@ async fn labels_link_to_their_guide_sections() {
     for (id, field) in [
         ("privacy", "Privacy"),
         ("password", "Password"),
-        ("expiry", "Expires after"),
-        ("burn", "Burn after reads (0 is off)"),
+        ("expiry", "Expires"),
+        ("burn", "Burn after reads"),
         ("syntax", "Syntax"),
         ("files", "Files"),
         ("editing", "Allow editing"),
@@ -308,4 +262,105 @@ async fn over_plain_http_a_secret_create_is_refused_before_any_file() {
     assert!(body_text(res).await.contains("Secret pastes need https."));
     let res = app.post_multipart("/", &[("content", None, b"hello"), ("privacy", None, b"unlisted")]).await;
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn one_box_carries_the_word_list_and_says_what_it_does() {
+    let html = body_text(app().await.get("/").await).await;
+    assert!(!html.contains("action=\"/open\""), "no second form for opening");
+    let src = bitvault::assets::Assets::url("bip39-english.txt");
+    assert!(html.contains(&format!("data-words-src=\"{src}\"")), "{html}");
+    assert!(html.contains("aria-describedby=\"box-echo\""));
+    assert!(html.contains("Three words, such as apple banana cherry, open the paste they name."));
+    assert!(html.contains("id=\"box-keep\" name=\"intent\" value=\"create\" hidden>"));
+}
+
+#[tokio::test]
+async fn the_options_show_before_the_closed_file_field() {
+    let html = body_text(app().await.get("/").await).await;
+    assert!(!html.contains("<details class=\"bv-options"), "the options are not folded away");
+    let options = html.find("<div class=\"bv-options\">").unwrap();
+    let attach = html.find("<details class=\"bv-attach\" id=\"attach\">").expect("closed file field");
+    let file = html.find("type=\"file\"").unwrap();
+    assert!(html.find("name=\"content\"").unwrap() < options);
+    for name in
+        ["name=\"privacy\"", "name=\"password\"", "name=\"expiry\"", "name=\"burn_after_reads\"", "name=\"syntax\""]
+    {
+        let at = html.find(name).unwrap();
+        assert!(options < at && at < attach, "{name} sits with the options");
+    }
+    assert!(attach < file && file < html.find("</details>").unwrap());
+}
+
+#[tokio::test]
+async fn the_uploader_password_sits_with_the_options() {
+    let html = body_text(app_with("[app]\nuploader_password = \"x\"\neditable = true\n").await.get("/").await).await;
+    let attach = html.find("id=\"attach\"").unwrap();
+    for name in ["name=\"uploader_password\"", "name=\"editable\""] {
+        assert!(html.find(name).unwrap() < attach, "{name} before the files");
+    }
+}
+
+/// A create from the box with only `content`, as a browser without scripts sends it.
+async fn post_box(
+    app: &support::App,
+    content: &str,
+    extra: &[(&str, Option<&str>, &[u8])],
+) -> axum::http::Response<axum::body::Body> {
+    let mut parts: Vec<(&str, Option<&str>, &[u8])> = vec![("content", None, content.as_bytes())];
+    parts.extend_from_slice(extra);
+    app.post_multipart("/", &parts).await
+}
+
+#[tokio::test]
+async fn the_words_of_a_paste_that_exists_open_it_instead_of_making_one() {
+    let app = app().await;
+    let (words, _) = support::created(&app.post_multipart("/", &[("content", None, b"kept")]).await);
+    for typed in [words.replace('-', " "), words.replace('-', ""), format!("  {}  ", words.to_uppercase())] {
+        let res = post_box(&app, &typed, &[]).await;
+        assert_eq!(res.status(), StatusCode::SEE_OTHER, "{typed}");
+        assert_eq!(res.headers()[header::LOCATION], format!("/{words}"));
+        assert!(res.headers().get(header::SET_COOKIE).is_none(), "opening is no create");
+    }
+}
+
+#[tokio::test]
+async fn words_are_kept_as_text_when_asked_when_files_come_with_them_or_when_no_paste_has_them() {
+    let app = app().await;
+    let (words, _) = support::created(&app.post_multipart("/", &[("content", None, b"kept")]).await);
+    let kept = |res: &axum::http::Response<axum::body::Body>| support::created(res).0;
+    assert_ne!(kept(&post_box(&app, &words, &[("intent", None, b"create")]).await), words);
+    assert_ne!(kept(&post_box(&app, &words, &[("file", Some("a.txt"), b"x")]).await), words);
+    let fresh = bitvault::domain::words::PasteId(7).words();
+    let new = kept(&post_box(&app, &fresh, &[]).await);
+    let id = bitvault::domain::words::parse(&new).unwrap();
+    let paste = bitvault::domain::paste::meta(&app.st, id, bitvault::domain::now()).await.unwrap();
+    assert_ne!(new, fresh);
+    assert_eq!(paste.privacy, bitvault::domain::Privacy::Unlisted);
+}
+
+#[tokio::test]
+async fn opening_from_the_box_needs_no_uploader_password_but_keeping_does() {
+    let app = app_with("[app]\nuploader_password = \"up\"\n").await;
+    let (words, _) = support::created(
+        &app.post_multipart("/", &[("uploader_password", None, b"up"), ("content", None, b"kept")]).await,
+    );
+    let res = post_box(&app, &words, &[]).await;
+    assert_eq!(res.headers()[header::LOCATION], format!("/{words}"));
+    let res = post_box(&app, "just some text", &[]).await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_box_lookup_that_misses_spends_the_lookup_budget() {
+    let app = app().await;
+    support::created(&post_box(&app, &bitvault::domain::words::PasteId(1).words(), &[]).await);
+    for n in 2..11 {
+        let res = app.get(&format!("/{}", bitvault::domain::words::PasteId(n).words())).await;
+        assert_eq!(res.status(), StatusCode::NOT_FOUND, "{n}");
+    }
+    let res = app.get(&format!("/{}", bitvault::domain::words::PasteId(11).words())).await;
+    assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+    let res = post_box(&app, &bitvault::domain::words::PasteId(12).words(), &[]).await;
+    assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS, "a dry budget refuses the box lookup too");
 }

@@ -27,6 +27,7 @@ use crate::domain::paste::{self, NewPaste, SecretParts};
 use crate::domain::{self, Privacy, grant, highlight, words};
 use crate::error::Error;
 use crate::ratelimit::{self, RateLimiter};
+use crate::security::ClientIp;
 use crate::state::AppState;
 
 const MIB: u64 = 1 << 20;
@@ -56,8 +57,6 @@ struct Home {
     secret: bool,
     editable: bool,
     uploader_password: bool,
-    /// The options' one-line summary as rendered; `create.js` keeps it in sync.
-    summary: String,
     /// Total limit for the files of a paste, which `create.js` checks before uploading.
     max_file_mb: u64,
     /// Per-file plaintext limit for secret pastes, which `create.js` enforces before encrypting.
@@ -76,18 +75,6 @@ const PRIVACY_GROUPS: [(&str, &[Privacy]); 3] = [
 fn sentence_case(s: &str) -> String {
     let mut chars = s.chars();
     chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
-}
-
-/// The same line `create.js` builds from the live choices, e.g. "Unlisted · 24 hours".
-fn options_summary(privacy: &str, expiry: &str, burn: u32) -> String {
-    let mut parts = vec![privacy.to_owned(), expiry.to_owned()];
-    parts.retain(|p| !p.is_empty());
-    match burn {
-        0 => {}
-        1 => parts.push("Burns after 1 read".to_owned()),
-        n => parts.push(format!("Burns after {n} reads")),
-    }
-    parts.join(" · ")
 }
 
 #[derive(Deserialize)]
@@ -125,9 +112,6 @@ async fn index(
         .filter(|e| expiry::allowed(app, *e))
         .map(|e| (e.as_str(), sentence_case(e.label()), e.as_str() == app.default_expiry))
         .collect();
-    let privacy = privacy_groups.iter().flat_map(|(_, o)| o).find(|o| o.2).map_or("", |o| o.1);
-    let expiry_label = expiry_options.iter().find(|o| o.2).map_or("", |o| o.1.as_str());
-    let summary = options_summary(privacy, expiry_label, app.default_burn_after);
     let home = Home {
         privacy_groups,
         expiry_options,
@@ -136,7 +120,6 @@ async fn index(
         secret: st.cfg.offers(Privacy::Secret),
         editable: app.editable,
         uploader_password: app.uploader_password.is_some(),
-        summary,
         max_file_mb: app.max_file_mb,
         max_secret_mb: app.max_secret_file_mb,
         words_src: Assets::url("bip39-english.txt"),
@@ -144,7 +127,7 @@ async fn index(
         deleted: q.notice().map(|n| super::escape_text(&n)),
     };
     let body = home.render().map_err(Error::internal)?;
-    let extras = Extras { js: vec![Assets::url("js/create.js"), Assets::url("js/words.js")], ..Extras::default() };
+    let extras = Extras { js: vec![Assets::url("js/create.js")], ..Extras::default() };
     page_with(&st, admin, "new", "New paste", body, extras)
 }
 
@@ -154,7 +137,7 @@ async fn open(
     headers: HeaderMap,
     UrlForm(form): UrlForm<OpenForm>,
 ) -> Result<Response, Error> {
-    let id = words::parse(&form.words)?;
+    let id = words::parse_typed(&form.words)?;
     match paste::meta(&st, id, domain::now()).await {
         Ok(_) => {}
         Err(Error::NotFound) => return Err(invalid("No paste has these words. Check them and try again.")),
@@ -237,6 +220,8 @@ pub(crate) struct Form {
     pub content_container: Option<Vec<u8>>,
     pub verifier_salt: Option<[u8; SALT_LEN]>,
     pub verifier: Option<[u8; 32]>,
+    /// `intent=create`: store the text even when it reads as the words of an existing paste.
+    pub create_only: bool,
 }
 
 fn invalid(msg: &str) -> Error {
@@ -345,6 +330,7 @@ impl Form {
             }
             "verifier_salt" => self.verifier_salt = Some(hex_array(&value)?),
             "verifier" => self.verifier = Some(hex_array(&value)?),
+            "intent" => self.create_only = text(value)?.trim() == "create",
             _ => {}
         }
         Ok(())
@@ -384,22 +370,64 @@ impl Form {
 /// `POST /`: to the new paste, with the creator cookie that shows it once without counting a read.
 /// A fetch or htmx create (`HX-Request`) gets 200 with `HX-Redirect` instead of a 303: fetch
 /// would follow the 303 itself, using up the cookie on a response the browser never shows.
+///
+/// The box is also how a paste is opened: text alone that reads as the words of a paste that
+/// exists goes to that paste instead, unless the form says `intent=create`. Such a lookup draws on
+/// the same budget as `/open`, so the box is no faster way to guess addresses.
 async fn create(State(st): State<AppState>, req: Request) -> Result<Response, Error> {
     let htmx = req.headers().contains_key("hx-request");
+    let ip = req.extensions().get::<ClientIp>().map(|c| c.0);
     let rules = CreateRules { uploader_checked: false, allow_secret: true, default_editable: false };
-    let (new, staging) = read_multipart(&st, req, rules).await?;
+    let (form, staging, gate) = read_form(&st, req, rules).await?;
     let now = domain::now();
-    let id = paste::create(&st, new, staging, now).await?;
+    if staging.is_none()
+        && let Some(id) = existing_paste(&st, &form, ip, now).await?
+    {
+        return Ok(go_to(&format!("/{}", id.words()), htmx));
+    }
+    gate.require()?;
+    let id = paste::create(&st, form.into_new(&st, rules)?, staging, now).await?;
     let words = id.words();
     let token = grant::issue_creator(&st.grant_key, id, now);
-    let target = format!("/{words}");
-    let mut res = if htmx {
-        (StatusCode::OK, [("hx-redirect", target)]).into_response()
-    } else {
-        Redirect::to(&target).into_response()
-    };
+    let mut res = go_to(&format!("/{words}"), htmx);
     res.headers_mut().insert(header::SET_COOKIE, super::paste::created_cookie(&st, &words, &token, grant::TTL_SECS)?);
     Ok(res)
+}
+
+/// A fetch or htmx request follows `HX-Redirect`; a plain form post a 303.
+fn go_to(target: &str, htmx: bool) -> Response {
+    if htmx {
+        (StatusCode::OK, [("hx-redirect", target.to_owned())]).into_response()
+    } else {
+        Redirect::to(target).into_response()
+    }
+}
+
+/// The paste a box of plain text names, when the text is three paste words and that paste exists.
+/// A lookup that finds nothing keeps its token, like a miss on `/open`.
+async fn existing_paste(
+    st: &AppState,
+    form: &Form,
+    ip: Option<std::net::IpAddr>,
+    now: i64,
+) -> Result<Option<words::PasteId>, Error> {
+    // Three words of at most eight letters, with room for separators and spaces around them.
+    if form.create_only || form.content_container.is_some() || form.content.len() > 64 {
+        return Ok(None);
+    }
+    let Ok(id) = words::parse_typed(&form.content) else { return Ok(None) };
+    if let Some(ip) = ip {
+        st.lookups.take(ip)?;
+    }
+    let found = paste::meta(st, id, now).await;
+    if let (Some(ip), false) = (ip, matches!(found, Err(Error::NotFound))) {
+        st.lookups.refund(ip);
+    }
+    match found {
+        Ok(_) => Ok(Some(id)),
+        Err(Error::NotFound) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// Reads a multipart create in order, streaming each file into a staging directory (encrypted
@@ -410,6 +438,29 @@ pub(crate) async fn read_multipart(
     req: Request,
     rules: CreateRules,
 ) -> Result<(NewPaste, Option<Staging>), Error> {
+    let (form, staging, gate) = read_form(st, req, rules).await?;
+    gate.require()?;
+    Ok((form.into_new(st, rules)?, staging))
+}
+
+/// Whether the uploader password was given, once a form is read.
+struct GateResult {
+    passed: bool,
+}
+
+impl GateResult {
+    fn require(&self) -> Result<(), Error> {
+        if self.passed { Ok(()) } else { Err(Error::UploaderPassword) }
+    }
+}
+
+/// [`read_multipart`] without its last two steps, so the web form can open an existing paste
+/// before asking for the uploader password. A file still needs the password before it streams.
+async fn read_form(
+    st: &AppState,
+    req: Request,
+    rules: CreateRules,
+) -> Result<(Form, Option<Staging>, GateResult), Error> {
     let boundary = req
         .headers()
         .get(header::CONTENT_TYPE)
@@ -485,6 +536,6 @@ pub(crate) async fn read_multipart(
             other => other?,
         };
     }
-    gate.require()?;
-    Ok((form.into_new(st, rules)?, staging))
+    let passed = gate.require().is_ok();
+    Ok((form, staging, GateResult { passed }))
 }

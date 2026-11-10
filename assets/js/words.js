@@ -1,122 +1,106 @@
-// Word help for "Open a paste". The list loads on the field's first focus.
-//
-// With a mouse and keyboard, the word being typed is completed in place: the rest of the first word it
-// begins is added and selected, so typing on replaces it, Backspace or Escape removes it, and Tab
-// takes it and adds a hyphen for the next word. Tab with nothing to take moves focus as usual.
-// On touch screens there is no Tab key, so the field keeps its datalist: each suggestion is the
-// whole value so far with the word being typed completed, because a datalist matches against
-// the whole field.
+// Paste words in the browser: reading what someone typed as an address, the way the server's
+// `words::parse_typed` does, and offering the words that fit the one being typed. The list is
+// the server's, sorted, one word per line in `bip39-english.txt`.
 
-const LIMIT = 12;
-// Inline completion starts at the second letter; one letter fits too many words to guess.
-const INLINE_FROM = 2;
-// Up to two finished words with their separators, then the word being typed.
-const PART = /^(\s*(?:[^\s-]+[\s-]+){0,2})([^\s-]+)$/;
+// Four letters always name one word in this list.
+const PREFIX_LEN = 4;
+const SEPARATORS = /[\s-]+/;
+// Chips start at the second letter; one letter fits too many words to be a useful list.
+const CHIPS_FROM = 2;
+const CHIP_LIMIT = 6;
 
-/** The words of `words` that begin with the word being typed in `value`, in list order. */
-function candidates(value, words) {
-  const match = PART.exec(value);
-  if (!match) return null;
-  const [, done, part] = match;
-  const prefix = part.toLowerCase();
-  return { done, part, fits: words.filter((w) => w.startsWith(prefix)) };
+/** The index of the word `part` spells in full or, from four letters, is the only word to begin; or -1. */
+export function findIn(words, part) {
+  const exact = words.indexOf(part);
+  if (exact !== -1) return exact;
+  if (part.length < PREFIX_LEN) return -1;
+  const fits = [];
+  for (let i = 0; i < words.length && fits.length < 2; i++) if (words[i].startsWith(part)) fits.push(i);
+  return fits.length === 1 ? fits[0] : -1;
 }
 
-export function suggestions(value, words, limit = LIMIT) {
-  const found = candidates(value, words);
-  if (!found) return [];
-  const out = found.fits.slice(0, limit).map((w) => found.done + w);
-  // A finished word suggests only itself, which would just repeat the field.
-  return out.length === 1 && out[0] === value ? [] : out;
+// Every way to read `s` as exactly `count` whole words, as lists of words.
+function wholeWords(words, s, count) {
+  if (count === 0) return s === "" ? [[]] : [];
+  if (s.length < 3 * count || s.length > 8 * count) return [];
+  const out = [];
+  for (let len = 3; len <= Math.min(8, s.length); len++) {
+    const head = s.slice(0, len);
+    if (words.indexOf(head) === -1) continue;
+    for (const tail of wholeWords(words, s.slice(len), count - 1)) out.push([head, ...tail]);
+  }
+  return out;
 }
 
-/** The letters that complete the word being typed to the first word it begins, or "". */
-export function completion(value, words) {
-  const found = candidates(value, words);
-  if (!found || found.part.length < INLINE_FROM) return "";
-  const word = found.fits[0];
-  return word ? word.slice(found.part.length) : "";
+function readParts(words, parts, done, out) {
+  if (parts.length === 0) {
+    if (done.length === 3) out.push(done);
+    return;
+  }
+  const [part, ...rest] = parts;
+  const one = findIn(words, part);
+  if (one !== -1) readParts(words, rest, [...done, words[one]], out);
+  for (let count = 2; count <= 3 - done.length; count++) {
+    for (const split of wholeWords(words, part, count)) readParts(words, rest, [...done, ...split], out);
+  }
 }
 
 /**
- * The value after Tab: the word being typed in full, followed by a separator unless it is the
- * third word. Null when Tab has nothing to complete, so it can move focus as usual.
+ * What `value` reads as: `{ address: "apple-banana-cherry" }`, `{ ambiguous: true }` for letters
+ * run together that read two ways, or null when it is not three paste words.
  */
-export function accept(value, words) {
-  const found = candidates(value, words);
-  if (!found) return null;
-  const prefix = found.part.toLowerCase();
-  // The typed word itself, or the only word it begins.
-  const word = found.fits.includes(prefix) ? prefix : found.fits.length === 1 ? found.fits[0] : null;
-  if (!word) return null;
-  const count = found.done.split(/[\s-]+/).filter(Boolean).length + 1;
-  const separator = count < 3 ? (/\s$/.test(found.done) ? " " : "-") : "";
-  const next = found.done + found.part + word.slice(prefix.length) + separator;
+export function readAddress(value, words) {
+  if (value.length > 64) return null;
+  const parts = value.toLowerCase().split(SEPARATORS).filter(Boolean);
+  if (parts.length === 3) {
+    const found = parts.map((p) => findIn(words, p));
+    return found.includes(-1) ? null : { address: found.map((i) => words[i]).join("-") };
+  }
+  if (parts.length !== 1 && parts.length !== 2) return null;
+  const readings = [];
+  readParts(words, parts, [], readings);
+  if (readings.length === 1) return { address: readings[0].join("-") };
+  return readings.length > 1 ? { ambiguous: true } : null;
+}
+
+/**
+ * The words that fit the one being typed, while the box still looks like an address: one line,
+ * at most three words so far, each finished one a paste word. Null otherwise.
+ */
+export function chips(value, words, limit = CHIP_LIMIT) {
+  if (value.includes("\n")) return null;
+  const match = /^(\s*(?:[^\s-]+[\s-]+){0,2})([a-zA-Z]+)$/.exec(value);
+  if (!match) return null;
+  const [, done, part] = match;
+  if (part.length < CHIPS_FROM) return null;
+  const finished = done.toLowerCase().split(SEPARATORS).filter(Boolean);
+  if (finished.some((w) => findIn(words, w) === -1)) return null;
+  const prefix = part.toLowerCase();
+  const fits = [];
+  for (const w of words) {
+    if (!w.startsWith(prefix)) continue;
+    fits.push(w);
+    if (fits.length >= limit) break;
+  }
+  // A finished last word needs no list.
+  if (fits.length === 0 || (fits.length === 1 && fits[0] === prefix && finished.length === 2)) return null;
+  return { done, part, fits, count: finished.length + 1 };
+}
+
+/**
+ * The box after choosing `word` for the word being typed: followed by a separator unless it is the
+ * third word, in the separator already used. Null when there is nothing to change.
+ */
+export function choose(value, words, word) {
+  const found = chips(value, words, Number.POSITIVE_INFINITY);
+  if (!found || !found.fits.includes(word)) return null;
+  const separator = found.count < 3 ? (/\s$/.test(found.done) ? " " : "-") : "";
+  const next = found.done + word + separator;
   return next === value ? null : next;
 }
 
-if (typeof document !== "undefined") {
-  const input = document.getElementById("words");
-  const list = input && document.getElementById(input.getAttribute("list") ?? "");
-  if (input && list && input.dataset.wordsSrc) {
-    const keyboard = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
-    if (keyboard) {
-      // The datalist's pop-up would compete with the completion in the field.
-      input.removeAttribute("list");
-      input.setAttribute("aria-autocomplete", "inline");
-      const hint = document.getElementById("words-hint");
-      if (hint) {
-        hint.hidden = false;
-        input.setAttribute("aria-describedby", hint.id);
-      }
-    }
-    let words = null;
-    let loading = null;
-    const update = () => {
-      if (!words || keyboard) return;
-      list.replaceChildren(
-        ...suggestions(input.value, words).map((v) => {
-          const option = document.createElement("option");
-          option.value = v;
-          return option;
-        }),
-      );
-    };
-    const atEnd = () => input.selectionEnd === input.value.length;
-    const pending = () => input.selectionStart < input.selectionEnd && atEnd();
-
-    input.addEventListener("focus", () => {
-      loading ??= fetch(input.dataset.wordsSrc)
-        .then((res) => (res.ok ? res.text() : ""))
-        .then((text) => {
-          words = text.split("\n").filter(Boolean);
-          update();
-        })
-        .catch(() => {
-          // Without the list the field works the same, without suggestions.
-        });
-    });
-    input.addEventListener("input", (event) => {
-      update();
-      // Only plain typing at the end: not deleting, pasting or composing with an input method.
-      if (!keyboard || !words || event.isComposing || event.inputType !== "insertText" || !atEnd()) return;
-      const rest = completion(input.value, words);
-      if (rest) input.setRangeText(rest, input.value.length, input.value.length, "select");
-    });
-    input.addEventListener("keydown", (event) => {
-      if (!keyboard || !words || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
-      if (event.key === "Escape" && pending()) {
-        event.preventDefault();
-        input.setRangeText("", input.selectionStart, input.selectionEnd, "end");
-      } else if (event.key === "Tab" && !event.shiftKey && atEnd()) {
-        // A selected completion is always taken first, even when it already ends the address.
-        const next = accept(input.value, words) ?? (pending() ? input.value : null);
-        if (next === null) return;
-        event.preventDefault();
-        input.value = next;
-        input.setSelectionRange(next.length, next.length);
-        update();
-      }
-    });
-  }
+/** Tab takes the first word in the list. */
+export function accept(value, words) {
+  const found = chips(value, words);
+  return found ? choose(value, words, found.fits[0]) : null;
 }

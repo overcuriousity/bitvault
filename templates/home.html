@@ -1,105 +1,92 @@
-{% import "components/button.html" as button %}
 {% import "components/field.html" as field %}
 {% import "components/help.html" as help %}
 {% import "components/notice.html" as notice %}
 <h1 class="oc-sr-only">New paste</h1>
 {% if let Some(deleted) = deleted %}{% call notice::notice_escaped("success", deleted) %}{% endcall %}{% endif %}
 
-<section class="bv-open" aria-labelledby="open-heading">
-  <h2 id="open-heading">Open a paste</h2>
-  <form class="oc-form" method="post" action="/open" hx-post="/open" hx-target="#open-result" hx-swap="innerHTML">
-    <div class="oc-field">
-      <label for="words">Three words</label>
-      {#- words.js loads the words on first focus: completion in the field with a keyboard, the list on touch screens. Without it the field works the same, without help. #}
-      <input class="oc-input" id="words" name="words" type="text" placeholder="apple banana cherry" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" list="word-list" data-words-src="{{ words_src }}">
-      <datalist id="word-list"></datalist>
-    </div>
-    <div class="oc-form__actions">
-      {% call button::submit("default", "Open paste") %}{% endcall %}
-    </div>
-  </form>
-  <p class="bv-hint" id="words-hint" hidden>Tab completes a word.</p>
-  <div id="open-result" aria-live="polite"></div>
-</section>
-
-<section class="bv-new" aria-labelledby="create-heading">
-<h2 id="create-heading">Create a paste</h2>
-<p class="bv-lead">Share text, links and files with a three-word address.</p>
-{#- Field order is a contract with the server: every text field, and so the options, before the file input. #}
+{#- One box: text or a link is kept as a new paste, and three words open the paste
+    they name. The server decides on submit; box.js says which before the button is pressed.
+    Field order is a contract with the server: every text field, and so the options, before the file input. #}
 <form class="oc-form bv-create" id="create-form" method="post" action="/" enctype="multipart/form-data" data-max-file-mb="{{ max_file_mb }}" data-max-secret-mb="{{ max_secret_mb }}">
-  <div class="oc-field">
-    <label for="content">Content</label>
-    <textarea class="oc-input bv-mono" id="content" name="content" rows="10" spellcheck="false" autocomplete="off" autofocus></textarea>
+  <div class="oc-field bv-box">
+    <label for="content">Text, a link, or three words</label>
+    <textarea class="oc-input bv-mono" id="content" name="content" rows="8" spellcheck="false" autocomplete="off" autofocus aria-describedby="box-echo" data-words-src="{{ words_src }}"></textarea>
+    <p class="bv-hint" id="box-echo" aria-live="polite">Text or a link is kept as a new paste. Three words, such as apple banana cherry, open the paste they name.</p>
+    {#- box.js fills this with the paste words that fit what is being typed. #}
+    <div class="bv-chips" id="box-chips" hidden></div>
   </div>
-  <details class="bv-options"{% if uploader_password %} open{% endif %}>
-    <summary><span class="bv-options__title">Options</span> <span class="bv-options__summary" id="options-summary">{{ summary }}</span></summary>
-    <div class="bv-options__body">
-      {#- Secret starts disabled: without create.js it would post the plaintext. create.js enables it. #}
-      <div class="oc-field">
-        {% call help::label("privacy", "Privacy", "privacy", help_icon) %}{% endcall %}
-        <select id="privacy" name="privacy" data-oc-menu>
-          {%- for (group, options) in privacy_groups %}
-          <optgroup label="{{ group }}">
-            {%- for (value, text, chosen) in options %}
-            <option value="{{ value }}"{% if chosen %} selected{% endif %}{% if value == &"secret" %} disabled{% endif %}>{{ text }}</option>
-            {%- endfor %}
-          </optgroup>
+  {#- Secret starts disabled: without create.js it would post the plaintext. create.js enables it. #}
+  <div class="bv-options">
+    <div class="oc-field">
+      {% call help::label("privacy", "Privacy", "privacy", help_icon) %}{% endcall %}
+      <select id="privacy" name="privacy" data-oc-menu>
+        {%- for (group, options) in privacy_groups %}
+        <optgroup label="{{ group }}">
+          {%- for (value, text, chosen) in options %}
+          <option value="{{ value }}"{% if chosen %} selected{% endif %}{% if value == &"secret" %} disabled{% endif %}>{{ text }}</option>
           {%- endfor %}
-        </select>
-      </div>
-      <div class="bv-password" data-for="readonly private">
-        <div class="oc-field">
-          {% call help::label("password", "Password", "password", help_icon) %}{% endcall %}
-          <input class="oc-input" id="password" name="password" type="password" autocomplete="new-password">
-        </div>
-      </div>
-      {#- Unnamed, so the browser never submits it. #}
-      {%- if secret %}
-      <div class="bv-password" data-for="secret">
-        <div class="oc-field">
-          {% call help::label("secret-password", "Password", "password", help_icon) %}{% endcall %}
-          <input class="oc-input" id="secret-password" type="password" autocomplete="new-password">
-        </div>
-      </div>
-      {%- endif %}
+        </optgroup>
+        {%- endfor %}
+      </select>
+    </div>
+    <div class="bv-password" data-for="readonly private">
       <div class="oc-field">
-        {% call help::label("expiry", "Expires after", "expiry", help_icon) %}{% endcall %}
-        <select id="expiry" name="expiry" data-oc-menu>
-          {%- for (value, text, chosen) in expiry_options %}
-          <option value="{{ value }}"{% if chosen %} selected{% endif %}>{{ text }}</option>
-          {%- endfor %}
-        </select>
+        {% call help::label("password", "Password", "password", help_icon) %}{% endcall %}
+        <input class="oc-input" id="password" name="password" type="password" autocomplete="new-password">
       </div>
+    </div>
+    {#- Unnamed, so the browser never submits it. #}
+    {%- if secret %}
+    <div class="bv-password" data-for="secret">
       <div class="oc-field">
-        {% call help::label("burn", "Burn after reads (0 is off)", "burn", help_icon) %}{% endcall %}
-        <input class="oc-input" id="burn" name="burn_after_reads" type="number" min="0" step="1" inputmode="numeric" value="{{ default_burn }}" autocomplete="off">
+        {% call help::label("secret-password", "Password", "password", help_icon) %}{% endcall %}
+        <input class="oc-input" id="secret-password" type="password" autocomplete="new-password">
       </div>
-      <div class="oc-field">
-        {% call help::label("syntax", "Syntax", "syntax", help_icon) %}{% endcall %}
-        <select id="syntax" name="syntax" data-oc-menu>
-          {%- for (value, text, chosen) in syntax_options %}
-          <option value="{{ value }}"{% if chosen %} selected{% endif %}>{{ text }}</option>
-          {%- endfor %}
-        </select>
-      </div>
-      {%- if editable %}
-      <div class="bv-label">
-        <label class="bv-check"><input type="checkbox" name="editable" value="on" checked> Allow editing</label>
-        <a class="oc-btn oc-btn--icon oc-btn--row bv-help" href="/guide#editing" aria-label="Help: Allow editing" data-oc-tip="Help: Allow editing">{{ help_icon|safe }}</a>
-      </div>
-      {%- endif %}
-      {%- if uploader_password %}
-      {% call field::password("uploader-password", "uploader_password", "Uploader password", "current-password") %}{% endcall %}
-      {%- endif %}
+    </div>
+    {%- endif %}
+    <div class="oc-field">
+      {% call help::label("expiry", "Expires", "expiry", help_icon) %}{% endcall %}
+      <select id="expiry" name="expiry" data-oc-menu>
+        {%- for (value, text, chosen) in expiry_options %}
+        <option value="{{ value }}"{% if chosen %} selected{% endif %}>{{ text }}</option>
+        {%- endfor %}
+      </select>
+    </div>
+    <div class="oc-field">
+      {% call help::label("burn", "Burn after reads", "burn", help_icon) %}{% endcall %}
+      <input class="oc-input" id="burn" name="burn_after_reads" type="number" min="0" step="1" inputmode="numeric" value="{{ default_burn }}" autocomplete="off" aria-describedby="burn-off">
+      <span class="oc-sr-only" id="burn-off">0 is off</span>
+    </div>
+    <div class="oc-field">
+      {% call help::label("syntax", "Syntax", "syntax", help_icon) %}{% endcall %}
+      <select id="syntax" name="syntax" data-oc-menu>
+        {%- for (value, text, chosen) in syntax_options %}
+        <option value="{{ value }}"{% if chosen %} selected{% endif %}>{{ text }}</option>
+        {%- endfor %}
+      </select>
+    </div>
+    {%- if uploader_password %}
+    {% call field::password("uploader-password", "uploader_password", "Uploader password", "current-password") %}{% endcall %}
+    {%- endif %}
+  </div>
+  {%- if editable %}
+  <div class="bv-label">
+    <label class="bv-check"><input type="checkbox" name="editable" value="on" checked> Allow editing</label>
+    <a class="oc-btn oc-btn--icon oc-btn--row bv-help" href="/guide#editing" aria-label="Help: Allow editing" data-oc-tip="Help: Allow editing">{{ help_icon|safe }}</a>
+  </div>
+  {%- endif %}
+  {#- Closed until wanted; create.js opens it when files are dropped or pasted. #}
+  <details class="bv-attach" id="attach">
+    <summary>Attach files</summary>
+    <div class="oc-field bv-files">
+      {% call help::label("files", "Files", "files", help_icon) %}{% endcall %}
+      <input class="oc-input" id="files" name="file" type="file" multiple>
     </div>
   </details>
-  <div class="oc-field bv-files">
-    {% call help::label("files", "Files", "files", help_icon) %}{% endcall %}
-    <input class="oc-input" id="files" name="file" type="file" multiple>
-  </div>
   <div id="create-notice" aria-live="polite"></div>
   <div class="oc-form__actions">
-    {% call button::submit("primary", "Create paste") %}{% endcall %}
+    {#- box.js names the action: Open paste when the box holds the words of a paste that exists. #}
+    <button type="submit" class="oc-btn oc-btn--primary" id="box-submit">Create paste</button>
+    <button type="submit" class="oc-btn oc-btn--default" id="box-keep" name="intent" value="create" hidden>Keep as a new paste</button>
   </div>
 </form>
-</section>

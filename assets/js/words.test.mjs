@@ -2,53 +2,56 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { accept, completion, suggestions } from "./words.js";
+import { accept, chips, choose, findIn, readAddress } from "./words.js";
 
 const WORDS = readFileSync(new URL("../bip39-english.txt", import.meta.url), "utf8").split("\n").filter(Boolean);
 
-test("the word being typed is completed after the words before it", () => {
-  assert.deepEqual(suggestions("happ", WORDS), ["happy"]);
-  assert.deepEqual(suggestions("happy appl", WORDS), ["happy apple"]);
-  assert.deepEqual(suggestions("happy-apple-bana", WORDS), ["happy-apple-banana"]);
-  assert.deepEqual(suggestions("Happy  BAN", WORDS), ["Happy  banana", "Happy  banner"]);
+test("a word is found in full, or from four letters when only one word begins so", () => {
+  assert.equal(WORDS[findIn(WORDS, "act")], "act");
+  assert.equal(WORDS[findIn(WORDS, "happ")], "happy");
+  assert.equal(findIn(WORDS, "hap"), -1);
+  assert.equal(findIn(WORDS, "bana"), WORDS.indexOf("banana"));
+  assert.equal(findIn(WORDS, "aple"), -1);
 });
 
-test("suggestions are capped and empty when nothing is being typed", () => {
-  assert.equal(suggestions("a", WORDS).length, 12);
-  assert.deepEqual(suggestions("", WORDS), []);
-  assert.deepEqual(suggestions("happy ", WORDS), []);
-  assert.deepEqual(suggestions("happy apple banana cherry", WORDS), []);
-  assert.deepEqual(suggestions("zzz", WORDS), []);
+test("an address is read with any separators, in any case, or run together like the server reads it", () => {
+  for (const typed of ["happy apple banana", "Happy-APPLE-banana", "  happy --  apple\tbanana ", "happ appl bana", "happyapplebanana", "happy applebanana", "happyapple-banana"]) {
+    assert.deepEqual(readAddress(typed, WORDS), { address: "happy-apple-banana" }, typed);
+  }
 });
 
-test("a finished word suggests nothing more", () => {
-  assert.deepEqual(suggestions("happy", WORDS), []);
+test("letters that read as two addresses, and text that is no address, are told apart", () => {
+  assert.deepEqual(readAddress("qualityseathen", WORDS), { ambiguous: true });
+  for (const typed of ["", "happy apple", "happy apple banana cherry", "hello world", "happyaplebanana", "happ applbana", "a\nb\nc"]) {
+    assert.equal(readAddress(typed, WORDS), null, typed);
+  }
 });
 
-test("the word being typed is completed to the first word it begins, from the second letter", () => {
-  assert.equal(completion("h", WORDS), "");
-  assert.equal(completion("ha", WORDS), "bit");
-  assert.equal(completion("happ", WORDS), "y");
-  assert.equal(completion("happy-ap", WORDS), "art");
-  assert.equal(completion("Happy BAN", WORDS), "ana");
-  assert.equal(completion("happy", WORDS), "");
-  assert.equal(completion("happy-", WORDS), "");
-  assert.equal(completion("zz", WORDS), "");
+test("the word list follows the word being typed while the box looks like an address", () => {
+  assert.deepEqual(chips("ban", WORDS).fits, ["banana", "banner"]);
+  assert.deepEqual(chips("happy-apple-bana", WORDS).fits, ["banana"]);
+  assert.equal(chips("h", WORDS), null);
+  assert.equal(chips("happy-", WORDS), null);
+  assert.equal(chips("happy-apple-banana", WORDS), null);
+  assert.equal(chips("lorem ips", WORDS), null, "lorem is no paste word");
+  assert.equal(chips("happy\nap", WORDS), null);
+  assert.equal(chips("a b c de", WORDS), null);
+  assert.equal(chips("a", WORDS), null);
+  assert.equal(chips("ab", WORDS).fits.length, 6);
 });
 
-test("Tab finishes a word that is whole or the only fit, and adds a separator before the third word", () => {
+test("choosing a word completes it and adds the separator already in use before the third word", () => {
+  assert.equal(choose("ban", WORDS, "banner"), "banner-");
+  assert.equal(choose("happy appl", WORDS, "apple"), "happy apple ");
+  assert.equal(choose("happy-apple-bana", WORDS, "banana"), "happy-apple-banana");
+  assert.equal(choose("ban", WORDS, "apple"), null);
+});
+
+test("Tab takes the first word in the list, and has nothing to do once the address is done", () => {
   assert.equal(accept("happ", WORDS), "happy-");
-  assert.equal(accept("happy", WORDS), "happy-");
-  assert.equal(accept("happy appl", WORDS), "happy apple ");
-  assert.equal(accept("happy-apple-bana", WORDS), "happy-apple-banana");
-  // "act" is a word and also begins "action", so the typed word is taken as it is.
   assert.equal(accept("act", WORDS), "act-");
-});
-
-test("Tab has nothing to do, so it moves focus, when the word is unclear or the address is done", () => {
-  assert.equal(accept("", WORDS), null);
-  assert.equal(accept("ban", WORDS), null);
-  assert.equal(accept("happy-", WORDS), null);
+  assert.equal(accept("ban", WORDS), "banana-");
   assert.equal(accept("happy-apple-banana", WORDS), null);
-  assert.equal(accept("zzz", WORDS), null);
+  assert.equal(accept("happy-", WORDS), null);
+  assert.equal(accept("lorem ipsum", WORDS), null);
 });
