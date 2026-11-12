@@ -123,12 +123,16 @@ async fn the_paste_view_is_full_width() {
 }
 
 #[tokio::test]
-async fn a_url_paste_redirects() {
+async fn a_url_paste_opens_its_page_and_never_redirects() {
     let app = app().await;
     let w = create(&app, new("https://example.com/target?q=1", Privacy::Public)).await;
-    let res = app.get(&format!("/{w}")).await;
-    assert_eq!(res.status(), StatusCode::FOUND);
-    assert_eq!(res.headers()[header::LOCATION], "https://example.com/target?q=1");
+    for path in [format!("/{w}"), format!("/{w}?view")] {
+        let res = app.get(&path).await;
+        assert_eq!(res.status(), StatusCode::OK, "{path}");
+        assert!(!res.headers().contains_key(header::LOCATION), "{path}");
+        let html = body_text(res).await;
+        assert!(html.contains("href=\"https://example.com/target?q=1\" rel=\"noreferrer noopener\" data-bv-target>"));
+    }
 }
 
 #[tokio::test]
@@ -762,7 +766,7 @@ async fn a_web_create_sets_a_creator_cookie_for_the_paste_path_only() {
 }
 
 #[tokio::test]
-async fn creating_a_url_paste_shows_its_words_instead_of_redirecting() {
+async fn creating_a_url_paste_shows_its_words() {
     let app = app().await;
     let res = app.post_multipart("/", &[("content", None, b"https://example.com/target?a=1&b=2")]).await;
     let (w, cookie) = support::created(&res);
@@ -774,11 +778,12 @@ async fn creating_a_url_paste_shows_its_words_instead_of_redirecting() {
         assert!(html.contains(&format!("data-oc-copy=\"{word}\"")), "{word}");
     }
     assert!(html.contains(&format!("data-oc-copy=\"http://localhost:8080/{w}\"")));
-    let link =
-        "<a href=\"https://example.com/target?a=1&#38;b=2\" rel=\"noreferrer noopener\" data-bv-target>Go to URL</a>";
-    assert!(html.contains(link), "{html}");
+    let link = "<a class=\"oc-btn oc-btn--primary\" href=\"https://example.com/target?a=1&#38;b=2\" rel=\"noreferrer noopener\" data-bv-target>";
+    assert!(html.contains(link) && html.contains("Go to URL</a>"), "{html}");
     assert_eq!(read_count(&app, &w).await, 0);
-    assert_eq!(app.get(&format!("/{w}")).await.status(), StatusCode::FOUND);
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    assert!(html.contains(link) && !html.contains("Paste created."), "{html}");
+    assert_eq!(read_count(&app, &w).await, 1);
 }
 
 #[tokio::test]
@@ -832,9 +837,9 @@ async fn a_forged_expired_or_misplaced_creator_cookie_is_ignored_and_cleared() {
     ];
     for cookie in &refused {
         let res = app.get_with_cookie(&format!("/{url}"), cookie).await;
-        assert_eq!(res.status(), StatusCode::FOUND, "{cookie}");
-        assert_eq!(res.headers()[header::LOCATION], "https://example.com/target");
+        assert_eq!(res.status(), StatusCode::OK, "{cookie}");
         assert_eq!(set_cookie(&res).unwrap(), cleared(&url), "{cookie}");
+        assert!(!body_text(res).await.contains("Paste created."), "{cookie}");
     }
     assert_eq!(read_count(&app, &url).await, refused.len() as u64);
     let res = app.get_with_cookie(&format!("/{text}"), &creator_cookie(&app, &url, now)).await;
@@ -845,15 +850,16 @@ async fn a_forged_expired_or_misplaced_creator_cookie_is_ignored_and_cleared() {
 }
 
 #[tokio::test]
-async fn without_the_cookie_a_url_paste_redirects_and_a_text_paste_counts() {
+async fn without_the_cookie_a_url_and_a_text_paste_open_as_a_reader_and_count() {
     let app = app().await;
     let res = app.post_multipart("/", &[("content", None, b"https://example.com/target")]).await;
     let (url, _) = support::created(&res);
     let res = app.post_multipart("/", &[("content", None, b"plain words")]).await;
     let (text, _) = support::created(&res);
     let res = app.get(&format!("/{url}")).await;
-    assert_eq!(res.status(), StatusCode::FOUND);
+    assert_eq!(res.status(), StatusCode::OK);
     assert!(set_cookie(&res).is_none());
+    assert!(!body_text(res).await.contains("Paste created."));
     let html = body_text(app.get(&format!("/{text}")).await).await;
     assert!(html.contains("plain words") && !html.contains("Paste created."), "{html}");
     assert_eq!((read_count(&app, &url).await, read_count(&app, &text).await), (1, 1));
@@ -866,22 +872,22 @@ async fn without_the_cookie_a_url_paste_redirects_and_a_text_paste_counts() {
 }
 
 #[tokio::test]
-async fn url_pastes_have_a_page_with_view() {
+async fn a_url_paste_shows_its_target_with_a_link_and_counts_the_read() {
     let app = app().await;
     let w = create(&app, new("https://example.com/target", Privacy::Public)).await;
-    let res = app.get(&format!("/{w}?view")).await;
+    let res = app.get(&format!("/{w}")).await;
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
     let html = body_text(res).await;
-    assert!(
-        html.contains("href=\"https://example.com/target\" rel=\"noreferrer noopener\" data-bv-target>Go to URL</a>")
-    );
+    let link = "<a class=\"oc-btn oc-btn--primary\" href=\"https://example.com/target\" rel=\"noreferrer noopener\" data-bv-target>";
+    assert!(html.contains(link) && html.contains("Go to URL</a>"), "the one primary action: {html}");
+    assert_eq!(html.matches("oc-btn--primary").count(), 1, "one primary per view");
     assert!(html.contains("data-oc-copy=\"https://example.com/target\""), "the target has a copy button");
     assert!(html.contains("data-oc-dialog-open=\"qr-dialog\""), "the page offers the QR code");
     assert!(!html.contains("Paste created."));
     assert_eq!(read_count(&app, &w).await, 1);
     let once = create(&app, NewPaste { burn_after_reads: 1, ..new("https://example.com/once", Privacy::Public) }).await;
-    let html = body_text(app.get(&format!("/{once}?view")).await).await;
+    let html = body_text(app.get(&format!("/{once}")).await).await;
     assert!(html.contains("https://example.com/once") && html.contains("That was the last read"), "{html}");
     assert_eq!(app.get(&format!("/{once}")).await.status(), StatusCode::NOT_FOUND);
 }
@@ -1088,7 +1094,7 @@ async fn a_secret_page_has_a_hidden_copy_text_button_until_decrypted() {
 async fn copy_text_is_absent_for_url_and_file_only_pastes() {
     let app = app().await;
     let url = create(&app, new("https://example.com/x", Privacy::Public)).await;
-    assert!(!body_text(app.get(&format!("/{url}?view")).await).await.contains("data-bv-copy-target"));
+    assert!(!body_text(app.get(&format!("/{url}")).await).await.contains("data-bv-copy-target"));
     let files = create_with_file(&app, new("", Privacy::Public), "a.bin", b"x").await;
     let html = body_text(app.get(&format!("/{files}")).await).await;
     assert!(!html.contains("data-bv-copy-target") && !html.contains("id=\"paste-text\""), "{html}");

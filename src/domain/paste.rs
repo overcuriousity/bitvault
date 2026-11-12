@@ -293,13 +293,12 @@ fn whole_url(content: &str) -> Option<&str> {
     let mut links = finder.links(trimmed);
     let link = links.next()?;
     let whole = links.next().is_none() && link.start() == 0 && link.end() == trimmed.len();
-    // Only web links become redirects; other schemes stay text.
+    // Only web links become URL pastes; other schemes stay text.
     let web = url::Url::parse(trimmed).is_ok_and(|u| matches!(u.scheme(), "http" | "https"));
     (whole && web).then_some(trimmed)
 }
 
-/// Kind and stored bytes for plaintext content at `privacy`. A paste with files stays text, so
-/// its files are never hidden behind a redirect.
+/// Kind and stored bytes for plaintext content at `privacy`. A paste with files stays text.
 fn plain_content(privacy: Privacy, content: String, has_files: bool) -> (Kind, Vec<u8>) {
     if matches!(privacy, Privacy::Public | Privacy::Unlisted)
         && !has_files
@@ -341,7 +340,7 @@ async fn prepare(new: NewPaste, has_files: bool, dek: Option<&Dek>) -> Result<St
             let (kind, content) = plain_content(new.privacy, new.content, has_files);
             Ok(none(kind, content))
         }
-        // Read-only is kept as written: never a redirect, never changed.
+        // Read-only is kept as written: never a URL paste, never changed.
         Privacy::Readonly => {
             require_content(&new.content, has_files)?;
             Ok(none(Kind::Text, new.content.into_bytes()))

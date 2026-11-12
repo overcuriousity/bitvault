@@ -1,6 +1,6 @@
 [package]
 name = "bitvault"
-version = "2026.11.0"
+version = "2026.11.1"
 edition = "2024"
 rust-version = "1.97"
 authors = ["overcuriousity, originally Daniel Szabo <daniel@microbin.eu> and contributors"]

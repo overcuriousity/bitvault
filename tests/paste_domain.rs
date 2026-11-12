@@ -114,7 +114,7 @@ async fn the_public_list_is_newest_first_in_pages_of_fifty() {
 }
 
 #[tokio::test]
-async fn a_whole_content_url_in_a_public_paste_becomes_a_redirect() {
+async fn a_whole_content_url_in_a_public_paste_becomes_a_url_paste() {
     let app = support::app().await;
     let id = create(&app.st, new("  https://example.org/a?b=c  \n", Privacy::Public)).await;
     let opened = read(&app.st, id, Access::Anonymous).await.unwrap();
@@ -630,7 +630,7 @@ async fn editing_a_private_paste_needs_its_password() {
 }
 
 #[tokio::test]
-async fn editing_a_public_paste_into_a_url_makes_it_a_redirect() {
+async fn editing_a_public_paste_into_a_url_makes_it_a_url_paste() {
     let app = support::app_with("[app]\neditable = true\n").await;
     let id = create(&app.st, NewPaste { editable: true, ..new("v1", Privacy::Public) }).await;
     paste::edit(&app.st, id, Access::Anonymous, IP, "https://example.org".into(), None, NOW).await.unwrap();

@@ -6,7 +6,7 @@
 <p>Write or paste your text, choose a privacy level and an expiry under Options (they open by themselves once the box holds text), add files under Attach files if you want (or drop or paste them onto the form), then select Create paste. You are taken to the new paste, whose three words are its address.</p>
 <p>A paste can be text, files or both. Files can add up to {{ max_file_mb }} MB per paste{% if self.offers("secret") %}, and each file of a secret paste can be at most {{ max_secret_file_mb }} MB{% endif %}.</p>
 {%- if self.offers("public") || self.offers("unlisted") %}
-<p>When a public or unlisted paste is a single web address and nothing else, it becomes a short link: opening the paste takes you straight to that address.</p>
+<p>When a public or unlisted paste is a single web address and nothing else, it becomes a short link: the paste shows the address with a button to go there, and never sends you there on its own.</p>
 {%- endif %}
 {%- if uploader_password %}
 <p>This server asks for an uploader password before it accepts a new paste. Ask its administrator for it.</p>
@@ -62,7 +62,7 @@
 <p>Files can be added to any paste and downloaded one by one or as a zip. Interrupted downloads of single files resume, except in private pastes; zip downloads do not.</p>
 
 <h2>Share</h2>
-<p>Each of the three words has a copy button, and Copy link copies the full address. Copy text copies the paste's text, and Share opens your device's share sheet where there is one.{% if qr %} The QR code button shows the address for a phone camera.{% endif %} Raw text opens the paste as plain text. Add <code>?view</code> to a link's address to see where it goes before following it.</p>
+<p>Each of the three words has a copy button, and Copy link copies the full address. Copy text copies the paste's text, and Share opens your device's share sheet where there is one.{% if qr %} The QR code button shows the address for a phone camera.{% endif %} Raw text opens the paste as plain text.</p>
 
 {%- if editable %}
 <h2 id="editing">Change a paste</h2>

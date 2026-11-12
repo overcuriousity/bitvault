@@ -5,7 +5,7 @@ use std::sync::{Arc, LazyLock};
 use askama::Template;
 use axum::Form;
 use axum::Router;
-use axum::extract::{FromRequestParts, Path, Query, RawQuery, State};
+use axum::extract::{FromRequestParts, Path, Query, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -371,8 +371,7 @@ async fn render_opened(st: &AppState, admin: bool, base: &BaseUrl, opened: &Open
     render_paste(st, admin, &view, &opened.paste.id.words())
 }
 
-/// The page a web create lands on: the paste as a reader would see it, without counting a read
-/// or following a URL paste's redirect.
+/// The page a web create lands on: the paste as a reader would see it, without counting a read.
 async fn render_creator(st: &AppState, admin: bool, base: &BaseUrl, id: PasteId, now: i64) -> Result<Response, Error> {
     let (p, body) = paste::creator_view(st, id, now).await?;
     let shown = match &body {
@@ -394,16 +393,6 @@ fn unlock_page(
     let title = words.clone();
     let body = render(&Unlock { words, notice })?;
     Ok((status, page_with(st, admin, "", &title, body, Extras::default())?).into_response())
-}
-
-/// 302 to a URL paste's target; the stored URL was validated as http(s) when it was created.
-fn redirect_to(target: &str) -> Result<Response, Error> {
-    let location = HeaderValue::from_str(target).or_else(|_| {
-        url::Url::parse(target)
-            .map_err(Error::internal)
-            .and_then(|u| HeaderValue::from_str(u.as_str()).map_err(Error::internal))
-    })?;
-    Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response())
 }
 
 /// The cookie that carries a creator token from `POST /` to the paste page it redirects to.
@@ -429,22 +418,17 @@ fn created_tokens(headers: &HeaderMap) -> Vec<&str> {
         .collect()
 }
 
-/// `?view` in the query of `GET /{words}`, read leniently: anything else is ignored.
-fn wants_page(query: Option<&str>) -> bool {
-    url::form_urlencoded::parse(query.unwrap_or_default().as_bytes()).any(|(key, _)| key == "view")
-}
-
 /// `GET /{words}`: content for plaintext levels (a read), the unlock form for private (no
 /// read), and an empty shell for secret, which the browser fills from `/raw`. A URL paste
-/// redirects, or shows its page with `?view`; both count a read. A valid creator cookie shows
-/// the creator view instead, once: any creator cookie, valid or not, is cleared, and a token
-/// already redeemed is refused even if the cookie is sent again.
+/// shows its target with a link and never redirects: following it is the reader's choice, and
+/// the instance is no open redirector. A valid creator cookie shows the creator view instead,
+/// once: any creator cookie, valid or not, is cleared, and a token already redeemed is refused
+/// even if the cookie is sent again.
 async fn view(
     State(st): State<AppState>,
     viewer: Viewer,
     method: Method,
     Path(words): Path<String>,
-    RawQuery(query): RawQuery,
     headers: HeaderMap,
 ) -> Result<Response, Error> {
     let id = paste_id(&words)?;
@@ -455,7 +439,7 @@ async fn view(
     let mut res = if !head && tokens.iter().any(|t| grant::redeem_creator(&st.grant_key, &st.redeemed, t, id, now)) {
         render_creator(&st, viewer.admin, &viewer.base, id, now).await?
     } else {
-        ordinary_view(&st, &viewer, &method, id, now, wants_page(query.as_deref())).await?
+        ordinary_view(&st, &viewer, &method, id, now).await?
     };
     if !head && !tokens.is_empty() {
         res.headers_mut().append(header::SET_COOKIE, created_cookie(&st, &id.words(), "", 0)?);
@@ -487,7 +471,6 @@ async fn ordinary_view(
     method: &Method,
     id: PasteId,
     now: i64,
-    page: bool,
 ) -> Result<Response, Error> {
     let Viewer { admin, ip, ref base } = *viewer;
     let p = paste::meta(st, id, now).await?;
@@ -501,10 +484,7 @@ async fn ordinary_view(
         _ if *method == Method::HEAD => Ok(head_only(HTML)),
         _ => {
             let opened = paste::read(st, &p, Access::Anonymous, ip, now).await?;
-            match &opened.body {
-                Body::Url(target) if !page => redirect_to(target),
-                _ => render_opened(st, admin, base, &opened).await,
-            }
+            render_opened(st, admin, base, &opened).await
         }
     }
 }
