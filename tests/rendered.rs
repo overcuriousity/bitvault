@@ -101,12 +101,7 @@ async fn every_rendered_page_and_fragment_is_clean() {
     assert_clean_html(&html);
     check("public paste", app.get(&format!("/{public}")).await, StatusCode::OK).await;
     check("readonly paste", app.get(&format!("/{readonly}")).await, StatusCode::OK).await;
-    // A URL paste redirects with no HTML body, so only the status and security headers apply.
-    let res = app.get(&format!("/{url}")).await;
-    assert_eq!(res.status(), StatusCode::FOUND);
-    assert_eq!(res.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
-    assert_eq!(res.headers()[header::REFERRER_POLICY], "no-referrer");
-    check_url_page("url paste page", app.get(&format!("/{url}?view")).await, TARGET).await;
+    check_url_page("url paste page", app.get(&format!("/{url}")).await, TARGET).await;
     let creator = |words: &str| {
         let id = bitvault::domain::words::parse(words).unwrap();
         format!("{}={}", support::CREATED_COOKIE, grant::issue_creator(&app.st.grant_key, id, domain::now()))

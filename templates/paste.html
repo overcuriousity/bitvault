@@ -89,7 +89,7 @@
 {%- else if let Some(url) = target %}
 <section class="bv-target" aria-label="Target">
   <p class="bv-address"><span class="oc-mono">{{ url }}</span>{% call copy::copy("URL", url, self.copy_icons()) %}{% endcall %}</p>
-  <p><a href="{{ url }}" rel="noreferrer noopener" data-bv-target>Go to URL</a></p>
+  <p><a class="oc-btn oc-btn--primary" href="{{ url }}" rel="noreferrer noopener" data-bv-target>{{ self.icon("arrow-right")|safe }}Go to URL</a></p>
 </section>
 {%- else if let Some(html) = content %}
 {%- if !html.is_empty() %}
