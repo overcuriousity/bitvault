@@ -2,11 +2,13 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are CalVer `YYYY.M.N`.
 
-## [2026.11.1]
+## [2026.11.2]
 
 ### Added
 
 - An Enigma page linked from the footer: a working three-rotor Enigma I with rotor, ring, start and plugboard settings. Its result can be kept as a paste; a cipher from the 1930s protects nothing.
+
+## [2026.11.1]
 
 ### Changed
 
