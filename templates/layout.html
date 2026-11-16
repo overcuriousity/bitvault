@@ -35,7 +35,7 @@
     {%- endif %}
   </div>
 </header>
-<main class="oc-main" id="main">{{ body|safe }}<footer class="bv-footer">BitVault {{ self.version() }}</footer></main>
+<main class="oc-main" id="main">{{ body|safe }}<footer class="bv-footer">BitVault {{ self.version() }} · <a href="/enigma"{% if current == "enigma" %} aria-current="page"{% endif %}>Enigma</a></footer></main>
 <nav class="oc-tabbar" aria-label="Primary">
   {%- for item in self.nav() %}{% if !item.wide_only %}
   <a href="{{ item.href }}"{% if item.current %} aria-current="page"{% endif %}>{{ self.icon(item.icon)|safe }}<span>{{ item.label }}</span></a>

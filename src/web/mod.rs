@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod docs;
+pub mod enigma;
 pub mod errors;
 pub mod files;
 pub mod guide;

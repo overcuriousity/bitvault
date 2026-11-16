@@ -43,20 +43,28 @@ const SECRET_IN_BROWSER: &str = "Secret pastes are encrypted in the browser. Cre
 const CONTAINER_LIMIT: usize = crypto::browser_container_max_len(6 * TEXT_LIMIT as u64 + (64 << 10)) as usize;
 
 /// A select option as (value, label, selected).
-type Choice = (&'static str, &'static str, bool);
+pub(super) type Choice = (&'static str, &'static str, bool);
+
+pub(super) struct Options {
+    /// Privacy choices by group label, empty groups left out.
+    pub(super) privacy_groups: Vec<(&'static str, Vec<Choice>)>,
+    pub(super) expiry_options: Vec<(&'static str, String, bool)>,
+    pub(super) syntax_options: Vec<(String, String, bool)>,
+    pub(super) default_burn: u32,
+    /// Whether Secret is offered, and with it its browser-only password field.
+    pub(super) secret: bool,
+    pub(super) show_syntax: bool,
+    pub(super) editable: bool,
+    pub(super) uploader_password: bool,
+    pub(super) help_icon: String,
+    /// The options' one-line summary as rendered; the page script keeps it in sync.
+    pub(super) summary: String,
+}
 
 #[derive(Template)]
 #[template(path = "home.html")]
 struct Home {
-    /// Privacy choices by group label, empty groups left out.
-    privacy_groups: Vec<(&'static str, Vec<Choice>)>,
-    expiry_options: Vec<(&'static str, String, bool)>,
-    syntax_options: Vec<(String, String, bool)>,
-    default_burn: u32,
-    /// Whether Secret is offered, and with it its browser-only password field.
-    secret: bool,
-    editable: bool,
-    uploader_password: bool,
+    options: Options,
     /// Total limit for the files of a paste, which `create.js` checks before uploading.
     max_file_mb: u64,
     /// Per-file plaintext limit for secret pastes, which `create.js` enforces before encrypting.
@@ -64,9 +72,6 @@ struct Home {
     words_src: String,
     /// `short_url`'s host, so `box.js` reads a short link to a paste as that paste's words.
     short_host: Option<String>,
-    help_icon: String,
-    /// The options' one-line summary as rendered; `create.js` keeps it in sync.
-    summary: String,
     create_icon: String,
     open_icon: String,
     deleted: Option<String>,
@@ -95,6 +100,43 @@ fn options_summary(privacy: &str, expiry: &str, burn: u32) -> String {
     parts.join(" · ")
 }
 
+pub(super) fn create_options(cfg: &Config, selected: Privacy, secret: bool, show_syntax: bool) -> Options {
+    let app = &cfg.app;
+    let privacy_groups: Vec<_> = PRIVACY_GROUPS
+        .iter()
+        .map(|(group, levels)| {
+            let offered = levels.iter().filter(|p| (**p != Privacy::Secret || secret) && cfg.offers(**p));
+            let options = offered.map(|p| (p.as_str(), super::privacy_label(*p), *p == selected));
+            (*group, options.collect::<Vec<_>>())
+        })
+        .filter(|(_, options)| !options.is_empty())
+        .collect();
+    let expiry_options: Vec<_> = Expiry::ALL
+        .into_iter()
+        .filter(|e| expiry::allowed(app, *e))
+        .map(|e| (e.as_str(), sentence_case(e.label()), e.as_str() == app.default_expiry))
+        .collect();
+    let privacy = privacy_groups.iter().flat_map(|(_, o)| o).find(|o| o.2).map_or("", |o| o.1);
+    let expiry_label = expiry_options.iter().find(|o| o.2).map_or("", |o| o.1.as_str());
+    let summary = options_summary(privacy, expiry_label, app.default_burn_after);
+    Options {
+        privacy_groups,
+        expiry_options,
+        syntax_options: if show_syntax {
+            syntax_options(app, if app.highlight { None } else { Some(highlight::PLAIN) })
+        } else {
+            Vec::new()
+        },
+        default_burn: app.default_burn_after,
+        secret,
+        show_syntax,
+        editable: app.editable,
+        uploader_password: app.uploader_password.is_some(),
+        help_icon: super::icon("circle-question-mark", super::IconSize::Row),
+        summary,
+    }
+}
+
 #[derive(Deserialize)]
 struct OpenForm {
     words: String,
@@ -115,38 +157,12 @@ async fn index(
     Query(q): Query<DeletedQuery>,
 ) -> Result<Html<String>, Error> {
     let app = &st.cfg.app;
-    let syntax_options = syntax_options(app, if app.highlight { None } else { Some(highlight::PLAIN) });
-    let privacy_groups: Vec<_> = PRIVACY_GROUPS
-        .iter()
-        .map(|(group, levels)| {
-            let offered = levels.iter().filter(|p| st.cfg.offers(**p));
-            let options = offered.map(|p| (p.as_str(), super::privacy_label(*p), p.as_str() == app.default_privacy));
-            (*group, options.collect::<Vec<_>>())
-        })
-        .filter(|(_, options)| !options.is_empty())
-        .collect();
-    let expiry_options: Vec<_> = Expiry::ALL
-        .into_iter()
-        .filter(|e| expiry::allowed(app, *e))
-        .map(|e| (e.as_str(), sentence_case(e.label()), e.as_str() == app.default_expiry))
-        .collect();
-    let privacy = privacy_groups.iter().flat_map(|(_, o)| o).find(|o| o.2).map_or("", |o| o.1);
-    let expiry_label = expiry_options.iter().find(|o| o.2).map_or("", |o| o.1.as_str());
-    let summary = options_summary(privacy, expiry_label, app.default_burn_after);
     let home = Home {
-        privacy_groups,
-        expiry_options,
-        syntax_options,
-        default_burn: app.default_burn_after,
-        secret: st.cfg.offers(Privacy::Secret),
-        editable: app.editable,
-        uploader_password: app.uploader_password.is_some(),
+        options: create_options(&st.cfg, default_privacy(&st)?, st.cfg.offers(Privacy::Secret), true),
         max_file_mb: app.max_file_mb,
         max_secret_mb: app.max_secret_file_mb,
         words_src: Assets::url("bip39-english.txt"),
         short_host: st.dep.short_host.clone(),
-        help_icon: super::icon("circle-question-mark", super::IconSize::Row),
-        summary,
         create_icon: super::icon("plus", super::IconSize::Tool),
         open_icon: super::icon("arrow-right", super::IconSize::Tool),
         deleted: q.notice().map(|n| super::escape_text(&n)),

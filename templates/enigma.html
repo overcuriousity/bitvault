@@ -1,0 +1,60 @@
+{% import "components/notice.html" as notice %}
+<div id="enigma" class="bv-enigma">
+  <h1 class="oc-sr-only">Enigma</h1>
+  {% call notice::icons() %}{% endcall %}
+  <noscript>{% call notice::notice("info", "The Enigma runs in the browser. Turn on JavaScript to use it.") %}{% endcall %}</noscript>
+
+  <section class="bv-enigma-set" id="enigma-set" aria-label="Rotor settings">
+    <div class="bv-enigma-set__grid">
+      <span></span><span class="bv-enigma-set__head">Reflector</span><span class="bv-enigma-set__head">Left</span><span class="bv-enigma-set__head">Middle</span><span class="bv-enigma-set__head">Right</span>
+      <span class="bv-enigma-set__label">Rotor</span>
+      <select id="enigma-reflector" aria-label="Reflector" data-oc-menu><option value="B" selected>B</option><option value="C">C</option></select>
+      <select data-enigma-rotor="0" aria-label="Left rotor" data-oc-menu><option value="I" selected>I</option><option value="II">II</option><option value="III">III</option><option value="IV">IV</option><option value="V">V</option></select>
+      <select data-enigma-rotor="1" aria-label="Middle rotor" data-oc-menu><option value="I">I</option><option value="II" selected>II</option><option value="III">III</option><option value="IV">IV</option><option value="V">V</option></select>
+      <select data-enigma-rotor="2" aria-label="Right rotor" data-oc-menu><option value="I">I</option><option value="II">II</option><option value="III" selected>III</option><option value="IV">IV</option><option value="V">V</option></select>
+      <span class="bv-enigma-set__label">Position</span><span></span>
+      <div class="bv-enigma-window" data-enigma-window="0" role="spinbutton" tabindex="0" aria-label="Left rotor position"></div>
+      <div class="bv-enigma-window" data-enigma-window="1" role="spinbutton" tabindex="0" aria-label="Middle rotor position"></div>
+      <div class="bv-enigma-window" data-enigma-window="2" role="spinbutton" tabindex="0" aria-label="Right rotor position"></div>
+      <span class="bv-enigma-set__label" data-oc-tip="Each rotor's letter ring can be turned against the wiring inside it. It is part of the key, like the position.">Ring<span class="oc-sr-only">Each rotor's letter ring can be turned against the wiring inside it. It is part of the key, like the position.</span></span><span></span>
+      <div class="bv-enigma-ring" data-enigma-ring="0" role="group" aria-label="Left ring setting"><button type="button" class="oc-btn oc-btn--default" data-step="-1" aria-label="Decrease left ring setting">‹</button><span data-value>01</span><button type="button" class="oc-btn oc-btn--default" data-step="1" aria-label="Increase left ring setting">›</button></div>
+      <div class="bv-enigma-ring" data-enigma-ring="1" role="group" aria-label="Middle ring setting"><button type="button" class="oc-btn oc-btn--default" data-step="-1" aria-label="Decrease middle ring setting">‹</button><span data-value>01</span><button type="button" class="oc-btn oc-btn--default" data-step="1" aria-label="Increase middle ring setting">›</button></div>
+      <div class="bv-enigma-ring" data-enigma-ring="2" role="group" aria-label="Right ring setting"><button type="button" class="oc-btn oc-btn--default" data-step="-1" aria-label="Decrease right ring setting">‹</button><span data-value>01</span><button type="button" class="oc-btn oc-btn--default" data-step="1" aria-label="Increase right ring setting">›</button></div>
+    </div>
+    <p class="bv-hint" id="enigma-started">Set the start position: mouse wheel, drag, arrow keys, or type a letter.</p>
+  </section>
+
+  <div class="bv-enigma-key"><code id="enigma-key">Rotors I II III · Reflector B · Rings 01 01 01 · Start A A A · Plugs none</code><button type="button" class="oc-btn oc-btn--icon oc-btn--row oc-copy" id="enigma-key-copy" aria-label="Copy key" data-oc-tip="Copy key" data-oc-copy="Rotors I II III · Reflector B · Rings 01 01 01 · Start A A A · Plugs none">{{ copy_icons|safe }}</button></div>
+
+  <section class="bv-enigma-output" aria-labelledby="enigma-result-label">
+    <h2 id="enigma-result-label">Result</h2>
+    <div class="bv-enigma-result bv-mono" id="enigma-result"></div>
+    <div class="bv-enigma-trace bv-mono" id="enigma-trace"></div>
+  </section>
+
+  <div class="oc-field">
+    <label for="enigma-text">Text to encipher or decipher</label>
+    <textarea class="oc-input bv-mono" id="enigma-text" rows="6" spellcheck="false" autocomplete="off"></textarea>
+  </div>
+
+  <section class="bv-enigma-plugboard" aria-labelledby="enigma-board-label">
+    <h2 id="enigma-board-label">Plugboard</h2>
+    <div class="bv-enigma-board" id="enigma-board"></div>
+    <p class="bv-hint">Click two letters to join them with a cable. Click a joined letter to pull it.</p>
+  </section>
+
+  {% if let Some(options) = options %}
+  <form class="oc-form bv-create" id="enigma-form" method="post" action="/" enctype="multipart/form-data">
+    <input type="hidden" name="content" id="enigma-content">
+    <input type="hidden" name="intent" value="create">
+    <div id="enigma-notice" aria-live="polite"></div>
+    {% include "components/options.html" %}
+    <div class="oc-form__actions bv-enigma-create">
+      <p class="bv-hint">Keeps the result as a paste. A cipher from the 1930s; it protects nothing.</p>
+      <button type="submit" class="oc-btn oc-btn--primary" id="enigma-submit" disabled>{{ create_icon|safe }}Create paste</button>
+    </div>
+  </form>
+  {% else %}
+  <p>This instance keeps Secret pastes only, so the result cannot be kept here.</p>
+  {% endif %}
+</div>

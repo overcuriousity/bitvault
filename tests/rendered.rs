@@ -136,9 +136,11 @@ async fn every_rendered_page_and_fragment_is_clean() {
     check("home signed in", app.get("/").await, StatusCode::OK).await;
     check("list signed in", app.get("/list").await, StatusCode::OK).await;
     check("guide signed in", app.get("/guide").await, StatusCode::OK).await;
+    check("enigma signed in", app.get("/enigma").await, StatusCode::OK).await;
     app.cookie = None;
 
     check("guide", app.get("/guide").await, StatusCode::OK).await;
+    check("enigma", app.get("/enigma").await, StatusCode::OK).await;
     check("docs", app.get("/docs").await, StatusCode::OK).await;
     check("offline", app.get("/offline").await, StatusCode::OK).await;
     check("not found", app.get("/nope").await, StatusCode::NOT_FOUND).await;
@@ -158,6 +160,7 @@ async fn plain_http_pages_are_clean() {
     check("plain public paste", app.get(&format!("/{public}")).await, StatusCode::OK).await;
     check("plain secret notice", app.get(&format!("/{secret}")).await, StatusCode::OK).await;
     check("plain guide", app.get("/guide").await, StatusCode::OK).await;
+    check("plain enigma", app.get("/enigma").await, StatusCode::OK).await;
     app.sign_in_admin().await;
     check("plain admin", app.get("/admin").await, StatusCode::OK).await;
     check("plain secret notice signed in", app.get(&format!("/{secret}")).await, StatusCode::OK).await;

@@ -79,6 +79,7 @@ pub async fn build_with(
         .merge(web::files::routes())
         .merge(web::list::routes())
         .merge(web::guide::routes())
+        .merge(web::enigma::routes())
         .merge(web::docs::routes())
         .merge(web::pwa::routes())
         .merge(web::admin::routes(&st))

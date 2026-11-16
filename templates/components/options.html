@@ -1,0 +1,68 @@
+{% import "components/field.html" as field %}
+{% import "components/help.html" as help %}
+<details class="bv-options" id="options" open>
+  <summary><span class="bv-options__title">Options</span> <span class="bv-options__summary" id="options-summary">{{ options.summary }}</span></summary>
+  <div class="bv-options__body">
+  <div class="bv-options__grid">
+    <div class="oc-field">
+      {% call help::label("privacy", "Privacy", "privacy", options.help_icon) %}{% endcall %}
+      <select id="privacy" name="privacy" data-oc-menu>
+        {%- for (group, choices) in options.privacy_groups %}
+        <optgroup label="{{ group }}">
+          {%- for (value, text, chosen) in choices %}
+          <option value="{{ value }}"{% if chosen %} selected{% endif %}{% if value == &"secret" %} disabled{% endif %}>{{ text }}</option>
+          {%- endfor %}
+        </optgroup>
+        {%- endfor %}
+      </select>
+    </div>
+    <div class="bv-password" data-for="private">
+      <div class="oc-field">
+        {% call help::label("password", "Password", "password", options.help_icon) %}{% endcall %}
+        <input class="oc-input" id="password" name="password" type="password" autocomplete="new-password">
+      </div>
+    </div>
+    {#- Unnamed, so the browser never submits it. #}
+    {%- if options.secret %}
+    <div class="bv-password" data-for="secret">
+      <div class="oc-field">
+        {% call help::label("secret-password", "Password", "password", options.help_icon) %}{% endcall %}
+        <input class="oc-input" id="secret-password" type="password" autocomplete="new-password">
+      </div>
+    </div>
+    {%- endif %}
+    <div class="oc-field">
+      {% call help::label("expiry", "Expires", "expiry", options.help_icon) %}{% endcall %}
+      <select id="expiry" name="expiry" data-oc-menu>
+        {%- for (value, text, chosen) in options.expiry_options %}
+        <option value="{{ value }}"{% if chosen %} selected{% endif %}>{{ text }}</option>
+        {%- endfor %}
+      </select>
+    </div>
+    <div class="oc-field">
+      {% call help::label("burn", "Burn after reads", "burn", options.help_icon) %}{% endcall %}
+      <input class="oc-input" id="burn" name="burn_after_reads" type="number" min="0" step="1" inputmode="numeric" value="{{ options.default_burn }}" autocomplete="off" aria-describedby="burn-off">
+      <span class="oc-sr-only" id="burn-off">0 is off</span>
+    </div>
+    {%- if options.show_syntax %}
+    <div class="oc-field">
+      {% call help::label("syntax", "Syntax", "syntax", options.help_icon) %}{% endcall %}
+      <select id="syntax" name="syntax" data-oc-menu>
+        {%- for (value, text, chosen) in options.syntax_options %}
+        <option value="{{ value }}"{% if chosen %} selected{% endif %}>{{ text }}</option>
+        {%- endfor %}
+      </select>
+    </div>
+    {%- endif %}
+    {%- if options.uploader_password %}
+    {% call field::password("uploader-password", "uploader_password", "Uploader password", "current-password") %}{% endcall %}
+    {%- endif %}
+  </div>
+  {%- if options.editable %}
+  <div class="bv-label">
+    <label class="bv-check"><input type="checkbox" name="editable" value="on" checked> Allow editing</label>
+    <a class="oc-btn oc-btn--icon oc-btn--row bv-help" href="/guide#editing" aria-label="Help: Allow editing" data-oc-tip="Help: Allow editing">{{ options.help_icon|safe }}</a>
+  </div>
+  {%- endif %}
+  </div>
+  </details>

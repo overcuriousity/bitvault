@@ -1,4 +1,3 @@
-{% import "components/field.html" as field %}
 {% import "components/help.html" as help %}
 {% import "components/notice.html" as notice %}
 <h1 class="oc-sr-only">New paste</h1>
@@ -29,73 +28,10 @@
   {#- Open as rendered, so the options are in view at rest and without scripts. box.js folds them to
       their summary only while the box is one line.
       Secret starts disabled: without create.js it would post the plaintext. create.js enables it. #}
-  <details class="bv-options" id="options" open>
-  <summary><span class="bv-options__title">Options</span> <span class="bv-options__summary" id="options-summary">{{ summary }}</span></summary>
-  <div class="bv-options__body">
-  <div class="bv-options__grid">
-    <div class="oc-field">
-      {% call help::label("privacy", "Privacy", "privacy", help_icon) %}{% endcall %}
-      <select id="privacy" name="privacy" data-oc-menu>
-        {%- for (group, options) in privacy_groups %}
-        <optgroup label="{{ group }}">
-          {%- for (value, text, chosen) in options %}
-          <option value="{{ value }}"{% if chosen %} selected{% endif %}{% if value == &"secret" %} disabled{% endif %}>{{ text }}</option>
-          {%- endfor %}
-        </optgroup>
-        {%- endfor %}
-      </select>
-    </div>
-    <div class="bv-password" data-for="private">
-      <div class="oc-field">
-        {% call help::label("password", "Password", "password", help_icon) %}{% endcall %}
-        <input class="oc-input" id="password" name="password" type="password" autocomplete="new-password">
-      </div>
-    </div>
-    {#- Unnamed, so the browser never submits it. #}
-    {%- if secret %}
-    <div class="bv-password" data-for="secret">
-      <div class="oc-field">
-        {% call help::label("secret-password", "Password", "password", help_icon) %}{% endcall %}
-        <input class="oc-input" id="secret-password" type="password" autocomplete="new-password">
-      </div>
-    </div>
-    {%- endif %}
-    <div class="oc-field">
-      {% call help::label("expiry", "Expires", "expiry", help_icon) %}{% endcall %}
-      <select id="expiry" name="expiry" data-oc-menu>
-        {%- for (value, text, chosen) in expiry_options %}
-        <option value="{{ value }}"{% if chosen %} selected{% endif %}>{{ text }}</option>
-        {%- endfor %}
-      </select>
-    </div>
-    <div class="oc-field">
-      {% call help::label("burn", "Burn after reads", "burn", help_icon) %}{% endcall %}
-      <input class="oc-input" id="burn" name="burn_after_reads" type="number" min="0" step="1" inputmode="numeric" value="{{ default_burn }}" autocomplete="off" aria-describedby="burn-off">
-      <span class="oc-sr-only" id="burn-off">0 is off</span>
-    </div>
-    <div class="oc-field">
-      {% call help::label("syntax", "Syntax", "syntax", help_icon) %}{% endcall %}
-      <select id="syntax" name="syntax" data-oc-menu>
-        {%- for (value, text, chosen) in syntax_options %}
-        <option value="{{ value }}"{% if chosen %} selected{% endif %}>{{ text }}</option>
-        {%- endfor %}
-      </select>
-    </div>
-    {%- if uploader_password %}
-    {% call field::password("uploader-password", "uploader_password", "Uploader password", "current-password") %}{% endcall %}
-    {%- endif %}
-  </div>
-  {%- if editable %}
-  <div class="bv-label">
-    <label class="bv-check"><input type="checkbox" name="editable" value="on" checked> Allow editing</label>
-    <a class="oc-btn oc-btn--icon oc-btn--row bv-help" href="/guide#editing" aria-label="Help: Allow editing" data-oc-tip="Help: Allow editing">{{ help_icon|safe }}</a>
-  </div>
-  {%- endif %}
-  </div>
-  </details>
+  {% include "components/options.html" %}
   {#- Always in view; create.js adds that files can be dropped or pasted too. #}
   <div class="oc-field bv-files">
-    {% call help::label("files", "Files", "files", help_icon) %}{% endcall %}
+    {% call help::label("files", "Files", "files", options.help_icon) %}{% endcall %}
     <input class="oc-input" id="files" name="file" type="file" multiple>
   </div>
 </form>

@@ -495,3 +495,14 @@ async fn every_notice_carries_its_status_symbol() {
     }
     assert!(include_str!("../assets/js/notice.js").contains("bv-notice-icons"));
 }
+
+#[tokio::test]
+async fn the_options_keep_their_fields_and_order() {
+    let html = body_text(app().await.get("/").await).await;
+    let mut previous = 0;
+    for id in ["options", "privacy", "password", "expiry", "burn", "syntax", "files"] {
+        let at = html.find(&format!("id=\"{id}\"")).unwrap();
+        assert!(at >= previous, "{id} is out of order");
+        previous = at;
+    }
+}
