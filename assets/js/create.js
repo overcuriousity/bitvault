@@ -139,9 +139,11 @@ function bindDropZone(form) {
   const label = form.querySelector('label[for="files"]')?.parentElement;
   if (label) {
     const hint = document.createElement("span");
-    hint.className = "bv-attach__hint";
+    hint.className = "bv-files__hint";
+    hint.id = "files-hint";
     hint.textContent = "or drop or paste them here";
     label.append(hint);
+    input.setAttribute("aria-describedby", hint.id);
   }
   let depth = 0;
   const hasFiles = (e) => Array.from(e.dataTransfer?.types ?? []).includes("Files");

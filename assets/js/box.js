@@ -86,13 +86,13 @@ export function submitDecision(result, address) {
 }
 
 /**
- * Whether the box is one line. It collapses only once its words name a paste that exists, stays
+ * Whether the box is one line. It collapses only once one line of words names a paste that exists, stays
  * one line while what it holds could still be an address, so mending a word does not make it
  * jump, and is tall again when emptied, when it holds text, and when files are attached.
  */
 export function nextCollapsed(collapsed, { empty, found, addressLike, files }) {
   if (empty || files) return false;
-  return found || (collapsed && addressLike);
+  return addressLike && (found || collapsed);
 }
 
 /** Where the border's light is drawn: the pointer at viewport `x`, `y`, measured from the box's `rect`. */
@@ -101,25 +101,43 @@ export function spotAt(rect, x, y) {
 }
 
 // The box's border carries a light that follows the mouse (see app.css). Without a mouse there
-// is nothing to follow, and the border stays plain.
+// is nothing to follow, and the border stays plain. A finger is not followed: it would leave the
+// light where it lifted. The light goes out when the mouse leaves the page, and keeps its place
+// under the mouse when the page scrolls beneath it.
 function bindSpot(box) {
   if (!window.matchMedia?.("(pointer: fine)").matches) return;
-  let last = null;
+  let pointer = null;
+  let queued = false;
+  const draw = () => {
+    queued = false;
+    if (!pointer) {
+      box.style.removeProperty("--bv-mx");
+      box.style.removeProperty("--bv-my");
+      return;
+    }
+    const at = spotAt(box.getBoundingClientRect(), pointer.x, pointer.y);
+    box.style.setProperty("--bv-mx", at.x);
+    box.style.setProperty("--bv-my", at.y);
+  };
+  const queue = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(draw);
+  };
   window.addEventListener(
     "pointermove",
     (event) => {
-      const waiting = last !== null;
-      last = event;
-      if (waiting) return;
-      requestAnimationFrame(() => {
-        const at = spotAt(box.getBoundingClientRect(), last.clientX, last.clientY);
-        last = null;
-        box.style.setProperty("--bv-mx", at.x);
-        box.style.setProperty("--bv-my", at.y);
-      });
+      if (event.pointerType === "touch") return;
+      pointer = { x: event.clientX, y: event.clientY };
+      queue();
     },
     { passive: true },
   );
+  document.documentElement.addEventListener("pointerleave", () => {
+    pointer = null;
+    queue();
+  });
+  window.addEventListener("scroll", () => pointer && queue(), { passive: true });
 }
 
 /** Binds the box of `form` and returns `decide`, which create.js awaits on submit. */

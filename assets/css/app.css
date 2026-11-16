@@ -103,7 +103,7 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-chip { height: auto; min-height: 1.75rem; padding: 0 var(--space-2); font-family: var(--font-mono); font-size: var(--text-dense); }
 .bv-chip:first-child { border-color: var(--color-accent); }
 .bv-options > summary { width: fit-content; padding-block: var(--space-1); font-weight: 500; color: var(--color-fg-secondary); cursor: pointer; }
-.bv-options__summary, .bv-attach__hint { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
+.bv-options__summary, .bv-files__hint { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
 .bv-options__body { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); }
 .bv-options[open] > .bv-options__body { animation: bv-reveal var(--motion-panel) var(--ease); }
 .bv-options__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: var(--space-3); align-items: end; }
@@ -137,6 +137,11 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
    A box resized by hand carries its height inline, which only !important overrules. */
 @media (scripting: enabled) {
   .bv-create[data-compact] #content { min-height: 0; height: calc(1lh + 2 * var(--space-2) + 2px) !important; resize: none; overflow-y: auto; }
+}
+/* Forced colours replace a background colour but not the painted layers above, so the box goes
+   back to a plain system field there. */
+@media (forced-colors: active) {
+  .bv-create #content { border-color: FieldText; background: Field; }
 }
 .bv-go { transition: background-color var(--motion-panel) var(--ease), border-color var(--motion-panel) var(--ease); }
 .bv-go__icon { display: inline-flex; }

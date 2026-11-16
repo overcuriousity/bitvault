@@ -69,6 +69,8 @@ test("the box collapses only on a found paste", () => {
   // Pending, missing, ambiguous and busy all arrive as found: false.
   assert.equal(nextCollapsed(false, facts({})), false);
   assert.equal(nextCollapsed(false, facts({ empty: true })), false);
+  // Found words on three lines are not one line of words: collapsing would hide two of them.
+  assert.equal(nextCollapsed(false, facts({ found: true, addressLike: false })), false);
 });
 
 test("a collapsed box stays one line while it could still be an address", () => {
