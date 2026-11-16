@@ -73,3 +73,71 @@ export function encipher(letters, key) {
 
   return { records, end: pos };
 }
+
+
+export function normalise(text) {
+  return text
+    .replaceAll("ß", "SS")
+    .toUpperCase()
+    .replace(/[ÄÖÜ]/g, (value) => ({ Ä: "AE", Ö: "OE", Ü: "UE" })[value])
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^A-Z]/g, "");
+}
+
+export function group(letters) {
+  return letters.match(/.{1,5}/g)?.join(" ") ?? "";
+}
+
+export function keyLine(key) {
+  const plugs = key.plugs
+    .map(([a, b]) => [a, b].sort((x, y) => x - y))
+    .sort(([a], [b]) => a - b)
+    .map((pair) => pair.map(letter).join(""))
+    .join(" ");
+  const rings = key.rings.map((value) => String(value + 1).padStart(2, "0")).join(" ");
+  const start = key.start.map(letter).join(" ");
+  return `Rotors ${key.rotors.join(" ")} · Reflector ${key.reflector} · Rings ${rings} · Start ${start} · Plugs ${plugs || "none"}`;
+}
+
+export function startedLine(key, count) {
+  const unit = count === 1 ? "letter" : "letters";
+  return `Started at ${key.start.map(letter).join(" ")}, ${count} ${unit} ago. Turning a rotor moves the start.`;
+}
+
+export function togglePlug(plugs, pending, letterIndex) {
+  const joined = plugs.some(([a, b]) => a === letterIndex || b === letterIndex);
+  if (joined) {
+    return {
+      plugs: plugs.filter(([a, b]) => a !== letterIndex && b !== letterIndex),
+      pending: null,
+    };
+  }
+  if (pending === null) return { plugs: [...plugs], pending: letterIndex };
+  if (pending === letterIndex) return { plugs: [...plugs], pending: null };
+  return { plugs: [...plugs, [pending, letterIndex]], pending: null };
+}
+
+export function swapRotor(rotors, slot, name) {
+  const next = [...rotors];
+  const other = next.indexOf(name);
+  if (other !== -1 && other !== slot) next[other] = next[slot];
+  next[slot] = name;
+  return next;
+}
+
+export function turnStart(key, slot, by) {
+  const start = [...key.start];
+  start[slot] = ((start[slot] + by) % 26 + 26) % 26;
+  return { ...key, start };
+}
+
+export function wheelSteps(acc, deltaY, deltaMode) {
+  const total = acc + deltaY * (deltaMode === 1 ? 34 : 1);
+  const steps = Math.trunc(total / 100);
+  return { steps, acc: total - steps * 100 };
+}
+
+export function looksLikeEnigma(text) {
+  return /^[A-Z]{5}(?:[ \r\n]+[A-Z]{5})*[ \r\n]+[A-Z]{1,5}$/.test(text.trim());
+}

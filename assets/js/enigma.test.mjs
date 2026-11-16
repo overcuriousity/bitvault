@@ -1,6 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { defaultKey, encipher } from "./enigma.js";
+import {
+  defaultKey,
+  encipher,
+  group,
+  keyLine,
+  looksLikeEnigma,
+  normalise,
+  startedLine,
+  swapRotor,
+  togglePlug,
+  turnStart,
+  wheelSteps,
+} from "./enigma.js";
 
 const out = (text, key) => encipher(text, key).records.map((record) => record.out).join("");
 const pairs = (text) => text.split(" ").map((pair) => [...pair].map((letter) => letter.charCodeAt(0) - 65));
@@ -44,4 +56,64 @@ test("the path names nine stages", () => {
 });
 test("empty input leaves the rotors at the start", () => {
   assert.deepEqual(encipher("", { ...defaultKey(), start: [1, 2, 3] }).end, [1, 2, 3]);
+});
+
+
+test("normalise keys text in as an operator would", () => {
+  assert.equal(normalise("Wetter für Köln, Straße 7!\n"), "WETTERFUERKOELNSTRASSE");
+  assert.equal(normalise("Ärger café Æ"), "AERGERCAFE");
+  assert.equal(normalise("123 🙂 ..."), "");
+});
+test("group writes fives", () => {
+  assert.equal(group("ABCDEFGHIJKL"), "ABCDE FGHIJ KL");
+  assert.equal(group(""), "");
+});
+test("the key line names the start and orders the cables", () => {
+  const key = {
+    rotors: ["I", "II", "III"],
+    reflector: "B",
+    rings: [0, 0, 25],
+    start: [0, 0, 22],
+    plugs: [[5, 4], [3, 2], [1, 0]],
+  };
+  assert.equal(keyLine(key), "Rotors I II III · Reflector B · Rings 01 01 26 · Start A A W · Plugs AB CD EF");
+  assert.equal(keyLine(defaultKey()), "Rotors I II III · Reflector B · Rings 01 01 01 · Start A A A · Plugs none");
+});
+test("the started line", () => {
+  const key = { ...defaultKey(), start: [0, 0, 22] };
+  assert.equal(startedLine(key, 12), "Started at A A W, 12 letters ago. Turning a rotor moves the start.");
+  assert.equal(startedLine(key, 1), "Started at A A W, 1 letter ago. Turning a rotor moves the start.");
+});
+test("plugging", () => {
+  assert.deepEqual(togglePlug([], null, 3), { plugs: [], pending: 3 });
+  assert.deepEqual(togglePlug([], 3, 3), { plugs: [], pending: null });
+  assert.deepEqual(togglePlug([], 3, 7), { plugs: [[3, 7]], pending: null });
+  assert.deepEqual(togglePlug([[3, 7]], null, 7), { plugs: [], pending: null });
+  assert.deepEqual(togglePlug([[3, 7]], 1, 3), { plugs: [], pending: null });
+});
+test("a rotor sits in one slot only", () => {
+  assert.deepEqual(swapRotor(["I", "II", "III"], 0, "III"), ["III", "II", "I"]);
+  assert.deepEqual(swapRotor(["I", "II", "III"], 0, "V"), ["V", "II", "III"]);
+});
+test("turning moves the start and wraps", () => {
+  assert.deepEqual(turnStart(defaultKey(), 2, -1).start, [0, 0, 25]);
+  assert.deepEqual(turnStart(defaultKey(), 0, 27).start, [1, 0, 0]);
+});
+test("one wheel notch is one step, on mice and trackpads", () => {
+  assert.deepEqual(wheelSteps(0, 120, 0), { steps: 1, acc: 20 });
+  assert.deepEqual(wheelSteps(0, 3, 1), { steps: 1, acc: 2 });
+  assert.deepEqual(wheelSteps(0, 4, 0), { steps: 0, acc: 4 });
+  assert.equal(Array.from({ length: 30 }).reduce((state) => {
+    const result = wheelSteps(state.acc, 4, 0);
+    return { acc: result.acc, n: state.n + result.steps };
+  }, { acc: 0, n: 0 }).n, 1);
+  assert.deepEqual(wheelSteps(0, -120, 0), { steps: -1, acc: -20 });
+});
+test("what counts as Enigma output", () => {
+  for (const yes of ["ABCDE FGHIJ", "ABCDE FGHIJ K", "ABCDE\nFGHIJ KLMNO", "  ABCDE FGHIJ  \n"]) {
+    assert.equal(looksLikeEnigma(yes), true, yes);
+  }
+  for (const no of ["HELLO", "ABCDE", "abcde fghij", "ABCDE FGHIJK", "ABCD EFGHI", "ABCDE 12345", "ABCDE FGH IJKLM", ""]) {
+    assert.equal(looksLikeEnigma(no), false, no);
+  }
 });
