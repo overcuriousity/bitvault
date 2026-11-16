@@ -361,7 +361,7 @@ html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
 }
 .bv-enigma-set__head, .bv-enigma-set__label { color: var(--color-fg-secondary); font-size: var(--text-micro); font-weight: 500; }
 .bv-enigma-set__head { text-align: center; }
-.bv-enigma-set__grid select { min-width: 0; width: 100%; }
+.bv-enigma-set__grid select:not(.oc-select-native) { min-width: 0; width: 100%; }
 .bv-enigma-set__grid .oc-menu-wrap { min-width: 0; }
 .bv-enigma-set__grid .oc-menu-button { width: 100%; min-width: 0; }
 .bv-enigma-set > .bv-hint { margin-top: var(--space-3); text-align: center; }
