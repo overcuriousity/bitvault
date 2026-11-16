@@ -319,8 +319,10 @@ if (root) {
   board.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-letter]");
     if (!button) return;
-    state = { ...state, ...togglePlug(state.plugs, state.pending, Number(button.dataset.letter)) };
+    const letter = button.dataset.letter;
+    state = { ...state, ...togglePlug(state.plugs, state.pending, Number(letter)) };
     render();
+    board.querySelector(`button[data-letter="${letter}"]`)?.focus({ preventScroll: true });
   });
   new ResizeObserver(drawCables).observe(board);
 
@@ -351,7 +353,7 @@ if (root) {
       if (submitting || !content.value) return;
       submitting = true;
       submit.disabled = true;
-      submit.setAttribute("aria-busy", "true");
+      const busyTimer = setTimeout(() => submit.setAttribute("aria-busy", "true"), 400);
       try {
         const response = await fetch("/", {
           method: "POST",
@@ -369,6 +371,7 @@ if (root) {
         options.open = true;
         showNotice(notice, "danger", "Could not reach the server.");
       } finally {
+        clearTimeout(busyTimer);
         submitting = false;
         submit.disabled = !content.value;
         submit.removeAttribute("aria-busy");

@@ -398,8 +398,8 @@ html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
 .bv-enigma-cell[data-distance="2"] { opacity: 0.3; }
 .bv-enigma-cell[data-distance="3"] { opacity: 0.1; }
 .bv-enigma-notch { position: absolute; right: var(--space-1); color: var(--color-fg-muted); }
-.bv-enigma-strip--forward { animation: bv-enigma-forward 140ms var(--ease); }
-.bv-enigma-strip--back { animation: bv-enigma-back 140ms var(--ease); }
+.bv-enigma-strip--forward { animation: bv-enigma-forward 120ms var(--ease); }
+.bv-enigma-strip--back { animation: bv-enigma-back 120ms var(--ease); }
 @keyframes bv-enigma-forward { from { translate: 0 var(--bv-enigma-row); } }
 @keyframes bv-enigma-back { from { translate: 0 calc(-1 * var(--bv-enigma-row)); } }
 .bv-enigma-ring { display: flex; align-items: center; justify-content: center; gap: var(--space-1); font-family: var(--font-mono); }
@@ -449,6 +449,7 @@ html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
   .bv-enigma-board__row:nth-of-type(3) { padding-left: 0; }
 }
 @media (pointer: coarse) {
+  .bv-enigma-set__grid { column-gap: var(--space-2); }
   .bv-enigma-ring .oc-btn, .bv-enigma-key-button { min-width: var(--target-touch); min-height: var(--target-touch); }
   .bv-enigma-key-button { width: var(--target-touch); height: 3.75rem; }
 }
