@@ -212,15 +212,25 @@ async fn privacy_levels_are_grouped_by_how_they_are_encrypted() {
 }
 
 #[tokio::test]
-async fn the_content_is_focused_with_an_address_as_its_example() {
+async fn the_content_is_focused_and_says_what_goes_in_it() {
     let html = body_text(app().await.get("/").await).await;
     let at = html.find("<textarea").unwrap();
     let tag = &html[at..at + html[at..].find('>').unwrap()];
     assert!(tag.contains(" autofocus"), "{tag}");
-    // The example shows the words; the visible label says text belongs here as well.
-    assert!(tag.contains("placeholder=\"apple-banana-cherry\""), "{tag}");
+    // Both the placeholder and the visible label say text belongs here, and words too.
+    assert!(tag.contains("placeholder=\"Type or paste text or a link. Three words open a paste.\""), "{tag}");
     assert!(html.contains("<label for=\"content\">Text, a link, or three words</label>"));
     assert!(html.contains("data-max-file-mb=\"2048\"") && html.contains("data-max-secret-mb=\"256\""));
+}
+
+#[tokio::test]
+async fn the_guide_describes_the_create_form_as_it_is() {
+    let guide = body_text(app().await.get("/guide").await).await;
+    let at = guide.find("id=\"create\"").unwrap();
+    let create = &guide[at..at + guide[at..].find("</p>").unwrap()];
+    // The options are open at rest and the file field is in view: nothing opens by itself or is called Attach files.
+    assert!(!create.contains("Attach files") && !create.contains("open by themselves"), "{create}");
+    assert!(create.contains("under Options") && create.contains("under Files"), "{create}");
 }
 
 #[tokio::test]
@@ -282,20 +292,23 @@ async fn one_box_carries_the_word_list_and_says_what_it_does() {
 }
 
 #[tokio::test]
-async fn the_options_are_open_as_rendered_with_their_summary_before_the_closed_file_field() {
+async fn the_options_are_open_as_rendered_with_the_file_field_in_view_after_them() {
     let html = body_text(app().await.get("/").await).await;
-    // Open, so a browser without scripts always shows them; box.js folds them while not needed.
+    // Open, so the options are in view at rest; box.js folds them only while the box is one line.
     let options = html.find("<details class=\"bv-options\" id=\"options\" open>").expect("open options");
-    let attach = html.find("<details class=\"bv-attach\" id=\"attach\">").expect("closed file field");
+    let options_end = html[options..].find("</details>").unwrap() + options;
+    let form = &html[html.find("id=\"create-form\"").unwrap()..];
+    assert!(!form[..form.find('>').unwrap()].contains("data-compact"), "tall as rendered");
+    assert!(!html.contains("id=\"attach\""), "the file field is not folded away");
     let file = html.find("type=\"file\"").unwrap();
     assert!(html.find("name=\"content\"").unwrap() < options);
     for name in
         ["name=\"privacy\"", "name=\"password\"", "name=\"expiry\"", "name=\"burn_after_reads\"", "name=\"syntax\""]
     {
         let at = html.find(name).unwrap();
-        assert!(options < at && at < attach, "{name} sits with the options");
+        assert!(options < at && at < options_end, "{name} sits with the options");
     }
-    assert!(attach < file && file < html.rfind("</details>").unwrap());
+    assert!(options_end < file, "files after every text field");
     assert!(
         html.contains("<span class=\"bv-options__summary\" id=\"options-summary\">Unlisted · 24 hours</span>"),
         "{html}"
@@ -308,9 +321,9 @@ async fn the_options_are_open_as_rendered_with_their_summary_before_the_closed_f
 #[tokio::test]
 async fn the_uploader_password_sits_with_the_options() {
     let html = body_text(app_with("[app]\nuploader_password = \"x\"\neditable = true\n").await.get("/").await).await;
-    let attach = html.find("id=\"attach\"").unwrap();
+    let file = html.find("type=\"file\"").unwrap();
     for name in ["name=\"uploader_password\"", "name=\"editable\""] {
-        assert!(html.find(name).unwrap() < attach, "{name} before the files");
+        assert!(html.find(name).unwrap() < file, "{name} before the files");
     }
 }
 

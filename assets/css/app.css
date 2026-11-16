@@ -76,7 +76,7 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
   .oc-topbar__logo { min-height: var(--target-touch); }
   .oc-field select:not(.oc-select-native) { min-height: var(--target-touch); font-size: 16px; }
   .bv-check { min-height: var(--target-touch); }
-  .bv-create .bv-attach > summary, .bv-create .bv-options > summary { padding-block: var(--space-3); }
+  .bv-create .bv-options > summary { padding-block: var(--space-3); }
   .bv-chip { min-height: var(--target-touch); }
   .bv-settings summary { padding-block: var(--space-3); }
   .bv-check input { width: 1.5rem; height: 1.5rem; }
@@ -96,39 +96,59 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-label > label:not(.bv-check) { font-weight: 500; color: var(--color-fg-secondary); }
 .bv-help { color: var(--color-fg-muted); }
 
-/* The home page: one box, the options in as few rows as the width allows, files behind a disclosure. */
+/* The home page: one box, the options in as few rows as the width allows, the file field under them. */
 .bv-create { padding-top: var(--space-5); }
 .bv-box { gap: var(--space-1); }
 .bv-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .bv-chip { height: auto; min-height: 1.75rem; padding: 0 var(--space-2); font-family: var(--font-mono); font-size: var(--text-dense); }
 .bv-chip:first-child { border-color: var(--color-accent); }
-.bv-options > summary, .bv-attach > summary { width: fit-content; padding-block: var(--space-1); font-weight: 500; color: var(--color-fg-secondary); cursor: pointer; }
-.bv-options__summary, .bv-attach__hint { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
+.bv-options > summary { width: fit-content; padding-block: var(--space-1); font-weight: 500; color: var(--color-fg-secondary); cursor: pointer; }
+.bv-options__summary, .bv-files__hint { margin-left: var(--space-2); font-weight: 400; color: var(--color-fg-muted); }
 .bv-options__body { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); }
 .bv-options[open] > .bv-options__body { animation: bv-reveal var(--motion-panel) var(--ease); }
 .bv-options__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: var(--space-3); align-items: end; }
 @keyframes bv-reveal { from { opacity: 0; translate: 0 calc(-1 * var(--space-2)); } }
-.bv-attach > .bv-files { margin-top: var(--space-2); }
 
 /* What the box will do, without words. box.js sets data-box: "open" when Enter or the button
    opens the paste the words name (green, and the button's plus turns into an arrow),
    "attention" when the words read two ways or lookups are paused (amber), "opening" while the
    paste loads (the arrow leaves). data-box-nudge shakes the box red when Enter cannot open. With
-   reduced motion the kit stops every animation, and the colours still tell. */
+   reduced motion the kit stops every animation, and the colours still tell.
+
+   The border also carries a light that follows the mouse (AGENTS.md exception 9): box.js sets
+   --bv-mx and --bv-my, and the spot is painted in the border area, over the border's own colour
+   (--bv-edge). At rest the spot is the text colour, so dark on a light page and light on a dark
+   one; in a state it is a stronger shade of the state's colour. Without a mouse the two
+   properties are never set and the spot stays far outside the box. */
+@property --bv-edge { syntax: "<color>"; inherits: false; initial-value: transparent; }
+@property --bv-spot { syntax: "<color>"; inherits: false; initial-value: transparent; }
 .bv-create #content {
+  --bv-edge: var(--color-border-control);
+  --bv-spot: color-mix(in srgb, var(--color-fg-primary) 70%, var(--color-border-control));
   height: 12rem;
-  transition: border-color var(--motion-panel) var(--ease), box-shadow var(--motion-panel) var(--ease), height var(--motion-panel) var(--ease);
+  border-color: transparent;
+  background:
+    linear-gradient(var(--color-bg-elevated), var(--color-bg-elevated)) padding-box,
+    radial-gradient(10rem circle at var(--bv-mx, -100rem) var(--bv-my, -100rem), var(--bv-spot), transparent 75%) border-box,
+    linear-gradient(var(--bv-edge), var(--bv-edge)) border-box;
+  transition: --bv-edge var(--motion-panel) var(--ease), --bv-spot var(--motion-panel) var(--ease), box-shadow var(--motion-panel) var(--ease), height var(--motion-panel) var(--ease);
 }
-/* One line until what is typed cannot be three words; box.js removes data-compact then. Only
-   with scripts on, so a browser without them gets the full box. */
+/* One line once the words in the box name a paste that exists; box.js sets data-compact then.
+   A box resized by hand carries its height inline, which only !important overrules. */
 @media (scripting: enabled) {
-  .bv-create[data-compact] #content { min-height: 0; height: calc(1lh + 2 * var(--space-2) + 2px); resize: none; overflow-y: auto; }
+  .bv-create[data-compact] #content { min-height: 0; height: calc(1lh + 2 * var(--space-2) + 2px) !important; resize: none; overflow-y: auto; }
+}
+/* Forced colours replace a background colour but not the painted layers above, so the box goes
+   back to a plain system field there. */
+@media (forced-colors: active) {
+  .bv-create #content { border-color: FieldText; background: Field; }
 }
 .bv-go { transition: background-color var(--motion-panel) var(--ease), border-color var(--motion-panel) var(--ease); }
 .bv-go__icon { display: inline-flex; }
 .bv-go__icon--open { display: none; }
 .bv-create:is([data-box="open"], [data-box="opening"]) #content {
-  border-color: var(--color-success);
+  --bv-edge: var(--color-success);
+  --bv-spot: color-mix(in srgb, var(--color-success) 60%, var(--color-fg-primary));
   box-shadow: 0 0 0 3px var(--color-success-dim);
   outline-color: var(--color-success);
 }
@@ -137,9 +157,10 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-create:is([data-box="open"], [data-box="opening"]) .bv-go__icon--create { display: none; }
 .bv-create:is([data-box="open"], [data-box="opening"]) .bv-go__icon--open { display: inline-flex; animation: bv-arrow-in var(--motion-panel) var(--ease); }
 .bv-create[data-box="opening"] .bv-go__icon--open { animation: bv-arrow-out 240ms var(--ease) forwards; }
-.bv-create[data-box="attention"] #content { border-color: var(--color-warning); box-shadow: 0 0 0 3px var(--color-warning-dim); outline-color: var(--color-warning); }
+.bv-create[data-box="attention"] #content { --bv-edge: var(--color-warning); --bv-spot: color-mix(in srgb, var(--color-warning) 60%, var(--color-fg-primary)); box-shadow: 0 0 0 3px var(--color-warning-dim); outline-color: var(--color-warning); }
 .bv-create[data-box-nudge] #content {
-  border-color: var(--color-danger);
+  --bv-edge: var(--color-danger);
+  --bv-spot: color-mix(in srgb, var(--color-danger) 60%, var(--color-fg-primary));
   box-shadow: 0 0 0 3px var(--color-danger-dim);
   outline-color: var(--color-danger);
   animation: bv-nudge 360ms var(--ease);

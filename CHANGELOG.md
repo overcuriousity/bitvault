@@ -6,6 +6,8 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 
 ### Changed
 
+- The home page looks like a place to write again: the box is a tall text area that says text and links go in it, the options are open and the file field is in view. The box becomes one line, with the options folded, only once the words in it name a paste that exists.
+- The box's border carries a faint light that follows the mouse pointer.
 - A paste that is one web address no longer redirects. It opens its page, which shows the address with a copy button and a "Go to URL" button, so following it is your choice and nobody can hide a target behind your instance's address. `?view` is no longer needed and is ignored.
 
 ## [2026.11.0]

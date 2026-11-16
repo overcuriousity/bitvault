@@ -131,21 +131,20 @@ function labelGroups(select) {
   }
 }
 
-// The whole form takes dropped files; the closed "Attach files" opens once there are any.
+// The whole form takes dropped files; the file field says so next to its label.
 function bindDropZone(form) {
   const input = form.querySelector("#files");
   if (!input) return;
-  const attach = form.querySelector("#attach");
-  const summary = attach?.querySelector("summary");
-  if (summary) {
+  // Beside the label, not in it, so the field is still named "Files".
+  const label = form.querySelector('label[for="files"]')?.parentElement;
+  if (label) {
     const hint = document.createElement("span");
-    hint.className = "bv-attach__hint";
+    hint.className = "bv-files__hint";
+    hint.id = "files-hint";
     hint.textContent = "or drop or paste them here";
-    summary.append(" ", hint);
+    label.append(hint);
+    input.setAttribute("aria-describedby", hint.id);
   }
-  input.addEventListener("change", () => {
-    if (attach && input.files.length > 0) attach.open = true;
-  });
   let depth = 0;
   const hasFiles = (e) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
   form.addEventListener("dragenter", (e) => {
