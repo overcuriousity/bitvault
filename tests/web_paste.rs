@@ -1315,7 +1315,6 @@ async fn private_raw_takes_a_password_with_letters_beyond_ascii() {
     assert_eq!(bytes_of(res).await, b"hidden");
 }
 
-
 #[tokio::test]
 async fn the_enigma_button_is_rendered_hidden() {
     let app = app().await;

@@ -4,6 +4,10 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 
 ## [2026.11.1]
 
+### Added
+
+- An Enigma page linked from the footer: a working three-rotor Enigma I with rotor, ring, start and plugboard settings. Its result can be kept as a paste; a cipher from the 1930s protects nothing.
+
 ### Changed
 
 - The home page looks like a place to write again: the box is a tall text area that says text and links go in it, the options are open and the file field is in view. The box becomes one line, with the options folded, only once the words in it name a paste that exists.
