@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { nextCollapsed, rememberLookups, submitDecision } from "./box.js";
+import { nextCollapsed, rememberLookups, spotAt, submitDecision } from "./box.js";
 
 // A lookup whose answers come from `answers` in turn, and the timers it set.
 function fixture(answers) {
@@ -81,4 +81,8 @@ test("a collapsed box regrows when emptied, when it holds text, and when files a
   assert.equal(nextCollapsed(true, facts({ addressLike: false })), false);
   assert.equal(nextCollapsed(true, facts({ files: true })), false);
   assert.equal(nextCollapsed(false, facts({ found: true, files: true })), false);
+});
+
+test("the border light sits where the pointer is, measured from the box", () => {
+  assert.deepEqual(spotAt({ left: 100, top: 40 }, 130, 20), { x: "30px", y: "-20px" });
 });

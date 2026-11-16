@@ -95,6 +95,33 @@ export function nextCollapsed(collapsed, { empty, found, addressLike, files }) {
   return found || (collapsed && addressLike);
 }
 
+/** Where the border's light is drawn: the pointer at viewport `x`, `y`, measured from the box's `rect`. */
+export function spotAt(rect, x, y) {
+  return { x: `${x - rect.left}px`, y: `${y - rect.top}px` };
+}
+
+// The box's border carries a light that follows the mouse (see app.css). Without a mouse there
+// is nothing to follow, and the border stays plain.
+function bindSpot(box) {
+  if (!window.matchMedia?.("(pointer: fine)").matches) return;
+  let last = null;
+  window.addEventListener(
+    "pointermove",
+    (event) => {
+      const waiting = last !== null;
+      last = event;
+      if (waiting) return;
+      requestAnimationFrame(() => {
+        const at = spotAt(box.getBoundingClientRect(), last.clientX, last.clientY);
+        last = null;
+        box.style.setProperty("--bv-mx", at.x);
+        box.style.setProperty("--bv-my", at.y);
+      });
+    },
+    { passive: true },
+  );
+}
+
 /** Binds the box of `form` and returns `decide`, which create.js awaits on submit. */
 export function bindBox(form) {
   const box = form.querySelector("#content");
@@ -105,6 +132,7 @@ export function bindBox(form) {
   const files = form.querySelector("#files");
   if (!box || !echo || !submit) return { decide: async () => ({}) };
 
+  bindSpot(box);
   const label = submit.querySelector(".bv-go__label") ?? submit;
   const idleLabel = label.textContent;
   const lookups = rememberLookups(lookup, () => update());
