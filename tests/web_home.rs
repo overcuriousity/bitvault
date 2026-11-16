@@ -224,6 +224,16 @@ async fn the_content_is_focused_and_says_what_goes_in_it() {
 }
 
 #[tokio::test]
+async fn the_guide_describes_the_create_form_as_it_is() {
+    let guide = body_text(app().await.get("/guide").await).await;
+    let at = guide.find("id=\"create\"").unwrap();
+    let create = &guide[at..at + guide[at..].find("</p>").unwrap()];
+    // The options are open at rest and the file field is in view: nothing opens by itself or is called Attach files.
+    assert!(!create.contains("Attach files") && !create.contains("open by themselves"), "{create}");
+    assert!(create.contains("under Options") && create.contains("under Files"), "{create}");
+}
+
+#[tokio::test]
 async fn labels_link_to_their_guide_sections() {
     let html = body_text(app_with("[app]\neditable = true\n").await.get("/").await).await;
     for (id, field) in [

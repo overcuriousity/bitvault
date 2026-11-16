@@ -96,7 +96,7 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-label > label:not(.bv-check) { font-weight: 500; color: var(--color-fg-secondary); }
 .bv-help { color: var(--color-fg-muted); }
 
-/* The home page: one box, the options in as few rows as the width allows, files behind a disclosure. */
+/* The home page: one box, the options in as few rows as the width allows, the file field under them. */
 .bv-create { padding-top: var(--space-5); }
 .bv-box { gap: var(--space-1); }
 .bv-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
@@ -133,9 +133,10 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
     linear-gradient(var(--bv-edge), var(--bv-edge)) border-box;
   transition: --bv-edge var(--motion-panel) var(--ease), --bv-spot var(--motion-panel) var(--ease), box-shadow var(--motion-panel) var(--ease), height var(--motion-panel) var(--ease);
 }
-/* One line once the words in the box name a paste that exists; box.js sets data-compact then. */
+/* One line once the words in the box name a paste that exists; box.js sets data-compact then.
+   A box resized by hand carries its height inline, which only !important overrules. */
 @media (scripting: enabled) {
-  .bv-create[data-compact] #content { min-height: 0; height: calc(1lh + 2 * var(--space-2) + 2px); resize: none; overflow-y: auto; }
+  .bv-create[data-compact] #content { min-height: 0; height: calc(1lh + 2 * var(--space-2) + 2px) !important; resize: none; overflow-y: auto; }
 }
 .bv-go { transition: background-color var(--motion-panel) var(--ease), border-color var(--motion-panel) var(--ease); }
 .bv-go__icon { display: inline-flex; }

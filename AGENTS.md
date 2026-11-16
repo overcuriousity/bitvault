@@ -23,7 +23,6 @@ https://github.com/overcuriousity/overcuriousity-dev-manifest/tree/v2026.11.0/ma
 6. Theme and text size are stored in `localStorage` for the admin too, not server-side (`10-visual.md` "store the choice per user"); a single in-memory admin session has nowhere durable to keep them.
 7. Opt-in plain HTTP (`insecure_http`), off by default: any Host, an `http://` `public_url`, origins checked against the request's own Host, no HSTS, a `bitvault-admin` cookie without `Secure`, `Referrer-Policy: same-origin` so our own form posts keep their Origin, and no Secret pastes (`70-ops.md` "NEVER an insecure LAN mode"). Since any host name is answered, a web page can reach the instance through DNS rebinding, and cross-site posts without cookies are not blocked. It restores 1.6.0's LAN use by the owner's decision; start-up logs a warning.
 8. Larger type and controls than the kit tokens, and one centred content column with the top bar aligned to it, by the owner's decision (`10-visual.md` type scale). The overrides live at the top of `assets/css/app.css`; the copied files stay unmodified.
-
 9. The home box's border carries a spot that follows the mouse pointer, drawn with a radial gradient, by the owner's decision (`10-visual.md` "NEVER: gradients, glows or saturated decorative fills"). Its colours come from the tokens, it moves only with the pointer and so does not stop under `prefers-reduced-motion`, and without a fine pointer the border is plain.
 
 ## Layout
