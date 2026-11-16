@@ -2,6 +2,13 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are CalVer `YYYY.M.N`.
 
+## [Unreleased]
+
+### Changed
+
+- The home page looks like a place to write again: the box is a tall text area that says text and links go in it, the options are open and the file field is in view. The box becomes one line, with the options folded, only once the words in it name a paste that exists.
+- The box's border carries a faint light that follows the mouse pointer.
+
 ## [2026.11.1]
 
 ### Changed
