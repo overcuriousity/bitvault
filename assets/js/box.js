@@ -85,6 +85,16 @@ export function submitDecision(result, address) {
   return result === "found" ? { open: `/${address}` } : { intent: "create" };
 }
 
+/**
+ * Whether the box is one line. It collapses only once its words name a paste that exists, stays
+ * one line while what it holds could still be an address, so mending a word does not make it
+ * jump, and is tall again when emptied, when it holds text, and when files are attached.
+ */
+export function nextCollapsed(collapsed, { empty, found, addressLike, files }) {
+  if (empty || files) return false;
+  return found || (collapsed && addressLike);
+}
+
 /** Binds the box of `form` and returns `decide`, which create.js awaits on submit. */
 export function bindBox(form) {
   const box = form.querySelector("#content");
@@ -171,19 +181,22 @@ export function bindBox(form) {
   // the box and the button green with an arrow, "attention" amber. See app.css.
   const look = (state) => (state === "found" ? "open" : state === "ambiguous" || state === "busy" ? "attention" : "");
 
-  // The box starts one line tall, like the address field it may be, and grows into the text area
-  // once what is typed can no longer be three words. It stays grown until it is emptied, so it
-  // never shrinks under someone editing text.
-  let grown = !form.hasAttribute("data-compact");
-  // The options follow: folded to their summary while the box is an address field, open once it
-  // holds text or files. Only a change of need moves them, so a fold or unfold by hand holds.
+  // The box is a tall text area at rest, and one line, like the address field it then is, once
+  // its words name a paste that exists. See `nextCollapsed`.
+  let collapsed = false;
+  // The options follow: open while the box is a text area, folded to their summary while it is
+  // one line. Only a change of need moves them, so a fold or unfold by hand holds.
   const options = form.querySelector("#options");
   let needed = null;
-  const size = () => {
-    if (!box.value.trim()) grown = false;
-    else if (!grown && !addressLike(box.value, words) && linked() === null) grown = true;
-    form.toggleAttribute("data-compact", !grown);
-    const need = grown || hasFiles();
+  const size = (read) => {
+    collapsed = nextCollapsed(collapsed, {
+      empty: !box.value.trim(),
+      found: read.state === "found",
+      addressLike: addressLike(box.value, words) || linked() !== null,
+      files: hasFiles(),
+    });
+    form.toggleAttribute("data-compact", collapsed);
+    const need = !collapsed;
     if (options && need !== needed) {
       needed = need;
       options.open = need;
@@ -192,8 +205,8 @@ export function bindBox(form) {
 
   // Returns the reading it drew.
   function render() {
-    size();
     const read = reading();
+    size(read);
     const { state, address } = read;
     setText(echo, echoFor(state, address) ?? "");
     const opens = state === "found";
@@ -267,8 +280,8 @@ export function bindBox(form) {
 
   box.addEventListener("focus", load);
   if (document.activeElement === box) load();
-  // A box the browser refilled (back, reload) is sized at once, by its shape until the list loads.
-  size();
+  // A box the browser refilled (back, reload) is drawn at once; it is looked up when the list loads.
+  render();
   box.addEventListener("input", () => {
     load();
     update();

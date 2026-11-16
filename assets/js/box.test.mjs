@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { rememberLookups, submitDecision } from "./box.js";
+import { nextCollapsed, rememberLookups, submitDecision } from "./box.js";
 
 // A lookup whose answers come from `answers` in turn, and the timers it set.
 function fixture(answers) {
@@ -60,4 +60,25 @@ test("a submit opens a found paste, keeps missing words, and leaves the rest to 
   // Keeping the words here would store them as a new paste although their paste may exist.
   assert.deepEqual(submitDecision("busy", "a-b-c"), {});
   assert.deepEqual(submitDecision(null, "a-b-c"), {});
+});
+
+const facts = (over) => ({ empty: false, found: false, addressLike: true, files: false, ...over });
+
+test("the box collapses only on a found paste", () => {
+  assert.equal(nextCollapsed(false, facts({ found: true })), true);
+  // Pending, missing, ambiguous and busy all arrive as found: false.
+  assert.equal(nextCollapsed(false, facts({})), false);
+  assert.equal(nextCollapsed(false, facts({ empty: true })), false);
+});
+
+test("a collapsed box stays one line while it could still be an address", () => {
+  assert.equal(nextCollapsed(true, facts({})), true);
+  assert.equal(nextCollapsed(true, facts({ found: true })), true);
+});
+
+test("a collapsed box regrows when emptied, when it holds text, and when files are attached", () => {
+  assert.equal(nextCollapsed(true, facts({ empty: true, addressLike: true })), false);
+  assert.equal(nextCollapsed(true, facts({ addressLike: false })), false);
+  assert.equal(nextCollapsed(true, facts({ files: true })), false);
+  assert.equal(nextCollapsed(false, facts({ found: true, files: true })), false);
 });
