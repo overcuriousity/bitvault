@@ -36,6 +36,7 @@
   {%- else if secret && !https_only %}
   <button type="button" class="oc-btn" data-bv-copy-target="paste-text" hidden>{{ self.icon("copy")|safe }}Copy text</button>
   {%- endif %}
+  <button type="button" class="oc-btn" data-bv-enigma hidden>{{ self.icon("key-round")|safe }}Decipher with Enigma</button>
   {%- if !burned %}
   {%- if let Some(href) = translate %}
   <a class="oc-btn" href="{{ href }}">{{ self.icon("languages")|safe }}Translate</a>

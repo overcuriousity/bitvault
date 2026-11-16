@@ -1,3 +1,5 @@
+import { looksLikeEnigma } from "./enigma.js";
+
 // The paste page: the buttons that need scripts, Share where the browser has it, Copy text from the shown content, and
 // relative times that stay fresh. Everything here is an extra; the page works without it.
 
@@ -56,6 +58,13 @@ async function copyTarget(button) {
   }
 }
 
+export function offerEnigma(root = document) {
+  const text = root.querySelector("#paste-text");
+  const button = root.querySelector("[data-bv-enigma]");
+  if (!text || !button) return;
+  button.hidden = text.hidden || !looksLikeEnigma(text.textContent);
+}
+
 export function init(root = document) {
   refreshTimes(root, Date.now());
   setInterval(() => refreshTimes(root, Date.now()), REFRESH_MS);
@@ -68,7 +77,20 @@ export function init(root = document) {
       navigator.share({ url: share.dataset.bvShare }).catch(() => {});
     });
   }
+  offerEnigma(root);
   root.addEventListener("click", (e) => {
+    const enigma = e.target.closest?.("[data-bv-enigma]");
+    if (enigma) {
+      const text = root.querySelector("#paste-text");
+      if (!text) return;
+      try {
+        sessionStorage.setItem("bv-enigma-text", text.textContent);
+      } catch {
+        // Navigation still works when storage is unavailable.
+      }
+      globalThis.location.href = "/enigma";
+      return;
+    }
     const button = e.target.closest?.("[data-bv-copy-target]");
     if (button && navigator.clipboard) copyTarget(button);
   });

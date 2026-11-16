@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { relativeFor, relativeText } from "./paste.js";
+import { offerEnigma, relativeFor, relativeText } from "./paste.js";
 import { splitLines } from "./lines.js";
 
 const MIN = 60;
@@ -45,4 +45,35 @@ test("lines keep their line break and a final break adds no empty line", () => {
   assert.deepEqual(splitLines("a\nb"), ["a\n", "b"]);
   assert.deepEqual(splitLines("a\n\nb\n"), ["a\n", "\n", "b\n"]);
   assert.deepEqual(splitLines(""), []);
+});
+
+
+function enigmaRoot(text, hidden = false) {
+  const button = { hidden: true };
+  const root = {
+    querySelector(selector) {
+      if (selector === "#paste-text") return { textContent: text, hidden };
+      if (selector === "[data-bv-enigma]") return button;
+      return null;
+    },
+  };
+  return { root, button };
+}
+
+test("Enigma is offered for shown text that looks like its output", () => {
+  const { root, button } = enigmaRoot("ABCDE FGHIJ KL");
+  offerEnigma(root);
+  assert.equal(button.hidden, false);
+});
+
+test("Enigma is not offered for ordinary text", () => {
+  const { root, button } = enigmaRoot("hello there");
+  offerEnigma(root);
+  assert.equal(button.hidden, true);
+});
+
+test("Enigma is not offered while the text is hidden", () => {
+  const { root, button } = enigmaRoot("ABCDE FGHIJ KL", true);
+  offerEnigma(root);
+  assert.equal(button.hidden, true);
 });

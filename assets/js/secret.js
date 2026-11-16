@@ -3,6 +3,7 @@
 import { CHUNK_LEN, HEADER_LEN, describe, fromHex, open, toHex, verifier } from "./crypto.js";
 import { fillLines } from "./lines.js";
 import { serverMessage, showNotice } from "./notice.js";
+import { offerEnigma } from "./paste.js";
 
 const PREVIEW_LIMIT = 10 * 1024 * 1024;
 // The largest container that can hold a previewable image.
@@ -250,6 +251,7 @@ function bind(view) {
       fillLines(target, text);
       target.hidden = false;
       showCopyText(view);
+      offerEnigma(view);
       form.hidden = true;
       if (cipher) cipher.hidden = true;
       if (state.grant) {
