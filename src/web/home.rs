@@ -74,6 +74,7 @@ struct Home {
     short_host: Option<String>,
     create_icon: String,
     open_icon: String,
+    enigma_icon: String,
     deleted: Option<String>,
 }
 
@@ -165,6 +166,7 @@ async fn index(
         short_host: st.dep.short_host.clone(),
         create_icon: super::icon("plus", super::IconSize::Tool),
         open_icon: super::icon("arrow-right", super::IconSize::Tool),
+        enigma_icon: super::icon("key-round", super::IconSize::Tool),
         deleted: q.notice().map(|n| super::escape_text(&n)),
     };
     let body = home.render().map_err(Error::internal)?;

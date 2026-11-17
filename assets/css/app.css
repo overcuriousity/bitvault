@@ -339,52 +339,77 @@ html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
 /* Enigma page */
 .bv-footer a { color: var(--color-fg-muted); }
 .bv-enigma {
-  --bv-enigma-row: var(--space-6);
+  --bv-enigma-row: 1.75rem;
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
   padding-top: var(--space-5);
   container: enigma / inline-size;
 }
-.bv-enigma h2 { margin-bottom: var(--space-2); font-size: var(--text-section); }
+/* The panels are titled like the text box between them is labelled. */
+.bv-enigma h2 { font-size: var(--text-ui); font-weight: 500; color: var(--color-fg-secondary); }
+.bv-enigma-head { display: flex; align-items: center; gap: var(--space-2); min-height: var(--target-tool); }
+.bv-enigma-plugboard > h2 { margin-bottom: var(--space-1); }
 .bv-enigma-set, .bv-enigma-result, .bv-enigma-board {
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
   background: var(--color-bg-elevated);
 }
+/* Rotors: narrow columns in the middle of the panel, the reflector at the left, as under the
+   machine's lid. */
 .bv-enigma-set { padding: var(--space-4); }
 .bv-enigma-set__grid {
   display: grid;
-  grid-template-columns: minmax(3.5rem, 1fr) minmax(3.5rem, 1fr) repeat(3, minmax(3.5rem, 1.15fr));
-  gap: var(--space-3) var(--space-2);
+  grid-template-columns: auto repeat(4, 4.5rem);
+  gap: var(--space-3) var(--space-4);
+  justify-content: center;
+  justify-items: center;
   align-items: center;
 }
 .bv-enigma-set__head, .bv-enigma-set__label { color: var(--color-fg-secondary); font-size: var(--text-micro); font-weight: 500; }
-.bv-enigma-set__head { text-align: center; }
-.bv-enigma-set__grid select:not(.oc-select-native) { min-width: 0; width: 100%; }
-.bv-enigma-set__grid .oc-menu-wrap { min-width: 0; }
-.bv-enigma-set__grid .oc-menu-button { width: 100%; min-width: 0; }
+.bv-enigma-set__label { justify-self: end; white-space: nowrap; }
+.bv-enigma-set__grid select:not(.oc-select-native) {
+  width: 100%;
+  min-width: 0;
+  height: var(--target-tool);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-base);
+  color: var(--color-fg-primary);
+  font-family: var(--font-mono);
+  text-align: center;
+  text-align-last: center;
+  /* No arrow: in a narrow column it would cut "III" short. */
+  appearance: none;
+}
+.bv-enigma-set__grid .oc-menu-wrap { display: block; width: 100%; min-width: 0; }
+.bv-enigma-set__grid .oc-menu-button { width: 100%; min-width: 0; justify-content: center; background: var(--color-bg-base); font-family: var(--font-mono); font-weight: 700; }
 .bv-enigma-set > .bv-hint { margin-top: var(--space-3); text-align: center; }
 .bv-enigma-window {
   position: relative;
+  width: 3.5rem;
   height: calc(5 * var(--bv-enigma-row));
   overflow: hidden;
   border: 1px solid var(--color-border-control);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-base);
   font-family: var(--font-mono);
   cursor: ns-resize;
   touch-action: none;
   user-select: none;
 }
-.bv-enigma-window::before {
+/* Two fine lines frame the letter the rotor stands at. */
+.bv-enigma-window::before, .bv-enigma-window::after {
   content: "";
   position: absolute;
-  z-index: var(--z-sticky);
-  inset: calc(2 * var(--bv-enigma-row)) 0 auto;
-  height: var(--bv-enigma-row);
-  border-block: 1px solid var(--color-border-strong);
+  inset-inline: var(--space-2);
+  height: 1px;
+  background: var(--color-border-control);
   pointer-events: none;
 }
+.bv-enigma-window::before { top: calc(2 * var(--bv-enigma-row)); }
+.bv-enigma-window::after { top: calc(3 * var(--bv-enigma-row)); }
 .bv-enigma-strip { position: absolute; top: calc(-1 * var(--bv-enigma-row)); left: 0; width: 100%; }
 .bv-enigma-cell {
   position: relative;
@@ -392,72 +417,87 @@ html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
   align-items: center;
   justify-content: center;
   height: var(--bv-enigma-row);
+  font-size: var(--text-prose);
   line-height: 1;
 }
-.bv-enigma-cell[data-distance="1"] { opacity: 0.65; }
-.bv-enigma-cell[data-distance="2"] { opacity: 0.3; }
-.bv-enigma-cell[data-distance="3"] { opacity: 0.1; }
-.bv-enigma-notch { position: absolute; right: var(--space-1); color: var(--color-fg-muted); }
-.bv-enigma-strip--forward { animation: bv-enigma-forward 120ms var(--ease); }
-.bv-enigma-strip--back { animation: bv-enigma-back 120ms var(--ease); }
+.bv-enigma-cell[data-distance="0"] { font-weight: 700; }
+.bv-enigma-cell[data-distance="1"] { opacity: 0.55; }
+.bv-enigma-cell[data-distance="2"] { opacity: 0.28; }
+.bv-enigma-cell[data-distance="3"] { opacity: 0.12; }
+.bv-enigma-notch { position: absolute; right: var(--space-1); color: var(--color-fg-muted); font-size: var(--text-micro); font-weight: 400; }
+.bv-enigma-strip--forward { animation: bv-enigma-forward 140ms var(--ease); }
+.bv-enigma-strip--back { animation: bv-enigma-back 140ms var(--ease); }
 @keyframes bv-enigma-forward { from { translate: 0 var(--bv-enigma-row); } }
 @keyframes bv-enigma-back { from { translate: 0 calc(-1 * var(--bv-enigma-row)); } }
-.bv-enigma-ring { display: flex; align-items: center; justify-content: center; gap: var(--space-1); font-family: var(--font-mono); }
-.bv-enigma-ring .oc-btn { min-width: 0; padding-inline: var(--space-2); }
+/* Ring: one small control, the number between its two steppers. */
+.bv-enigma-ring {
+  display: flex;
+  align-items: stretch;
+  width: 4.5rem;
+  height: var(--target-tool);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-base);
+  font-family: var(--font-mono);
+  cursor: ns-resize;
+}
+.bv-enigma-ring [data-value] { flex: 1; align-self: center; text-align: center; color: var(--color-fg-secondary); font-size: var(--text-dense); }
+.bv-enigma-ring__step { flex: none; width: 1.375rem; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--color-fg-muted); font: inherit; cursor: pointer; }
+.bv-enigma-ring__step:hover { color: var(--color-fg-primary); }
+/* The copy button stands right after the key line, not at the far edge. */
 .bv-enigma-key { display: flex; align-items: flex-start; gap: var(--space-2); }
-.bv-enigma-key code { flex: 1; font-family: var(--font-mono); font-size: var(--text-mono); overflow-wrap: anywhere; }
+.bv-enigma-key code { font-family: var(--font-mono); font-size: var(--text-mono); overflow-wrap: anywhere; }
 .bv-enigma-key .oc-copy { flex: 0 0 auto; }
-.bv-enigma-result { min-height: calc(3 * var(--bv-enigma-row)); padding: var(--space-3); line-height: 1.8; overflow-wrap: anywhere; }
+.bv-enigma-result { min-height: calc(2 * var(--bv-enigma-row)); padding: var(--space-3); line-height: 1.8; overflow-wrap: anywhere; }
 .bv-enigma-result:empty::before { content: "The enciphered text appears here."; color: var(--color-fg-muted); font-family: var(--font-ui); font-size: var(--text-micro); }
 .bv-enigma-result__last { padding: var(--space-1); border: 1px solid var(--color-accent); border-radius: var(--radius-sm); background: var(--color-accent-dim); }
 .bv-enigma-trace { margin-top: var(--space-2); color: var(--color-fg-primary); font-size: var(--text-micro); overflow-wrap: anywhere; }
 .bv-enigma-trace__stage { color: var(--color-fg-muted); }
+/* Plugboard: the machine's key order, each letter over its two sockets. The sockets and cables
+   are drawn by enigma-page.js in the SVG layer under the keys; a key leaves them 2rem at its
+   foot. The room under the last row is where the cables hang. */
 .bv-enigma-plugboard .bv-hint { margin-top: var(--space-2); }
-.bv-enigma-board { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: var(--space-4) var(--space-4) calc(3 * var(--space-6)); overflow: hidden; }
+.bv-enigma-board { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: var(--space-4) var(--space-4) var(--space-6); overflow: hidden; }
 .bv-enigma-cables { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: visible; }
 .bv-enigma-board__row { position: relative; z-index: 1; display: flex; gap: var(--space-2); }
-.bv-enigma-board__row:nth-of-type(3) { padding-left: var(--space-4); }
 .bv-enigma-key-button {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  width: 2.75rem;
-  height: 3.5rem;
-  padding: var(--space-2) var(--space-1) var(--space-3);
-  background: transparent;
-  font-family: var(--font-mono);
-  line-height: 1.2;
+  justify-content: center;
+  width: 2.5rem;
+  padding: var(--space-2) 0 2rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-fg-secondary);
+  font: 700 var(--text-dense) / 1.2 var(--font-mono);
+  cursor: pointer;
 }
-.bv-enigma-key-button__partner { min-height: 1em; color: var(--color-fg-secondary); font-size: var(--text-micro); }
-.bv-enigma-key-button[aria-pressed="true"] { border-color: var(--color-accent); background: var(--color-accent-dim); }
+.bv-enigma-key-button:hover { border-color: var(--color-border-strong); }
+.bv-enigma-key-button[aria-pressed="true"] { border-color: var(--color-accent); color: var(--color-fg-primary); }
+.bv-enigma-key-button__letter { position: relative; }
+/* The partner stands beside the letter without pushing it off the sockets' axis. */
+.bv-enigma-key-button__partner { position: absolute; left: 100%; bottom: 0; margin-left: 0.125rem; color: var(--color-fg-secondary); font-size: var(--text-micro); font-weight: 400; }
+.bv-enigma .bv-create { padding-top: 0; }
 .bv-enigma-create { justify-content: space-between; gap: var(--space-4); }
 .bv-enigma-create .bv-hint { max-width: 36rem; margin: 0; }
 
 @container enigma (max-width: 36rem) {
-  .bv-enigma-set { padding: var(--space-2); }
-  .bv-enigma-set__grid {
-    grid-template-columns: minmax(2.75rem, 0.8fr) minmax(3rem, 1fr) repeat(3, minmax(2.75rem, 1fr));
-    gap: var(--space-2) var(--space-1);
-  }
-  .bv-enigma-ring { gap: 0; }
-  .bv-enigma-ring .oc-btn { padding-inline: var(--space-1); }
+  .bv-enigma-set { padding: var(--space-3) var(--space-2); }
+  .bv-enigma-set__grid { grid-template-columns: auto repeat(4, minmax(0, 3.6rem)); gap: var(--space-2); }
+  .bv-enigma-window { width: 100%; }
+  .bv-enigma-ring { width: 100%; }
 }
+/* Phones: the letters keep the machine's sequence and wrap into as many rows as they need. */
 @container enigma (max-width: 31rem) {
-  .bv-enigma-board { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: var(--space-2); padding-bottom: calc(2 * var(--space-6)); }
+  .bv-enigma-board { flex-direction: row; flex-wrap: wrap; justify-content: center; }
   .bv-enigma-board__row { display: contents; }
-  .bv-enigma-board__row:nth-of-type(3) { padding-left: 0; }
 }
+/* Fingers: steppers above and below the number, and keys, at touch size. */
 @media (pointer: coarse) {
-  .bv-enigma-set__grid { column-gap: var(--space-2); }
-  .bv-enigma-ring .oc-btn, .bv-enigma-key-button { min-width: var(--target-touch); min-height: var(--target-touch); }
-  .bv-enigma-key-button { width: var(--target-touch); height: 3.75rem; }
-}
-@container enigma (max-width: 36rem) {
-  @media (pointer: coarse) {
-    .bv-enigma-ring { flex-direction: column; }
-    .bv-enigma-ring .oc-btn { width: 100%; }
-  }
+  .bv-enigma-ring { flex-direction: column-reverse; height: auto; cursor: auto; }
+  .bv-enigma-ring [data-value] { padding-block: var(--space-1); }
+  .bv-enigma-ring__step { width: 100%; min-height: var(--target-touch); }
+  .bv-enigma-key-button { width: var(--target-touch); }
 }
 @media (prefers-reduced-motion: reduce) {
   .bv-enigma-strip--forward, .bv-enigma-strip--back { animation: none; }

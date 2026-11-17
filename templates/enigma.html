@@ -17,9 +17,9 @@
       <div class="bv-enigma-window" data-enigma-window="1" role="spinbutton" tabindex="0" aria-label="Middle rotor position"></div>
       <div class="bv-enigma-window" data-enigma-window="2" role="spinbutton" tabindex="0" aria-label="Right rotor position"></div>
       <span class="bv-enigma-set__label" data-oc-tip="Each rotor's letter ring can be turned against the wiring inside it. It is part of the key, like the position.">Ring<span class="oc-sr-only">Each rotor's letter ring can be turned against the wiring inside it. It is part of the key, like the position.</span></span><span></span>
-      <div class="bv-enigma-ring" data-enigma-ring="0" role="group" aria-label="Left ring setting"><button type="button" class="oc-btn oc-btn--default" data-step="-1" aria-label="Decrease left ring setting">‹</button><span data-value>01</span><button type="button" class="oc-btn oc-btn--default" data-step="1" aria-label="Increase left ring setting">›</button></div>
-      <div class="bv-enigma-ring" data-enigma-ring="1" role="group" aria-label="Middle ring setting"><button type="button" class="oc-btn oc-btn--default" data-step="-1" aria-label="Decrease middle ring setting">‹</button><span data-value>01</span><button type="button" class="oc-btn oc-btn--default" data-step="1" aria-label="Increase middle ring setting">›</button></div>
-      <div class="bv-enigma-ring" data-enigma-ring="2" role="group" aria-label="Right ring setting"><button type="button" class="oc-btn oc-btn--default" data-step="-1" aria-label="Decrease right ring setting">‹</button><span data-value>01</span><button type="button" class="oc-btn oc-btn--default" data-step="1" aria-label="Increase right ring setting">›</button></div>
+      <div class="bv-enigma-ring" data-enigma-ring="0" role="group" aria-label="Left ring setting"><button type="button" class="bv-enigma-ring__step" data-step="-1" aria-label="Decrease left ring setting">‹</button><span data-value>01</span><button type="button" class="bv-enigma-ring__step" data-step="1" aria-label="Increase left ring setting">›</button></div>
+      <div class="bv-enigma-ring" data-enigma-ring="1" role="group" aria-label="Middle ring setting"><button type="button" class="bv-enigma-ring__step" data-step="-1" aria-label="Decrease middle ring setting">‹</button><span data-value>01</span><button type="button" class="bv-enigma-ring__step" data-step="1" aria-label="Increase middle ring setting">›</button></div>
+      <div class="bv-enigma-ring" data-enigma-ring="2" role="group" aria-label="Right ring setting"><button type="button" class="bv-enigma-ring__step" data-step="-1" aria-label="Decrease right ring setting">‹</button><span data-value>01</span><button type="button" class="bv-enigma-ring__step" data-step="1" aria-label="Increase right ring setting">›</button></div>
     </div>
     <p class="bv-hint" id="enigma-started">Set the start position: mouse wheel, drag, arrow keys, or type a letter.</p>
   </section>
@@ -27,7 +27,10 @@
   <div class="bv-enigma-key"><code id="enigma-key">Rotors I II III · Reflector B · Rings 01 01 01 · Start A A A · Plugs none</code><button type="button" class="oc-btn oc-btn--icon oc-btn--row oc-copy" id="enigma-key-copy" aria-label="Copy key" data-oc-tip="Copy key" data-oc-copy="Rotors I II III · Reflector B · Rings 01 01 01 · Start A A A · Plugs none">{{ copy_icons|safe }}</button></div>
 
   <section class="bv-enigma-output" aria-labelledby="enigma-result-label">
-    <h2 id="enigma-result-label">Result</h2>
+    <div class="bv-enigma-head">
+      <h2 id="enigma-result-label">Result</h2>
+      <button type="button" class="oc-btn oc-btn--icon oc-btn--row oc-copy" id="enigma-result-copy" aria-label="Copy result" data-oc-tip="Copy result" data-oc-copy="" hidden>{{ copy_icons|safe }}</button>
+    </div>
     <div class="bv-enigma-result bv-mono" id="enigma-result"></div>
     <div class="bv-enigma-trace bv-mono" id="enigma-trace"></div>
   </section>

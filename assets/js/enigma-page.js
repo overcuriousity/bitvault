@@ -11,6 +11,7 @@ import {
   turnStart,
   wheelSteps,
 } from "./enigma.js";
+import { ENIGMA_TEXT_KEY } from "./enigma-open.js";
 import { createdLocation, summaryText } from "./create.js";
 import { serverMessage, showNotice } from "./notice.js";
 
@@ -23,6 +24,7 @@ if (root) {
   const started = document.getElementById("enigma-started");
   const keyText = document.getElementById("enigma-key");
   const keyCopy = document.getElementById("enigma-key-copy");
+  const resultCopy = document.getElementById("enigma-result-copy");
   const board = document.getElementById("enigma-board");
   const form = document.getElementById("enigma-form");
   const content = document.getElementById("enigma-content");
@@ -35,15 +37,20 @@ if (root) {
   const rings = [...root.querySelectorAll("[data-enigma-ring]")];
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const svgNS = "http://www.w3.org/2000/svg";
+  // The plugboard's sockets, in px: their radius, how far the lower one sits above the key's
+  // foot, and the distance between the two. app.css leaves the key this much room.
+  const SOCKET_RADIUS = 5;
+  const SOCKET_FOOT = 9;
+  const SOCKET_STEP = 14;
   let state = { ...defaultKey(), pending: null };
   let shown = [...state.start];
   let submitting = false;
 
   try {
-    const arriving = sessionStorage.getItem("bv-enigma-text");
+    const arriving = sessionStorage.getItem(ENIGMA_TEXT_KEY);
     if (arriving !== null) {
       text.value = arriving;
-      sessionStorage.removeItem("bv-enigma-text");
+      sessionStorage.removeItem(ENIGMA_TEXT_KEY);
     }
   } catch {
     // Storage is optional; the machine still works without it.
@@ -108,6 +115,8 @@ if (root) {
     if (nodes.length) nodes.at(-1).className = "bv-enigma-result__last";
     result.replaceChildren(...nodes);
     if (content) content.value = grouped;
+    resultCopy.dataset.ocCopy = grouped;
+    resultCopy.hidden = !grouped;
     if (submit) submit.disabled = submitting || !grouped;
 
     trace.replaceChildren();
@@ -147,17 +156,20 @@ if (root) {
     for (const button of board.querySelectorAll("button[data-letter]")) {
       const rect = button.getBoundingClientRect();
       const x = rect.left - box.left + rect.width / 2;
-      const y = rect.top - box.top + rect.height - 6;
+      // Two sockets one above the other at the foot of the key, as on the machine; the cable
+      // leaves from the lower one.
+      const y = rect.top - box.top + rect.height - SOCKET_FOOT;
       const letter = Number(button.dataset.letter);
       sockets.set(letter, { x, y });
-      for (const side of [-1, 1]) {
+      const live = partner(letter) !== null || state.pending === letter;
+      for (const cy of [y - SOCKET_STEP, y]) {
         const circle = document.createElementNS(svgNS, "circle");
-        circle.setAttribute("cx", String(x + side * 4));
-        circle.setAttribute("cy", String(y));
-        circle.setAttribute("r", "2.5");
-        circle.setAttribute("stroke", partner(letter) === null ? "var(--color-border-strong)" : "var(--color-accent)");
-        circle.setAttribute("fill", partner(letter) === null ? "var(--color-bg-elevated)" : "var(--color-accent)");
-        circle.setAttribute("stroke-width", "1");
+        circle.setAttribute("cx", String(x));
+        circle.setAttribute("cy", String(cy));
+        circle.setAttribute("r", String(SOCKET_RADIUS));
+        circle.setAttribute("stroke", live ? "var(--color-accent)" : "var(--color-border-control)");
+        circle.setAttribute("fill", live ? "var(--color-accent)" : "var(--color-bg-base)");
+        circle.setAttribute("stroke-width", "1.5");
         svg.append(circle);
       }
     }
@@ -167,13 +179,21 @@ if (root) {
       if (!one || !two) continue;
       const path = document.createElementNS(svgNS, "path");
       const distance = Math.hypot(two.x - one.x, two.y - one.y);
-      const sag = 14 + distance * 0.12;
-      const y = Math.max(one.y, two.y) + sag;
-      path.setAttribute("d", `M ${one.x} ${one.y} Q ${(one.x + two.x) / 2} ${y} ${two.x} ${two.y}`);
+      // A longer cable hangs lower, but never out of the panel: the curve dips half as far as
+      // its control point.
+      const low = Math.max(one.y, two.y);
+      const sag = Math.min(14 + distance * 0.12, 2 * (height - low - SOCKET_RADIUS));
+      const y = low + sag;
+      // Sockets one above the other, as on a phone's wrapped board: the cable bows sideways so
+      // it does not run through the keys between them.
+      const across = Math.abs(two.x - one.x);
+      const bow = across < 24 ? 24 - across : 0;
+      path.setAttribute("d", `M ${one.x} ${one.y} Q ${(one.x + two.x) / 2 + bow} ${y} ${two.x} ${two.y}`);
       path.setAttribute("fill", "none");
       path.setAttribute("stroke", "var(--color-accent)");
       path.setAttribute("stroke-width", "3");
       path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-opacity", "0.8");
       svg.append(path);
     }
   }
@@ -190,16 +210,20 @@ if (root) {
         const joined = partner(value);
         const button = document.createElement("button");
         button.type = "button";
-        button.className = "oc-btn oc-btn--default bv-enigma-key-button";
+        button.className = "bv-enigma-key-button";
         button.dataset.letter = String(value);
         button.setAttribute("aria-label", joined === null ? character : `${character}, joined to ${alphabet[joined]}`);
         button.setAttribute("aria-pressed", String(state.pending === value));
         const letter = document.createElement("span");
+        letter.className = "bv-enigma-key-button__letter";
         letter.textContent = character;
-        const mate = document.createElement("span");
-        mate.className = "bv-enigma-key-button__partner";
-        mate.textContent = joined === null ? "" : alphabet[joined];
-        button.append(letter, mate);
+        if (joined !== null) {
+          const mate = document.createElement("span");
+          mate.className = "bv-enigma-key-button__partner";
+          mate.textContent = alphabet[joined];
+          letter.append(mate);
+        }
+        button.append(letter);
         row.append(button);
       }
       return row;
