@@ -37,7 +37,11 @@
 
   <div class="oc-field">
     <label for="enigma-text">Text to encipher or decipher</label>
-    <textarea class="oc-input bv-mono" id="enigma-text" rows="6" spellcheck="false" autocomplete="off"></textarea>
+    <div class="bv-enigma-waiting" id="enigma-waiting" aria-live="polite"></div>
+    <div class="bv-enigma-input">
+      <textarea class="oc-input bv-mono" id="enigma-text" rows="6" spellcheck="false" autocomplete="off"></textarea>
+      <button type="button" class="oc-btn" id="enigma-type" hidden>{{ type_icon|safe }}Type</button>
+    </div>
   </div>
 
   <section class="bv-enigma-plugboard" aria-labelledby="enigma-board-label">

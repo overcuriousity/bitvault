@@ -85,6 +85,14 @@ export function normalise(text) {
     .replace(/[^A-Z]/g, "");
 }
 
+// Splits off what one key press adds to the text box: the next letter and whatever lies before it.
+export function nextKeystroke(waiting) {
+  const chars = [...waiting];
+  const at = chars.findIndex((character) => normalise(character) !== "");
+  if (at === -1) return ["", ""];
+  return [chars.slice(0, at + 1).join(""), chars.slice(at + 1).join("")];
+}
+
 export function group(letters) {
   return letters.match(/.{1,5}/g)?.join(" ") ?? "";
 }

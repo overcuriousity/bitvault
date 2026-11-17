@@ -6,6 +6,7 @@ import {
   group,
   keyLine,
   looksLikeEnigma,
+  nextKeystroke,
   normalise,
   startedLine,
   swapRotor,
@@ -63,6 +64,12 @@ test("normalise keys text in as an operator would", () => {
   assert.equal(normalise("Wetter für Köln, Straße 7!\n"), "WETTERFUERKOELNSTRASSE");
   assert.equal(normalise("Ärger café Æ"), "AERGERCAFE");
   assert.equal(normalise("123 🙂 ..."), "");
+});
+test("one key press types the next letter with the spaces before it", () => {
+  assert.deepEqual(nextKeystroke("ABCDE FG"), ["A", "BCDE FG"]);
+  assert.deepEqual(nextKeystroke(" FG"), [" F", "G"]);
+  assert.deepEqual(nextKeystroke("E\n"), ["E", "\n"]);
+  assert.deepEqual(nextKeystroke("\n "), ["", ""]);
 });
 test("group writes fives", () => {
   assert.equal(group("ABCDEFGHIJKL"), "ABCDE FGHIJ KL");
