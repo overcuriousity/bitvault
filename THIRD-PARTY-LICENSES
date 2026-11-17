@@ -342,6 +342,40 @@ DEALINGS IN THE SOFTWARE.
 MIT License (MIT)
 
 Used by:
+- sqlx 0.9.0
+
+Copyright (C) SQLx Contributors
+Portions of this work Copyright (C) LaunchBadge, LLC
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+
+-------------------------------------------------------------------------------
+MIT License (MIT)
+
+Used by:
 - sha2 0.10.9
 
 Copyright (c) 2006-2009 Graydon Hoare
@@ -1015,7 +1049,7 @@ DEALINGS IN THE SOFTWARE.
 MIT License (MIT)
 
 Used by:
-- hashbrown 0.15.5
+- hashbrown 0.16.1
 - hashbrown 0.17.1
 
 Copyright (c) 2016 Amanieu d'Antras
@@ -2228,7 +2262,7 @@ SOFTWARE.
 MIT License (MIT)
 
 Used by:
-- sd-notify 0.4.5
+- sd-notify 0.5.0
 
 Copyright (c) 2019 Laurențiu Nicola
 
@@ -2399,7 +2433,7 @@ DEALINGS IN THE SOFTWARE.
 MIT License (MIT)
 
 Used by:
-- tower-http 0.6.11
+- tower-http 0.7.1
 
 Copyright (c) 2019-2021 Tower Contributors
 
@@ -2541,43 +2575,6 @@ Used by:
 
 Copyright (c) 2019-2026 The RustCrypto Project Developers
 Copyright (c) 2019 MobileCoin, LLC
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
-
--------------------------------------------------------------------------------
-MIT License (MIT)
-
-Used by:
-- sqlx-core 0.8.6
-- sqlx-macros-core 0.8.6
-- sqlx-macros 0.8.6
-- sqlx-sqlite 0.8.6
-- sqlx 0.8.6
-
-Copyright (c) 2020 LaunchBadge, LLC
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -3714,6 +3711,10 @@ Used by:
 - pear 0.2.9
 - pear_codegen 0.2.9
 - r-efi 6.0.0
+- sqlx-core 0.9.0
+- sqlx-macros-core 0.9.0
+- sqlx-macros 0.9.0
+- sqlx-sqlite 0.9.0
 - windows-link 0.2.1
 - windows-sys 0.61.2
 
@@ -3892,7 +3893,7 @@ SOFTWARE.
 MIT License (MIT)
 
 Used by:
-- flume 0.11.1
+- flume 0.12.0
 - rustc-hash 2.1.3
 
 Permission is hereby granted, free of charge, to any
@@ -4382,9 +4383,9 @@ THE SOFTWARE.
 MIT License (MIT)
 
 Used by:
-- rust-embed-impl 8.13.0
-- rust-embed-utils 8.13.0
-- rust-embed 8.13.0
+- rust-embed-impl 8.14.0
+- rust-embed-utils 8.14.0
+- rust-embed 8.14.0
 
 The MIT License (MIT)
 
@@ -4797,7 +4798,7 @@ SOFTWARE.
 MIT License (MIT)
 
 Used by:
-- hashlink 0.10.0
+- hashlink 0.11.1
 
 This work is derived in part from the `linked-hash-map` crate, Copyright (c)
 2015 The Rust Project Developers
@@ -4949,7 +4950,7 @@ ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation a
 zlib License (Zlib)
 
 Used by:
-- foldhash 0.1.5
+- foldhash 0.2.0
 
 Copyright (c) 2024 Orson Peters
 

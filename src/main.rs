@@ -46,7 +46,7 @@ async fn run(cli: Cli) -> Result<(), bitvault::error::Error> {
     if st.cfg.insecure_http {
         tracing::warn!("Plain HTTP is on: passwords and pastes travel unencrypted on the network.");
     }
-    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]);
+    let _ = sd_notify::notify(&[sd_notify::NotifyState::Ready]);
     spawn_watchdog();
     spawn_purge(st.clone());
     let (stopping, mut stopped) = tokio::sync::watch::channel(false);
@@ -87,15 +87,14 @@ fn spawn_purge(st: bitvault::state::AppState) {
 }
 
 fn spawn_watchdog() {
-    let mut usec = 0;
-    if !sd_notify::watchdog_enabled(false, &mut usec) {
+    let Some(timeout) = sd_notify::watchdog_enabled() else {
         return;
-    }
-    let every = std::time::Duration::from_micros(usec / 2);
+    };
+    let every = timeout / 2;
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(every).await;
-            let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Watchdog]);
+            let _ = sd_notify::notify(&[sd_notify::NotifyState::Watchdog]);
         }
     });
 }
@@ -110,5 +109,5 @@ async fn shutdown() {
         _ = ctrl_c => {},
         _ = term.recv() => {},
     }
-    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]);
+    let _ = sd_notify::notify(&[sd_notify::NotifyState::Stopping]);
 }
