@@ -1,4 +1,5 @@
 import { looksLikeEnigma } from "./enigma.js";
+import { openInEnigma } from "./enigma-open.js";
 
 // The paste page: the buttons that need scripts, Share where the browser has it, Copy text from the shown content, and
 // relative times that stay fresh. Everything here is an extra; the page works without it.
@@ -82,13 +83,7 @@ export function init(root = document) {
     const enigma = e.target.closest?.("[data-bv-enigma]");
     if (enigma) {
       const text = root.querySelector("#paste-text");
-      if (!text) return;
-      try {
-        sessionStorage.setItem("bv-enigma-text", text.textContent);
-      } catch {
-        // Navigation still works when storage is unavailable.
-      }
-      globalThis.location.href = "/enigma";
+      if (text) openInEnigma(text.textContent);
       return;
     }
     const button = e.target.closest?.("[data-bv-copy-target]");

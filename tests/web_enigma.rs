@@ -20,6 +20,8 @@ async fn the_page_renders_with_its_script_and_no_named_text_box() {
     let submit = html.find("id=\"enigma-submit\"").unwrap();
     let end = submit + html[submit..].find('>').unwrap();
     assert!(html[submit..end].contains("disabled"));
+    // The result has its own copy button, hidden until the script has a result to copy.
+    assert!(html.contains("id=\"enigma-result-copy\" aria-label=\"Copy result\""), "{html}");
 }
 
 #[tokio::test]

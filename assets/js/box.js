@@ -5,6 +5,8 @@
 //
 // Enter on a box that is one line of three words opens that paste, the quick way in. It only ever
 // opens: words no paste has stay in the box with a note, and keeping them takes the button.
+import { looksLikeEnigma } from "./enigma.js";
+import { openInEnigma } from "./enigma-open.js";
 import { accept, addressLike, chips, choose, linkWords, MAX_TYPED, readAddress, settled } from "./words.js";
 
 // Long enough that a lookup waits for a pause in typing, short enough to answer before a press.
@@ -147,6 +149,7 @@ export function bindBox(form) {
   const chipRow = form.querySelector("#box-chips");
   const submit = form.querySelector("#box-submit");
   const keep = form.querySelector("#box-keep");
+  const enigma = form.querySelector("#box-enigma");
   const files = form.querySelector("#files");
   if (!box || !echo || !submit) return { decide: async () => ({}) };
 
@@ -258,6 +261,8 @@ export function bindBox(form) {
     const opens = state === "found";
     setText(label, opens ? "Open paste" : idleLabel);
     if (keep) keep.hidden = !opens;
+    // Groups of five capitals read as Enigma output: offer the machine that deciphers them.
+    if (enigma) enigma.hidden = !looksLikeEnigma(box.value);
     const shown = look(state);
     if (shown) form.dataset.box = shown;
     else delete form.dataset.box;
@@ -324,6 +329,7 @@ export function bindBox(form) {
     enter();
   });
 
+  enigma?.addEventListener("click", () => openInEnigma(box.value));
   box.addEventListener("focus", load);
   if (document.activeElement === box) load();
   // A box the browser refilled (back, reload) is drawn at once; it is looked up when the list loads.

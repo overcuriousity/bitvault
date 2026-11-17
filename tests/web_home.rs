@@ -224,6 +224,17 @@ async fn the_content_is_focused_and_says_what_goes_in_it() {
 }
 
 #[tokio::test]
+async fn the_box_carries_a_hidden_enigma_button_beside_its_own() {
+    let html = body_text(app().await.get("/").await).await;
+    let at = html.find("id=\"box-enigma\"").expect("the Enigma button");
+    let tag = &html[html[..at].rfind('<').unwrap()..at + html[at..].find('>').unwrap()];
+    // Not a submit: it leaves for the Enigma page and keeps nothing. Shown by box.js only.
+    assert!(tag.contains("type=\"button\"") && tag.ends_with(" hidden"), "{tag}");
+    assert!(html.find("id=\"box-submit\"").unwrap() < at && at < html.find("id=\"options\"").unwrap());
+    assert!(html[at..].contains("Decipher with Enigma"));
+}
+
+#[tokio::test]
 async fn the_guide_describes_the_create_form_as_it_is() {
     let guide = body_text(app().await.get("/guide").await).await;
     let at = guide.find("id=\"create\"").unwrap();
