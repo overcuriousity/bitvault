@@ -4,6 +4,7 @@ import {
   encipher,
   group,
   keyLine,
+  nextKeystroke,
   normalise,
   startedLine,
   swapRotor,
@@ -32,6 +33,8 @@ if (root) {
   const options = document.getElementById("options");
   const notice = document.getElementById("enigma-notice");
   const reflector = document.getElementById("enigma-reflector");
+  const waitingNotice = document.getElementById("enigma-waiting");
+  const typeButton = document.getElementById("enigma-type");
   const rotorSelects = [...root.querySelectorAll("[data-enigma-rotor]")];
   const windows = [...root.querySelectorAll("[data-enigma-window]")];
   const rings = [...root.querySelectorAll("[data-enigma-ring]")];
@@ -45,16 +48,45 @@ if (root) {
   let state = { ...defaultKey(), pending: null };
   let shown = [...state.start];
   let submitting = false;
+  // A text handed over from elsewhere is not put in the box: the windows show where the rotors
+  // stand after the text, so the key could not be set over it. It waits until Type keys it in.
+  let waiting = "";
 
   try {
     const arriving = sessionStorage.getItem(ENIGMA_TEXT_KEY);
     if (arriving !== null) {
-      text.value = arriving;
       sessionStorage.removeItem(ENIGMA_TEXT_KEY);
+      waiting = arriving;
     }
   } catch {
     // Storage is optional; the machine still works without it.
   }
+
+  const waitingCount = normalise(waiting).length;
+  if (waitingCount) {
+    const unit = waitingCount === 1 ? "letter" : "letters";
+    showNotice(waitingNotice, "info", `${waitingCount} ${unit} waiting. Set the key, then press Type.`);
+    typeButton.hidden = false;
+  }
+
+  function keyIn() {
+    const [typed, rest] = nextKeystroke(waiting);
+    waiting = rest;
+    if (!typed) {
+      clearInterval(typing);
+      return;
+    }
+    text.value += typed;
+    render();
+  }
+
+  let typing;
+  typeButton.addEventListener("click", () => {
+    typeButton.hidden = true;
+    showNotice(waitingNotice, "info", "");
+    keyIn();
+    typing = setInterval(keyIn, 500);
+  });
 
   const wrap = (value) => ((value % 26) + 26) % 26;
   const signedDifference = (to, from) => wrap(to - from + 13) - 13;

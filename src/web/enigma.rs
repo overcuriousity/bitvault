@@ -23,6 +23,7 @@ struct Enigma {
     options: Option<Options>,
     copy_icons: String,
     create_icon: String,
+    type_icon: String,
 }
 
 pub(super) fn enigma_privacy(cfg: &Config) -> Option<Privacy> {
@@ -37,6 +38,7 @@ async fn enigma(State(st): State<AppState>, MaybeAdmin(admin): MaybeAdmin) -> Re
         options,
         copy_icons: super::copy_icons(),
         create_icon: super::icon("plus", super::IconSize::Tool),
+        type_icon: super::icon("keyboard", super::IconSize::Tool),
     })?;
     let extras = Extras { js: vec![Assets::url("js/enigma-page.js")], ..Extras::default() };
     page_with(&st, admin, "enigma", "Enigma", body, extras)

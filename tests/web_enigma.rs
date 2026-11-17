@@ -25,6 +25,16 @@ async fn the_page_renders_with_its_script_and_no_named_text_box() {
 }
 
 #[tokio::test]
+async fn the_type_button_is_hidden_until_a_handed_over_text_waits() {
+    let html = body_text(app().await.get("/enigma").await).await;
+    let at = html.find("id=\"enigma-type\"").unwrap();
+    let end = at + html[at..].find('>').unwrap();
+    assert!(html[at..end].contains("hidden"), "{}", &html[at..end]);
+    assert!(html[at..].contains("data-icon=\"keyboard\""));
+    assert!(html.contains("id=\"enigma-waiting\" aria-live=\"polite\""));
+}
+
+#[tokio::test]
 async fn secret_and_syntax_and_files_are_not_offered() {
     let html = body_text(app().await.get("/enigma").await).await;
     for absent in ["value=\"secret\"", "id=\"syntax\"", "type=\"file\"", "id=\"secret-password\""] {

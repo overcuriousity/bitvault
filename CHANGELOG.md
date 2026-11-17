@@ -2,6 +2,16 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are CalVer `YYYY.M.N`.
 
+## [2026.11.5]
+
+### Fixed
+
+- A text opened with "Decipher with Enigma" no longer lands in the Enigma's text box before the key is set. The rotor windows show where the rotors stand after the text, so setting the key over a filled box set the wrong start and the text did not decipher. The text now waits: set the key, then press Type, and the machine keys it in one letter every half second.
+
+### Changed
+
+- Dependency updates: base64 0.23, rust-embed 8.14, sd-notify 0.5, sqlx 0.9 and tower-http 0.7.
+
 ## [2026.11.4]
 
 ### Added
