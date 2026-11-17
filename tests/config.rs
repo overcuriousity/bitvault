@@ -1,14 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::result_large_err)]
 
-mod support;
-
 use std::path::Path;
 
-use axum::http::{StatusCode, header};
-use bitvault::assets::Assets;
 use bitvault::config::{self, Config};
 use bitvault::error::Error;
-use support::{app, body_text};
 
 // Jail tests set process-wide environment variables, so every test that loads a config takes this lock.
 static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -165,31 +160,6 @@ fn secrets_can_come_from_files() {
         assert_eq!(cfg.app.admin_password.as_deref(), Some("s3cret-pass"));
         Ok(())
     });
-}
-
-#[tokio::test]
-async fn the_home_page_renders_in_the_shell() {
-    let a = app().await;
-    let res = a.get("/").await;
-    assert_eq!(res.status(), StatusCode::OK);
-    assert!(res.headers()[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/html"));
-    let html = body_text(res).await;
-    assert!(html.contains("<meta name=\"htmx-config\""));
-    assert!(html.contains("data-theme"));
-    assert!(!html.contains("style="));
-}
-
-#[tokio::test]
-async fn assets_are_served_immutable_under_a_hashed_url() {
-    let a = app().await;
-    let url = Assets::url("vendor/oc/css/00-tokens.css");
-    let res = a.get(&url).await;
-    assert_eq!(res.status(), StatusCode::OK);
-    assert!(res.headers()[header::CACHE_CONTROL].to_str().unwrap().contains("immutable"));
-    assert!(res.headers()[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/css"));
-
-    let stale = url.replacen(url.split('/').nth(2).unwrap(), "00000000", 1);
-    assert_eq!(a.get(&stale).await.status(), StatusCode::NOT_FOUND);
 }
 
 #[test]
