@@ -350,6 +350,7 @@ html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
 .bv-enigma h2 { font-size: var(--text-ui); font-weight: 500; color: var(--color-fg-secondary); }
 .bv-enigma-head { display: flex; align-items: center; gap: var(--space-2); min-height: var(--target-tool); }
 .bv-enigma-input { position: relative; }
+.bv-enigma-input textarea { display: block; width: 100%; }
 .bv-enigma-input .oc-btn { position: absolute; right: var(--space-2); bottom: var(--space-2); }
 .bv-enigma-input:has(> .oc-btn:not([hidden])) textarea { padding-bottom: calc(var(--target-touch) + var(--space-3)); }
 .bv-enigma-waiting:empty { display: none; }
