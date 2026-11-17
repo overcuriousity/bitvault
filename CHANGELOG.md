@@ -2,6 +2,17 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are CalVer `YYYY.M.N`.
 
+## [2026.11.4]
+
+### Added
+
+- The box on the home page offers "Decipher with Enigma" while it holds what looks like Enigma output, groups of five capital letters. The button opens the Enigma page with that text.
+- The Enigma page's result has a copy button.
+
+### Changed
+
+- The Enigma page has the compact look it was designed with: narrow rotor columns in the middle of the panel, one small ring control per rotor, the letter a rotor stands at in bold between two fine lines, and plugboard letters over two round sockets each. Its rotor choices are styled on touch devices too, and cables no longer hang out of the plugboard.
+
 ## [2026.11.3]
 
 ### Fixed
