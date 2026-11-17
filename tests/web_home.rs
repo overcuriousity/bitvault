@@ -3,6 +3,7 @@
 mod support;
 
 use axum::http::{StatusCode, header};
+use bitvault::assets::Assets;
 use support::{app, app_with, body_text};
 
 fn words_shape(location: &str) -> bool {
@@ -516,4 +517,31 @@ async fn the_options_keep_their_fields_and_order() {
         assert!(at >= previous, "{id} is out of order");
         previous = at;
     }
+}
+
+// These two build the app, so they live here and not in `tests/config.rs`: its jail tests set
+// process-wide environment variables, which a config loaded at the same moment would pick up.
+#[tokio::test]
+async fn the_home_page_renders_in_the_shell() {
+    let a = app().await;
+    let res = a.get("/").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(res.headers()[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/html"));
+    let html = body_text(res).await;
+    assert!(html.contains("<meta name=\"htmx-config\""));
+    assert!(html.contains("data-theme"));
+    assert!(!html.contains("style="));
+}
+
+#[tokio::test]
+async fn assets_are_served_immutable_under_a_hashed_url() {
+    let a = app().await;
+    let url = Assets::url("vendor/oc/css/00-tokens.css");
+    let res = a.get(&url).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(res.headers()[header::CACHE_CONTROL].to_str().unwrap().contains("immutable"));
+    assert!(res.headers()[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/css"));
+
+    let stale = url.replacen(url.split('/').nth(2).unwrap(), "00000000", 1);
+    assert_eq!(a.get(&stale).await.status(), StatusCode::NOT_FOUND);
 }
