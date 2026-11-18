@@ -75,6 +75,7 @@ pub async fn build_with_rooms(
     // Edits carry a whole paste's text, which escaping can grow sixfold, like a JSON create.
     let edits = Router::new()
         .merge(web::paste::edit_routes())
+        .merge(web::live::edit_routes())
         .merge(api.edits)
         .layer(from_fn_with_state(st.clone(), web::lookups::budget))
         .layer(from_fn_with_state(st.clone(), web::errors::render))
@@ -84,6 +85,7 @@ pub async fn build_with_rooms(
     let rest = Router::new()
         .merge(web::home::routes())
         .merge(web::paste::routes())
+        .merge(web::live::routes())
         .merge(web::files::routes())
         .merge(web::list::routes())
         .merge(web::guide::routes())

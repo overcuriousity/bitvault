@@ -58,6 +58,8 @@ pub struct Timing {
     pub render_every: Duration,
     /// Editors get caret moves at most this often.
     pub peers_every: Duration,
+    /// A private paste's stream hands out a fresh grant this often.
+    pub grant_every: Duration,
 }
 
 impl Default for Timing {
@@ -69,6 +71,7 @@ impl Default for Timing {
             presence_grace: Duration::from_secs(15),
             render_every: Duration::from_secs(1),
             peers_every: Duration::from_millis(250),
+            grant_every: Duration::from_secs(300),
         }
     }
 }
@@ -259,6 +262,11 @@ impl Rooms {
         let hold = JoinHold::default();
         *lock(&self.hold) = Some(hold.clone());
         hold
+    }
+
+    /// The delays these rooms run on.
+    pub fn timing(&self) -> Timing {
+        self.timing
     }
 
     /// How many sessions are running.

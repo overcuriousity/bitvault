@@ -6,6 +6,7 @@ pub mod files;
 pub mod guide;
 pub mod home;
 pub mod list;
+pub mod live;
 pub mod lookups;
 pub mod multipart;
 pub mod paste;

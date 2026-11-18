@@ -44,6 +44,7 @@ fn timing() -> Timing {
         presence_grace: ms(100),
         render_every: ms(100),
         peers_every: ms(20),
+        grant_every: Duration::from_secs(300),
     }
 }
 
