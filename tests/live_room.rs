@@ -11,7 +11,7 @@ use bitvault::domain::expiry::Expiry;
 use bitvault::domain::files::Staging;
 use bitvault::domain::live::ot::{Op, Part};
 use bitvault::domain::live::room::{
-    self, ClientId, EditorEvent, Init, Joined, Msg, Peer, Rooms, StreamGuard, Timing, WatchEvent,
+    self, ClientId, EditorEvent, Init, Joined, Msg, Peer, Rooms, StreamGuard, Timing, WatchEvent, WatchRx,
 };
 use bitvault::domain::paste::{self, Access, NewPaste, Paste, TEXT_LIMIT};
 use bitvault::domain::{self, Privacy};
@@ -45,6 +45,7 @@ fn timing() -> Timing {
         render_every: ms(100),
         peers_every: ms(20),
         grant_every: Duration::from_secs(300),
+        stall: Duration::from_secs(60),
     }
 }
 
@@ -107,7 +108,7 @@ fn edit(seq: u64, base: u64, op: Op) -> Msg {
 }
 
 /// The next `op` event, skipping the others.
-async fn next_op(rx: &mut Receiver<EditorEvent>) -> (u64, u32, u64, Op) {
+async fn next_op(rx: &mut Receiver<EditorEvent>) -> (u64, u32, u64, Arc<Op>) {
     tokio::time::timeout(PATIENCE, async {
         loop {
             if let EditorEvent::Op { rev, peer, seq, op } = rx.recv().await.unwrap() {
@@ -120,7 +121,7 @@ async fn next_op(rx: &mut Receiver<EditorEvent>) -> (u64, u32, u64, Op) {
 }
 
 /// The next watcher event that `pick` accepts, skipping the others.
-async fn next_watch<T>(rx: &mut Receiver<WatchEvent>, pick: impl Fn(WatchEvent) -> Option<T>) -> T {
+async fn next_watch<T>(rx: &mut WatchRx, pick: impl Fn(WatchEvent) -> Option<T>) -> T {
     tokio::time::timeout(PATIENCE, async {
         loop {
             if let Some(t) = pick(rx.recv().await.unwrap()) {
@@ -610,7 +611,7 @@ async fn editor_gone(rx: &mut Receiver<EditorEvent>) {
     next_editor(rx, |e| matches!(e, EditorEvent::Gone).then_some(())).await;
 }
 
-async fn watcher_gone(rx: &mut Receiver<WatchEvent>) {
+async fn watcher_gone(rx: &mut WatchRx) {
     next_watch(rx, |e| matches!(e, WatchEvent::Gone).then_some(())).await;
 }
 
@@ -827,26 +828,132 @@ async fn a_join_that_read_the_row_before_a_form_edit_reads_it_again() {
     assert_eq!(row_text(st, &p).await, "new text");
 }
 
+/// How many `Reload`s are waiting for `watcher`; fails on anything but `Live` and `Reload`.
+fn reloads(watcher: &mut WatchRx) -> usize {
+    let mut n = 0;
+    while let Ok(e) = watcher.try_recv() {
+        match e {
+            WatchEvent::Reload => n += 1,
+            WatchEvent::Live { .. } => {}
+            other => panic!("{other:?}"),
+        }
+    }
+    n
+}
+
 #[tokio::test]
-async fn a_url_paste_that_stays_a_url_does_not_reload_watchers() {
+async fn a_url_paste_reloads_watchers_when_its_target_changes() {
     let app = live_app().await;
     let st = &app.st;
     let (first, second, third) = ("https://example.org/", "https://example.org/a", "https://example.org/b");
     let p = create(st, first, Privacy::Unlisted).await;
     assert_eq!(row(st, &p).await.0, "url");
     let mut watcher = room::watch(st, &p, ip(9)).unwrap();
-    // A save from a session.
+    // A save from a session to another target reloads once.
     let a = join(st, &p, ip(1)).await;
     room::submit(st, &p, &a.init.client, edit(1, 0, Op::from_texts(first, second))).await.unwrap();
     eventually("the session saved", || async { row_text(st, &p).await == second }).await;
+    next_watch(&mut watcher.events, |e| matches!(e, WatchEvent::Reload).then_some(())).await;
+    // Another text with the same target does not.
+    let spaced = format!("{second}\n");
+    room::submit(st, &p, &a.init.client, edit(2, 1, Op::from_texts(second, &spaced))).await.unwrap();
     drop(a);
     sessions_end(st).await;
-    // A save without one.
+    assert_eq!(row(st, &p).await, ("url".into(), second.into()));
+    assert_eq!(reloads(&mut watcher.events), 0, "the same target reloaded");
+    // A save without a session: another target reloads once, the same one does not.
     paste::edit(st, p.id, Access::Anonymous, ip(2), third.into(), None, domain::now()).await.unwrap();
     assert_eq!(row(st, &p).await, ("url".into(), third.into()));
-    // Whatever a reload would have been sent by is done: the session saved, ended, and the
-    // edit returned after telling the watchers.
-    while let Ok(e) = watcher.events.try_recv() {
-        assert!(matches!(e, WatchEvent::Live { .. }), "{e:?}");
+    assert_eq!(reloads(&mut watcher.events), 1);
+    paste::edit(st, p.id, Access::Anonymous, ip(2), format!(" {third} "), None, domain::now()).await.unwrap();
+    assert_eq!(reloads(&mut watcher.events), 0, "the same target reloaded");
+}
+
+#[tokio::test]
+async fn a_watcher_gets_empty_content_when_the_session_text_is_empty() {
+    let timing = Timing { session_grace: Duration::from_secs(600), ..timing() };
+    let app = support::app_with_timing(CONFIG, timing).await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let mut watcher = room::watch(st, &p, ip(9)).unwrap();
+    let a = join(st, &p, ip(1)).await;
+    room::submit(st, &p, &a.init.client, edit(1, 0, Op::from_parts([Part::Delete(5)]))).await.unwrap();
+    let html = next_watch(&mut watcher.events, |e| match e {
+        WatchEvent::Content { html, .. } => Some(html),
+        _ => None,
+    })
+    .await;
+    assert_eq!(&*html, "");
+    // A watcher that connects now starts from the session's empty text, not the row's.
+    let mut late = room::watch(st, &p, ip(10)).unwrap();
+    let first = late.content(st, &p, None).await.unwrap();
+    assert!(matches!(first, Some(WatchEvent::Content { ref html, .. }) if html.is_empty()), "{first:?}");
+    assert_eq!(row_text(st, &p).await, "hello");
+}
+
+#[tokio::test]
+async fn a_stalled_editor_lags_and_pins_no_old_operations() {
+    // A history of two revisions, so only the channel could still hold the first operation.
+    let app = support::app_with_rooms(CONFIG, Rooms::with_history(no_timed_saves(), 2, 1 << 20)).await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    // Each edit from its own editor, so none runs into the per-editor rate.
+    let mut writers = Vec::new();
+    for n in 0..40 {
+        writers.push(join(st, &p, ip(100 + n)).await);
     }
+    let mut stalled = join(st, &p, ip(1)).await;
+    let mut reader = join(st, &p, ip(2)).await;
+    let mut first = None;
+    for (rev, w) in (0u64..).zip(&writers) {
+        let len = 5 + u32::try_from(rev).unwrap();
+        room::submit(st, &p, &w.init.client, edit(1, rev, insert(len, len, "!"))).await.unwrap();
+        let (_, _, _, op) = next_op(&mut reader.events).await;
+        first.get_or_insert_with(|| Arc::downgrade(&op));
+    }
+    assert!(first.unwrap().upgrade().is_none(), "the first operation is still held");
+    let lagged = loop {
+        match stalled.events.recv().await {
+            Ok(_) => {}
+            Err(e) => break e,
+        }
+    };
+    assert!(matches!(lagged, tokio::sync::broadcast::error::RecvError::Lagged(_)), "{lagged:?}");
+}
+
+#[tokio::test]
+async fn watchers_get_the_newest_content_after_a_burst() {
+    let app = live_app().await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let mut watcher = room::watch(st, &p, ip(9)).unwrap();
+    for n in 0..100 {
+        paste::edit(st, p.id, Access::Anonymous, ip(2), format!("text {n}"), None, domain::now()).await.unwrap();
+    }
+    let mut contents = Vec::new();
+    while let Ok(e) = watcher.events.try_recv() {
+        if let WatchEvent::Content { html, .. } = e {
+            contents.push(html);
+        }
+    }
+    assert_eq!(contents.len(), 1, "{contents:?}");
+    assert!(contents[0].contains("text 99"), "{contents:?}");
+}
+
+#[tokio::test]
+async fn the_last_editor_leaving_saves_at_once() {
+    let timing = Timing { session_grace: Duration::from_secs(600), ..no_timed_saves() };
+    let app = support::app_with_timing(CONFIG, timing).await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let a = join(st, &p, ip(1)).await;
+    let b = join(st, &p, ip(2)).await;
+    room::submit(st, &p, &a.init.client, edit(1, 0, insert(5, 5, "!"))).await.unwrap();
+    drop(a);
+    // Long enough for a save to have happened; one editor is still here.
+    tokio::time::sleep(ms(200)).await;
+    assert_eq!(row_text(st, &p).await, "hello");
+    drop(b);
+    eventually("the text is saved", || async { row_text(st, &p).await == "hello!" }).await;
+    assert_eq!(st.rooms.sessions(), 1, "the session still waits out its grace");
 }

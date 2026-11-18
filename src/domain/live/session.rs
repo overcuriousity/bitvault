@@ -8,6 +8,7 @@ use tokio::time::Instant;
 
 use super::ot::{self, Op, Part};
 use super::room::{ClientId, EditorEvent, Init, Peer};
+use crate::domain::Kind;
 use crate::domain::crypto::Dek;
 use crate::domain::paste::{self, Paste, TEXT_LIMIT};
 use crate::error::Error;
@@ -17,6 +18,9 @@ const EDITS_PER_SECOND: f64 = 30.0;
 /// The most clients one session remembers. Past it, [`Session::add_client`] forgets the one
 /// absent longest, so repeated fresh joins cannot grow a long session's memory without bound.
 const CLIENTS: usize = 4096;
+/// The most transform work one edit may ask for: its parts times the revisions it is behind.
+/// Real edits have a handful of parts and are a few revisions behind.
+const TRANSFORM_BUDGET: u64 = 1_000_000;
 
 pub(super) fn chars(s: &str) -> u32 {
     u32::try_from(s.chars().count()).unwrap_or(u32::MAX)
@@ -55,10 +59,12 @@ impl Client {
 }
 
 /// An applied operation, kept to transform late edits over and to replay.
+/// Its operation is shared with the event that broadcast it, so the history and the editors'
+/// channel hold one copy.
 pub(super) struct Logged {
     pub(super) peer: u32,
     pub(super) seq: u64,
-    pub(super) op: Op,
+    pub(super) op: Arc<Op>,
 }
 
 /// A save taken from the session: what to write, and since when it was unsaved.
@@ -77,6 +83,8 @@ pub(super) struct Session {
     pub(super) len: u32,
     pub(super) rev: u64,
     pub(super) syntax: Option<String>,
+    /// The target the row holds while the paste is a URL paste, to tell when a save changed it.
+    pub(super) target: Option<String>,
     /// The operations that made the last `history.len()` revisions.
     pub(super) history: VecDeque<Logged>,
     pub(super) history_bytes: usize,
@@ -97,7 +105,9 @@ pub(super) struct Session {
 impl Session {
     pub(super) fn new(paste: Paste, dek: Option<Arc<Dek>>, text: &str, now: Instant) -> Self {
         let text = lf(text);
+        let target = (paste.kind == Kind::Url).then(|| paste::url_target(&paste, &text)).flatten();
         Self {
+            target,
             len: chars(&text),
             syntax: paste.syntax.clone(),
             paste,
@@ -183,7 +193,7 @@ impl Session {
             rev: first + i as u64 + 1,
             peer: l.peer,
             seq: l.seq,
-            op: l.op.clone(),
+            op: Arc::clone(&l.op),
         });
         Some(events.collect())
     }
@@ -226,6 +236,11 @@ impl Session {
         let first = self.first_rev();
         if base > self.rev || base < first {
             return Err(invalid());
+        }
+        // Refused before any work: transforming costs about the parts times the revisions behind.
+        let parts = u64::try_from(op.parts().len()).unwrap_or(u64::MAX);
+        if parts.saturating_mul(self.rev - base) > TRANSFORM_BUDGET {
+            return Err(Error::Invalid("The edit is too far behind the text. Reload the page.".into()));
         }
         let skip = usize::try_from(base - first).map_err(|_| invalid())?;
         for logged in self.history.iter().skip(skip) {
@@ -287,7 +302,8 @@ impl Session {
         self.text = text;
         self.rev += 1;
         self.history_bytes += op.inserted_bytes();
-        self.history.push_back(Logged { peer, seq, op: op.clone() });
+        let op = Arc::new(op);
+        self.history.push_back(Logged { peer, seq, op: Arc::clone(&op) });
         let (max_revs, max_bytes) = limits;
         while self.history.len() > max_revs || (self.history_bytes > max_bytes && !self.history.is_empty()) {
             if let Some(old) = self.history.pop_front() {

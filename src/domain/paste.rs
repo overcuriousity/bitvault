@@ -310,6 +310,13 @@ fn plain_content(privacy: Privacy, content: String, has_files: bool) -> (Kind, V
     (Kind::Text, content.into_bytes())
 }
 
+/// The target `text` makes `p` a URL paste with, by the rules of [`plain_content`]; `None` when it
+/// stays a text paste.
+pub(crate) fn url_target(p: &Paste, text: &str) -> Option<String> {
+    let plain = matches!(p.privacy, Privacy::Public | Privacy::Unlisted) && p.files.is_empty();
+    plain.then(|| whole_url(text)).flatten().map(str::to_owned)
+}
+
 /// Text is optional only when the paste carries files.
 pub(crate) fn require_content(content: &str, has_files: bool) -> Result<(), Error> {
     if content.trim().is_empty() && !has_files {
@@ -835,8 +842,14 @@ pub async fn edit(
     if room::replace_text(st, &p, content.clone(), syntax.clone()).await? {
         return Ok(());
     }
+    // A URL paste's page shows its target, so watchers reload when the target changes too.
+    let old_target = match p.kind {
+        Kind::Url => peek_text(st, p.id, p.created_at, None, now).await?.and_then(|(_, t)| url_target(&p, &t)),
+        Kind::Text => None,
+    };
     let kind = store_text(st, &p, dek.as_ref(), content.clone(), syntax.clone(), now).await?.ok_or(Error::NotFound)?;
-    room::text_saved(st, &p, &content, syntax.as_deref(), kind != p.kind).await;
+    let reload = kind != p.kind || (kind == Kind::Url && url_target(&p, &content) != old_target);
+    room::text_saved(st, &p, &content, syntax.as_deref(), reload).await;
     Ok(())
 }
 

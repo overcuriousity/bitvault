@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use subtle::ConstantTimeEq;
+use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 use tokio::sync::{Notify, broadcast, watch};
 use tokio::time::Instant;
 
@@ -40,7 +41,12 @@ const STREAMS_PER_ADDRESS: usize = 16;
 const SESSIONS: usize = 512;
 const HISTORY_REVS: usize = 10_000;
 const HISTORY_BYTES: usize = 8 << 20;
-const EDITOR_CHANNEL: usize = 1024;
+/// Editor events a stream may fall behind by before it is closed. An entry costs no copy of what
+/// the history holds (the operation is shared), so a stalled stream pins at most this many
+/// operations of at most `TEXT_LIMIT` inserted each: 32 MiB, four times the history's bound.
+const EDITOR_CHANNEL: usize = 32;
+/// Watcher events other than the text, which only the newest of matters and goes by
+/// [`Room::content`]; these are a few bytes each.
 const WATCH_CHANNEL: usize = 64;
 
 /// The delays of saving, presence and throttling.
@@ -60,6 +66,9 @@ pub struct Timing {
     pub peers_every: Duration,
     /// A private paste's stream hands out a fresh grant this often.
     pub grant_every: Duration,
+    /// A stream whose response has taken no frame this long ends: its client stopped reading. A
+    /// quiet stream still gets a comment line every 20 seconds, so it is measured too.
+    pub stall: Duration,
 }
 
 impl Default for Timing {
@@ -72,6 +81,7 @@ impl Default for Timing {
             render_every: Duration::from_secs(1),
             peers_every: Duration::from_millis(250),
             grant_every: Duration::from_secs(300),
+            stall: Duration::from_secs(60),
         }
     }
 }
@@ -125,7 +135,7 @@ pub enum EditorEvent {
         rev: u64,
         peer: u32,
         seq: u64,
-        op: Op,
+        op: Arc<Op>,
     },
     Peers(Vec<Peer>),
     Syntax(Option<String>),
@@ -140,10 +150,10 @@ pub enum WatchEvent {
     },
     /// The text as the paste page renders it.
     Content {
-        html: String,
+        html: Arc<str>,
         highlighted: bool,
     },
-    /// The paste changed between text and URL: the page must be loaded again.
+    /// The paste changed between text and URL, or to another URL: the page must be loaded again.
     Reload,
     Gone,
 }
@@ -187,9 +197,44 @@ pub enum Msg {
     Syntax(Option<String>),
 }
 
+/// A watcher's events: `Live`, `Reload` and `Gone` in order, and of the rendered text only the
+/// newest, however many renders it missed.
+pub struct WatchRx {
+    events: broadcast::Receiver<WatchEvent>,
+    content: watch::Receiver<Option<WatchEvent>>,
+}
+
+impl WatchRx {
+    /// The next event; `Lagged` when the stream fell too far behind and must end.
+    pub async fn recv(&mut self) -> Result<WatchEvent, RecvError> {
+        loop {
+            tokio::select! {
+                biased;
+                event = self.events.recv() => return event,
+                changed = self.content.changed() => {
+                    changed.map_err(|_| RecvError::Closed)?;
+                    if let Some(event) = self.content.borrow_and_update().clone() {
+                        return Ok(event);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The next event if one is waiting.
+    pub fn try_recv(&mut self) -> Result<WatchEvent, TryRecvError> {
+        match self.events.try_recv() {
+            Err(TryRecvError::Empty) if self.content.has_changed().unwrap_or(false) => {
+                self.content.borrow_and_update().clone().ok_or(TryRecvError::Empty)
+            }
+            other => other,
+        }
+    }
+}
+
 pub struct Watching {
     pub editors: usize,
-    pub events: broadcast::Receiver<WatchEvent>,
+    pub events: WatchRx,
     pub guard: StreamGuard,
     /// The running session's text, taken under the lock the subscription was made under.
     current: Option<Current>,
@@ -309,6 +354,12 @@ impl Rooms {
         hold
     }
 
+    /// How many streams from `ip` are counted. Test-only.
+    #[cfg(feature = "test-hooks")]
+    pub fn streams_from(&self, ip: IpAddr) -> usize {
+        lock(&self.inner).streams.get(&bucket_key(ip)).copied().unwrap_or(0)
+    }
+
     /// The delays these rooms run on.
     pub fn timing(&self) -> Timing {
         self.timing
@@ -341,6 +392,19 @@ impl Rooms {
         let room = Arc::clone(inner.rooms.entry(key).or_insert_with(|| Arc::new(Room::new(key))));
         lock(&room.state).streams += 1;
         Ok(StreamGuard { rooms: Arc::clone(self), room, ip, role: Role::Pending })
+    }
+
+    /// Whether a stream from `ip` would be counted now, without counting it or creating a room:
+    /// the answer a `HEAD` gives.
+    pub fn probe(&self, ip: IpAddr) -> Result<(), Error> {
+        let inner = lock(&self.inner);
+        if *self.closing.borrow() {
+            return Err(Error::ShuttingDown);
+        }
+        if inner.streams.get(&bucket_key(ip)).is_some_and(|n| *n >= STREAMS_PER_ADDRESS) {
+            return Err(Error::TooManyAttempts);
+        }
+        Ok(())
     }
 
     fn reserve_session(self: &Arc<Self>) -> Result<SessionSlot, Error> {
@@ -437,11 +501,14 @@ pub struct StreamGuard {
 }
 
 impl StreamGuard {
-    /// Returns once [`close_all`] has run, at once if it already has: the stream must end.
-    pub async fn closed(&self) {
-        // The sender lives as long as the rooms this guard holds, so the wait ends only by
-        // `close_all`.
-        let _ = self.rooms.closing.subscribe().wait_for(|closing| *closing).await;
+    /// Resolves once [`close_all`] has run, at once if it already has: the stream must end. It
+    /// does not borrow the guard, so the guard can be dropped while it waits.
+    pub fn closed(&self) -> impl Future<Output = ()> + Send + 'static {
+        let mut closing = self.rooms.closing.subscribe();
+        async move {
+            // Ends early only if the rooms are dropped, which ends every stream anyway.
+            let _ = closing.wait_for(|closing| *closing).await;
+        }
     }
 }
 
@@ -488,6 +555,9 @@ pub(super) struct Room {
     pub(super) key: Key,
     pub(super) editors: broadcast::Sender<EditorEvent>,
     pub(super) watchers: broadcast::Sender<WatchEvent>,
+    /// The newest rendered text (`WatchEvent::Content`) for watchers: one value, however many
+    /// watchers fall behind.
+    pub(super) content: watch::Sender<Option<WatchEvent>>,
     /// Wakes the session task when something it times has changed.
     pub(super) wake: Notify,
     pub(super) state: Mutex<RoomState>,
@@ -510,6 +580,7 @@ impl Room {
             key,
             editors: broadcast::channel(EDITOR_CHANNEL).0,
             watchers: broadcast::channel(WATCH_CHANNEL).0,
+            content: watch::Sender::new(None),
             wake: Notify::new(),
             state: Mutex::default(),
         }
@@ -657,7 +728,7 @@ pub fn watch(st: &AppState, p: &Paste, ip: IpAddr) -> Result<Watching, Error> {
     }
     s.watchers += 1;
     guard.role = Role::Watcher;
-    let events = room.watchers.subscribe();
+    let events = WatchRx { events: room.watchers.subscribe(), content: room.content.subscribe() };
     let editors = s.session.as_ref().map_or(0, Session::present);
     let current = s.session.as_ref().map(|sess| Current {
         text: sess.text.clone(),
@@ -726,9 +797,9 @@ pub async fn replace_text(st: &AppState, p: &Paste, text: String, syntax: Option
 /// Called after `text` and `syntax` were written to a live paste's row outside a session. A
 /// session started meanwhile may hold the text from before the write: it gets the write as a
 /// server edit, as in [`replace_text`]. Without a session the watchers are told: `Reload` when
-/// the paste changed between text and URL (`kind_changed`), the rendered text when it stays a
-/// text paste, and nothing when it stays a URL paste.
-pub async fn text_saved(st: &AppState, p: &Paste, text: &str, syntax: Option<&str>, kind_changed: bool) {
+/// the page must show something else (`reload`: the paste changed between text and URL, or its
+/// URL target changed), the rendered text when it stays a text paste, and nothing otherwise.
+pub async fn text_saved(st: &AppState, p: &Paste, text: &str, syntax: Option<&str>, reload: bool) {
     let limits = (st.rooms.history_revs, st.rooms.history_bytes);
     let room = {
         // A join installing its session takes this lock too, so it either is seen here or sees
@@ -752,7 +823,7 @@ pub async fn text_saved(st: &AppState, p: &Paste, text: &str, syntax: Option<&st
         drop(s);
         room
     };
-    if kind_changed {
+    if reload {
         let _ = room.watchers.send(WatchEvent::Reload);
     } else if p.kind == Kind::Text {
         task::render(st, &room, text, syntax).await;

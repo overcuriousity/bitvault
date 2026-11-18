@@ -50,10 +50,12 @@ impl Room {
         }
         let Some(sess) = s.session.as_mut() else { return Step::Exit };
         let ending = alone && sess.alone_since.is_some_and(|at| now >= at + t.session_grace);
+        // With no editor left, what they typed is saved at once, so the paste's page and Raw show
+        // it; the session itself still waits out its grace.
         if let Some(since) = sess.unsaved_since
             && !sess.saving
             && sess.retry_at.is_none_or(|at| now >= at)
-            && (ending || now >= sess.changed_at + t.idle_save || now >= since + t.max_unsaved)
+            && (alone || now >= sess.changed_at + t.idle_save || now >= since + t.max_unsaved)
             && let Some(save) = sess.take_save()
         {
             return Step::Save(Box::new(save));
@@ -80,7 +82,7 @@ impl Room {
             at(sess.peers_at.map_or(now, |p| p + t.peers_every));
         }
         if let Some(since) = sess.unsaved_since.filter(|_| !sess.saving) {
-            let due = (sess.changed_at + t.idle_save).min(since + t.max_unsaved);
+            let due = if alone { now } else { (sess.changed_at + t.idle_save).min(since + t.max_unsaved) };
             at(sess.retry_at.map_or(due, |r| r.max(due)));
         }
         if sess.render_pending {
@@ -92,19 +94,29 @@ impl Room {
         Step::Wait(next)
     }
 
-    /// Takes in a save's result; `false` when the session is over.
-    fn saved(self: &Arc<Self>, rooms: &Rooms, result: Result<Option<Kind>, Error>, since: Instant) -> bool {
+    /// Takes in a save's result, `target` being the URL the save made the paste point to; `false`
+    /// when the session is over.
+    fn saved(
+        self: &Arc<Self>,
+        rooms: &Rooms,
+        result: Result<Option<Kind>, Error>,
+        since: Instant,
+        target: Option<String>,
+    ) -> bool {
         let mut s = lock(&self.state);
         let Some(sess) = s.session.as_mut() else { return false };
         sess.saving = false;
         match result {
             Ok(Some(kind)) => {
                 sess.retry_at = None;
-                // Between text and URL the page shows something else, so it is loaded again.
-                if kind != sess.paste.kind {
+                // Between text and URL, or to another URL, the page shows something else, so it
+                // is loaded again.
+                let target = target.filter(|_| kind == Kind::Url);
+                if kind != sess.paste.kind || (kind == Kind::Url && target != sess.target) {
                     let _ = self.watchers.send(WatchEvent::Reload);
                 }
                 sess.paste.kind = kind;
+                sess.target = target;
                 true
             }
             Ok(None) => {
@@ -125,21 +137,22 @@ impl Room {
 /// Writes `save` and takes in the result; `false` when the session is over.
 async fn store(st: &AppState, room: &Arc<Room>, save: Save) -> bool {
     let Save { paste, dek, text, syntax, since } = save;
+    let target = paste::url_target(&paste, &text);
     let result = paste::store_text(st, &paste, dek.as_deref(), text, syntax, domain::now()).await;
-    room.saved(&st.rooms, result, since)
+    room.saved(&st.rooms, result, since, target)
 }
 
 /// `text` as the paste page renders it, for watchers.
 pub(super) async fn content(st: &AppState, text: &str, syntax: Option<&str>) -> Result<WatchEvent, Error> {
     let (html, highlighted) = highlight::content_html(st, text, syntax).await?;
-    Ok(WatchEvent::Content { html, highlighted })
+    Ok(WatchEvent::Content { html: html.into(), highlighted })
 }
 
-/// Sends watchers `text` as the paste page renders it.
+/// Gives watchers `text` as the paste page renders it, in place of the text they have not taken.
 pub(super) async fn render(st: &AppState, room: &Room, text: &str, syntax: Option<&str>) {
     match content(st, text, syntax).await {
         Ok(event) => {
-            let _ = room.watchers.send(event);
+            room.content.send_replace(Some(event));
         }
         Err(e) => e.log(),
     }

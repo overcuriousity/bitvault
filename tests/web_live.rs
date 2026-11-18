@@ -591,3 +591,141 @@ async fn close_all_ends_every_stream() {
     assert_eq!(connect_with(&app, &w, "", 3, &[]).await.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(watch_with(&app, &w, "", 3).await.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
+
+#[tokio::test]
+async fn an_oversized_or_far_behind_edit_is_refused() {
+    let app = live_app().await;
+    let w = create(&app, &"a".repeat(2000), Privacy::Public).await;
+    let (mut s, init) = join(&app, &w, 1).await;
+    let me = client(&init);
+    // More parts than any edit has.
+    let mut parts: Vec<Value> = (0..2049).flat_map(|_| [json!(1), json!("x")]).collect();
+    parts.truncate(4097);
+    assert_eq!(parts.len(), 4097);
+    let oversized = json!({"seq": 1, "base": 0, "op": parts, "pos": 0});
+    assert_eq!(post(&app, &w, &me, &oversized).await, StatusCode::UNPROCESSABLE_ENTITY);
+    // 300 revisions from the form, then an edit of 4000 parts made against the first text.
+    let id = bitvault::domain::words::parse(&w).unwrap();
+    let ip = "10.0.0.2".parse().unwrap();
+    for n in 0..300 {
+        let text = format!("{}{n}", "a".repeat(2000));
+        paste::edit(&app.st, id, paste::Access::Anonymous, ip, text, None, domain::now()).await.unwrap();
+        // Read as they come: a stream that falls behind by more than its channel holds ends.
+        s.until(|f| ops(f).len() > n).await;
+    }
+    let pairs = |tail: usize| {
+        let mut op: Vec<Value> = (0..2000).flat_map(|_| [json!(1), json!("x")]).collect();
+        if tail > 0 {
+            op.push(json!(tail));
+        }
+        op
+    };
+    let behind = json!({"seq": 1, "base": 0, "op": pairs(0), "pos": 0});
+    assert_eq!(post(&app, &w, &me, &behind).await, StatusCode::UNPROCESSABLE_ENTITY);
+    // Neither took a revision or the seq: the same edit against the current text is applied.
+    assert_eq!(ops(&s.frames).last().unwrap().json()["rev"], 300);
+    let current = json!({"seq": 1, "base": 300, "op": pairs(3), "pos": 0});
+    assert_eq!(post(&app, &w, &me, &current).await, StatusCode::NO_CONTENT);
+    let op = s.next_named(s.frames.len(), "op").await.json();
+    assert_eq!((op["rev"].clone(), op["seq"].clone()), (json!(301), json!(1)));
+}
+
+/// `HEAD` on a stream route from address `n`.
+async fn head(app: &App, uri: &str, n: u32) -> StatusCode {
+    app.send(app.req("HEAD", uri).header("x-forwarded-for", from(n)).body(Body::empty()).unwrap()).await.status()
+}
+
+#[tokio::test]
+async fn head_answers_as_a_get_would_without_taking_a_place() {
+    let app = live_app().await;
+    let w = create(&app, "hello", Privacy::Public).await;
+    let routes = [format!("/{w}/live/events"), format!("/{w}/events")];
+    let mut streams = Vec::new();
+    for _ in 0..15 {
+        streams.push(watch_with(&app, &w, "", 7).await);
+    }
+    // Many HEADs at 15 open streams take none of the last place.
+    for _ in 0..20 {
+        for uri in &routes {
+            assert_eq!(head(&app, uri, 7).await, StatusCode::OK, "{uri}");
+        }
+    }
+    let last = watch_with(&app, &w, "", 7).await;
+    assert_eq!(last.status(), StatusCode::OK);
+    for uri in &routes {
+        assert_eq!(head(&app, uri, 7).await, StatusCode::TOO_MANY_REQUESTS, "{uri}");
+        assert_eq!(head(&app, uri, 8).await, StatusCode::OK, "{uri}");
+    }
+    bitvault::domain::live::room::close_all(&app.st);
+    for uri in &routes {
+        assert_eq!(head(&app, uri, 8).await, StatusCode::SERVICE_UNAVAILABLE, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn a_stream_opened_from_another_site_is_refused() {
+    let app = live_app().await;
+    let w = create(&app, "hello", Privacy::Public).await;
+    for site in ["cross-site", "same-site"] {
+        let site = [("sec-fetch-site", site)];
+        assert_eq!(connect_with(&app, &w, "", 1, &site).await.status(), StatusCode::FORBIDDEN);
+        let r = app.req("GET", &format!("/{w}/events")).header("x-forwarded-for", from(1)).header(site[0].0, site[0].1);
+        assert_eq!(app.send(r.body(Body::empty()).unwrap()).await.status(), StatusCode::FORBIDDEN);
+        let r = app.req("HEAD", &format!("/{w}/events")).header(site[0].0, site[0].1);
+        assert_eq!(app.send(r.body(Body::empty()).unwrap()).await.status(), StatusCode::FORBIDDEN);
+    }
+    assert_eq!(app.st.rooms.sessions(), 0, "a refused stream started a session");
+    for site in ["same-origin", "none"] {
+        let mut s = open_with(&app, &w, "", 1, &[("sec-fetch-site", site)]).await;
+        assert_eq!(s.nth(0).await.event, "init");
+        let r =
+            app.req("GET", &format!("/{w}/events")).header("x-forwarded-for", from(1)).header("sec-fetch-site", site);
+        assert_eq!(app.send(r.body(Body::empty()).unwrap()).await.status(), StatusCode::OK);
+    }
+}
+
+#[tokio::test]
+async fn a_stream_whose_client_stops_reading_ends_and_frees_its_place() {
+    let app = support::app_with_timing(CONFIG, Timing { stall: Duration::from_millis(200), ..timing() }).await;
+    let w = create(&app, "hello", Privacy::Public).await;
+    let uri = format!("/{w}/events");
+    // Never read: each has `live` and `content` to send, and the second is never taken.
+    let mut stalled = Vec::new();
+    for _ in 0..16 {
+        let res = watch_with(&app, &w, "", 7).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        stalled.push(res);
+    }
+    assert_eq!(head(&app, &uri, 7).await, StatusCode::TOO_MANY_REQUESTS);
+    let start = std::time::Instant::now();
+    let ip = from(7).parse().unwrap();
+    while app.st.rooms.streams_from(ip) > 0 {
+        assert!(start.elapsed() < Duration::from_secs(10), "the stalled streams kept their places");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(start.elapsed() >= Duration::from_millis(150), "freed after only {:?}", start.elapsed());
+    assert_eq!(head(&app, &uri, 7).await, StatusCode::OK);
+    // A stalled stream ends once read again, after what it had been handed.
+    let frames = SseReader::new(stalled.pop().unwrap()).read_to_end().await.to_vec();
+    assert_eq!(frames.iter().map(|f| f.event.as_str()).collect::<Vec<_>>(), ["live"], "{frames:#?}");
+}
+
+/// The page of a files-only paste on `app`.
+async fn files_only_page(app: &App) -> String {
+    let mut staging = bitvault::domain::files::Staging::new(&app.st.files_dir).unwrap();
+    let body = futures_util::stream::iter([Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"bytes"))]);
+    staging.add("a.txt", "", body, u64::MAX).await.unwrap();
+    let w = paste::create(&app.st, new("", Privacy::Public), Some(staging), domain::now()).await.unwrap().words();
+    let res = app.get(&format!("/{w}")).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    body_text(res).await
+}
+
+#[tokio::test]
+async fn a_live_page_without_text_has_a_hidden_place_for_it() {
+    let html = files_only_page(&live_app().await).await;
+    assert!(html.contains(r#"<pre class="paste-text" id="paste-text" hidden><code></code></pre>"#), "{html}");
+    let off = support::app_with_timing("[app]\neditable = true\nlive_edit = false\n", timing()).await;
+    let html = files_only_page(&off).await;
+    assert!(!html.contains("paste-text"), "{html}");
+}

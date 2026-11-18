@@ -11,6 +11,10 @@ use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::ser::{SerializeSeq, Serializer};
 use serde::{Deserialize, Serialize};
 
+/// The most parts an operation may have; real edits have a handful. A longer one is refused when
+/// it is read, before anything is transformed over it.
+pub const MAX_PARTS: usize = 4096;
+
 /// One step of an operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Part {
@@ -316,7 +320,12 @@ impl<'de> Deserialize<'de> for Op {
             fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Op, A::Error> {
                 let (mut base, mut target) = (0u64, 0u64);
                 let mut op = Op::default();
+                let mut parts = 0usize;
                 while let Some(WirePart(part)) = seq.next_element()? {
+                    parts += 1;
+                    if parts > MAX_PARTS {
+                        return Err(de::Error::custom("the operation has too many parts"));
+                    }
                     match &part {
                         Part::Keep(n) => {
                             base += u64::from(*n);

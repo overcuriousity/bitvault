@@ -100,6 +100,9 @@
 {%- else if let Some(html) = content %}
 {%- if !html.is_empty() %}
 <pre class="paste-text{% if highlighted %} bv-code{% endif %}" id="paste-text"><code>{{ html|safe }}</code></pre>
+{%- else if watch.is_some() %}
+{#- live-view.js shows the text here once it is no longer empty. #}
+<pre class="paste-text" id="paste-text" hidden><code></code></pre>
 {%- endif %}
 {%- endif %}
 {#- One quiet line: when it was made, when it goes, and the short address where there is one. #}
