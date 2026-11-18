@@ -12,7 +12,7 @@ import {
   rebase,
   streamUrl,
   syntaxValue,
-} from "./live-edit.js";
+} from "./live-edit-core.js";
 
 test("lineOf counts lines from 1 at a code-point position", () => {
   assert.equal(lineOf("", 0), 1);
