@@ -4,6 +4,7 @@ pub mod expiry;
 pub mod files;
 pub mod grant;
 pub mod highlight;
+pub mod live;
 pub mod paste;
 pub mod qr;
 pub mod words;

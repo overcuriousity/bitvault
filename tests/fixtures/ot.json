@@ -1,0 +1,133 @@
+{
+  "apply": [
+    { "text": "abc", "op": ["X", 3], "result": "Xabc" },
+    { "text": "abc", "op": [1, "X", 2], "result": "aXbc" },
+    { "text": "abc", "op": [3, "X"], "result": "abcX" },
+    { "text": "abc", "op": [-1, 2], "result": "bc" },
+    { "text": "abc", "op": [1, -1, 1], "result": "ac" },
+    { "text": "abc", "op": [2, -1], "result": "ab" },
+    { "text": "abc", "op": ["X", -1, 2], "result": "Xbc" },
+    { "text": "abc", "op": [1, "X", -1, 1], "result": "aXc" },
+    { "text": "abc", "op": [2, "X", -1], "result": "abX" },
+    { "text": "abc", "op": [-3], "result": "" },
+    { "text": "", "op": [], "result": "" },
+    { "text": "", "op": ["hi"], "result": "hi" },
+    { "text": "a😀b", "op": [2, "X", 1], "result": "a😀Xb" },
+    { "text": "a😀b", "op": [1, -1, 1], "result": "ab" },
+    { "text": "ä\n", "op": [1, "ß", -1], "result": "äß" }
+  ],
+  "transform": [
+    {
+      "text": "abc",
+      "first": [1, "X", 2],
+      "second": [1, "Y", 2],
+      "first2": [1, "X", 3],
+      "second2": [2, "Y", 2],
+      "result": "aXYbc"
+    },
+    {
+      "text": "abc",
+      "first": [1, "Y", 2],
+      "second": [1, "X", 2],
+      "first2": [1, "Y", 3],
+      "second2": [2, "X", 2],
+      "result": "aYXbc"
+    },
+    {
+      "text": "",
+      "first": ["A"],
+      "second": ["B"],
+      "first2": ["A", 1],
+      "second2": [1, "B"],
+      "result": "AB"
+    },
+    {
+      "text": "",
+      "first": [],
+      "second": [],
+      "first2": [],
+      "second2": [],
+      "result": ""
+    },
+    {
+      "text": "abc",
+      "first": ["X", 3],
+      "second": [3, "Y"],
+      "first2": ["X", 4],
+      "second2": [4, "Y"],
+      "result": "XabcY"
+    },
+    {
+      "text": "abcdef",
+      "first": [1, -3, 2],
+      "second": [2, -3, 1],
+      "first2": [1, -1, 1],
+      "second2": [1, -1, 1],
+      "result": "af"
+    },
+    {
+      "text": "abcde",
+      "first": [1, -3, 1],
+      "second": [3, "X", 2],
+      "first2": [1, -2, 1, -1, 1],
+      "second2": [1, "X", 1],
+      "result": "aXe"
+    },
+    {
+      "text": "abcdef",
+      "first": [1, -4, 1],
+      "second": [2, "X", -1, 3],
+      "first2": [1, -1, 1, -2, 1],
+      "second2": [1, "X", 1],
+      "result": "aXf"
+    },
+    {
+      "text": "abcdef",
+      "first": [1, -4, 1],
+      "second": [2, -1, 3],
+      "first2": [1, -3, 1],
+      "second2": [2],
+      "result": "af"
+    },
+    {
+      "text": "abc",
+      "first": [1, -1, 1],
+      "second": [1, -1, 1],
+      "first2": [2],
+      "second2": [2],
+      "result": "ac"
+    },
+    {
+      "text": "abc",
+      "first": [1, -1, 1],
+      "second": [1, "X", 2],
+      "first2": [2, -1, 1],
+      "second2": [1, "X", 1],
+      "result": "aXc"
+    },
+    {
+      "text": "a😀b",
+      "first": [2, "X", 1],
+      "second": [1, -1, 1],
+      "first2": [1, "X", 1],
+      "second2": [1, -1, 2],
+      "result": "aXb"
+    }
+  ],
+  "invalid": [
+    { "text": "abc", "op": [2] },
+    { "text": "abc", "op": [4] },
+    { "text": "a😀b", "op": [4] },
+    { "text": "", "op": [1] },
+    { "text": "abc", "op": [0, 3] },
+    { "text": "abc", "op": ["", 3] },
+    { "text": "abc", "op": [1.5, 2] },
+    { "text": "abc", "op": [null, 3] },
+    { "text": "abc", "op": [true, 3] },
+    { "text": "abc", "op": [[1], 2] },
+    { "text": "abc", "op": [4294967296] },
+    { "text": "abc", "op": null },
+    { "text": "abc", "op": "abc" },
+    { "text": "abc", "op": {} }
+  ]
+}
