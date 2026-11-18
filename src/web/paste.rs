@@ -182,6 +182,11 @@ struct EditPage {
     /// The grant from unlocking a private paste, which the save sends back as its proof.
     grant: Option<String>,
     notice: Option<String>,
+    /// The live-edit address (`/{words}/live`) that `live-edit.js` turns the form into an editor
+    /// with; `None` keeps the plain form.
+    live: Option<String>,
+    /// An empty text is saved only on a paste with files.
+    has_files: bool,
 }
 
 fn reads(n: u32) -> String {
@@ -551,15 +556,24 @@ fn edit_page(
     status: StatusCode,
 ) -> Result<Response, Error> {
     let words = p.id.words();
+    // A form shown again with a notice holds text the person typed; a live editor would replace
+    // it with the session's text, so that form stays plain.
+    let live = (notice.is_none() && paste::live(st, p)).then(|| format!("/{words}/live"));
+    let extras = match live {
+        Some(_) => Extras { js: vec![Assets::url("js/live-edit.js")], ..Extras::default() },
+        None => Extras::default(),
+    };
     let view = EditPage {
         words: words.clone(),
         content: draft.content,
         syntax_options: super::home::syntax_options(&st.cfg.app, draft.syntax),
         grant: draft.grant,
         notice,
+        live,
+        has_files: !p.files.is_empty(),
     };
     let body = render(&view)?;
-    let page = page_with(st, admin, "", &format!("Edit {words}"), body, Extras::default())?;
+    let page = page_with(st, admin, "", &format!("Edit {words}"), body, extras)?;
     Ok(no_store((status, page).into_response()))
 }
 

@@ -128,7 +128,21 @@ async fn every_rendered_page_and_fragment_is_clean() {
     assert_clean_html(&html);
     let refused = app.post_form(&format!("/{private}/delete"), "g=expired").await;
     check("unlock page after a refused delete", refused, StatusCode::FORBIDDEN).await;
-    check("edit page", app.get(&format!("/{public}/edit")).await, StatusCode::OK).await;
+    let res = app.get(&format!("/{public}/edit")).await;
+    assert!(body_text(res).await.contains("data-bv-live"), "the public edit page must be the live editor");
+    check("live edit page", app.get(&format!("/{public}/edit")).await, StatusCode::OK).await;
+    let editable_private =
+        create(&app, NewPaste { editable: true, password: Some("pw".into()), ..new("ours", Privacy::Private) }).await;
+    let opened = body_text(app.post_form(&format!("/{editable_private}/unlock"), "password=pw").await).await;
+    let edit_link = opened
+        .split('"')
+        .find(|s| s.starts_with(&format!("/{editable_private}/edit?g=")))
+        .unwrap_or_else(|| panic!("no edit link with a grant"))
+        .replace("&amp;", "&");
+    check("private live edit page", app.get(&edit_link).await, StatusCode::OK).await;
+    let burning_edit =
+        create(&app, NewPaste { editable: true, burn_after_reads: 3, ..new("thrice", Privacy::Public) }).await;
+    check("plain edit page", app.get(&format!("/{burning_edit}/edit")).await, StatusCode::OK).await;
 
     check("admin sign-in", app.get("/admin/sign-in").await, StatusCode::OK).await;
     app.sign_in_admin().await;

@@ -5,7 +5,25 @@
 {%- if let Some(message) = notice %}
 {% call notice::notice("danger", message) %}{% endcall %}
 {%- endif %}
-<form class="oc-form bv-edit" method="post" action="/{{ words }}/edit">
+{%- if live.is_some() %}
+{% call notice::icons() %}{% endcall %}
+<div class="bv-live" id="live-bar" hidden>
+  <p class="oc-status bv-live__status" id="live-status" role="status"></p>
+  <p class="bv-live__peers" id="live-peers"><span id="live-count"></span><span class="bv-live__chips" id="live-chips"></span></p>
+  {%- if !has_files %}
+  <p class="bv-hint bv-live__empty" id="live-empty" role="status"></p>
+  {%- endif %}
+</div>
+<div class="bv-live-out" id="live-out" hidden tabindex="-1">
+  <div id="live-out-notice"></div>
+  <p class="bv-live-out__actions">
+    <a href="/{{ words }}" id="live-unlock" hidden>Unlock the paste again to continue</a>
+    <button type="button" class="oc-btn oc-btn--default" id="live-copy">Copy my text</button>
+    <button type="button" class="oc-btn oc-btn--default" id="live-rejoin">Rejoin</button>
+  </p>
+</div>
+{%- endif %}
+<form class="oc-form bv-edit" method="post" action="/{{ words }}/edit"{% if let Some(live) = live %} data-bv-live="{{ live }}"{% endif %}>
   <div class="oc-field">
     <label for="content">Content</label>
     <textarea class="oc-input bv-mono" id="content" name="content" rows="16" spellcheck="false" autocomplete="off" autofocus>{{ content }}</textarea>

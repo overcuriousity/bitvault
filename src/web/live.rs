@@ -60,14 +60,20 @@ struct EventsQuery {
     g: Option<String>,
     /// A reconnecting editor's secret.
     client: Option<String>,
+    /// The last revision seen, for a stream the page opens itself: `EventSource` sends
+    /// `Last-Event-ID` only on its own reconnect, which keeps the old address and grant.
+    last: Option<String>,
 }
 
-/// The client and revision a reconnect resumes from: both `?client=` and `Last-Event-ID`, well
-/// formed, or it is a fresh join.
+/// The client and revision a reconnect resumes from: `?client=` and the revision, from
+/// `Last-Event-ID` or else `?last=`, well formed, or it is a fresh join.
 fn resume(q: &EventsQuery, headers: &HeaderMap) -> Option<(ClientId, u64)> {
     let client = ClientId::from_hex(q.client.as_deref()?)?;
-    let rev = headers.get("last-event-id")?.to_str().ok()?.trim().parse().ok()?;
-    Some((client, rev))
+    let rev = match headers.get("last-event-id") {
+        Some(h) => h.to_str().ok()?,
+        None => q.last.as_deref()?,
+    };
+    Some((client, rev.trim().parse().ok()?))
 }
 
 /// A private paste's data key, from the grant its stream must present on every connect; `None`

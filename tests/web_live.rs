@@ -240,6 +240,37 @@ async fn reconnect_replays() {
 }
 
 #[tokio::test]
+async fn reconnect_takes_the_revision_from_the_query_too() {
+    let app = live_app().await;
+    let w = create(&app, "hello", Privacy::Public).await;
+    let (a, init_a) = join(&app, &w, 1).await;
+    let (mut b, init_b) = join(&app, &w, 2).await;
+    drop(a);
+    let me = client(&init_b);
+    assert_eq!(
+        post(&app, &w, &me, &json!({"seq": 1, "base": 0, "op": [5, "!"], "pos": 6})).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        post(&app, &w, &me, &json!({"seq": 2, "base": 1, "op": [6, "?"], "pos": 7})).await,
+        StatusCode::NO_CONTENT
+    );
+    b.until(|f| ops(f).len() == 2).await;
+    let names = |frames: &[SseFrame]| frames.iter().map(|f| f.event.clone()).collect::<Vec<_>>();
+    // `EventSource` cannot set the header on a stream the page builds itself, so `last` stands in.
+    let query = format!("client={}&last=0", client(&init_a));
+    let mut a = open_with(&app, &w, &query, 1, &[]).await;
+    let frames = a.until(|f| f.iter().any(|x| x.event == "peers")).await;
+    assert_eq!(names(frames), ["op", "op", "syntax", "peers"], "{frames:#?}");
+    drop(a);
+    // The browser's own `Last-Event-ID` wins over the query.
+    let mut a = open_with(&app, &w, &query, 1, &[("last-event-id", "1")]).await;
+    let frames = a.until(|f| f.iter().any(|x| x.event == "peers")).await;
+    assert_eq!(names(frames), ["op", "syntax", "peers"], "{frames:#?}");
+    assert_eq!(ops(frames)[0].id.as_deref(), Some("2"));
+}
+
+#[tokio::test]
 async fn private_needs_a_grant_each_time() {
     let app = live_app().await;
     let w = create(&app, "private text", Privacy::Private).await;

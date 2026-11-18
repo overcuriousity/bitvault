@@ -422,6 +422,38 @@ async fn an_opened_private_paste_is_edited_without_asking_for_the_password_again
 }
 
 #[tokio::test]
+async fn the_edit_form_of_a_live_paste_names_its_stream() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let w = create(&app, NewPaste { editable: true, ..new("together", Privacy::Public) }).await;
+    let html = body_text(app.get(&format!("/{w}/edit")).await).await;
+    assert!(html.contains(&format!("data-bv-live=\"/{w}/live\"")), "{html}");
+    assert!(html.contains("id=\"live-status\" role=\"status\""), "{html}");
+    assert!(html.contains("id=\"live-peers\""), "{html}");
+    assert!(html.contains("id=\"live-out\" hidden"), "{html}");
+    assert!(html.contains("Copy my text") && html.contains("Rejoin"), "{html}");
+    assert!(html.contains("/js/live-edit.js\""), "{html}");
+    // The form itself still saves without scripts.
+    assert!(html.contains("Save changes") && html.contains("together"), "{html}");
+    let off = app_with("[app]\neditable = true\nlive_edit = false\n").await;
+    let w = create(&off, NewPaste { editable: true, ..new("alone", Privacy::Public) }).await;
+    let html = body_text(off.get(&format!("/{w}/edit")).await).await;
+    assert!(!html.contains("data-bv-live") && !html.contains("live-edit.js"), "{html}");
+}
+
+#[tokio::test]
+async fn the_edit_form_of_a_burn_paste_is_plain() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let w = create(&app, NewPaste { editable: true, burn_after_reads: 3, ..new("burns", Privacy::Public) }).await;
+    let res = app.get(&format!("/{w}/edit")).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let html = body_text(res).await;
+    assert!(html.contains("Save changes") && html.contains("burns"), "{html}");
+    for live in ["data-bv-live", "live-edit.js", "live-status", "live-peers", "live-out", "bv-notice-icons"] {
+        assert!(!html.contains(live), "{live}: {html}");
+    }
+}
+
+#[tokio::test]
 async fn editing_is_not_offered_unless_both_switches_are_on() {
     let app = app().await;
     let w = create(&app, NewPaste { editable: true, ..new("x", Privacy::Public) }).await;
