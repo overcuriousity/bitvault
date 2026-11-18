@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { apply, diff, transform } from "./ot.js";
+import { MAX_PARTS, apply, diff, transform } from "./ot.js";
 import { LiveClient } from "./live-client.js";
 
 /** mulberry32: a small seeded generator, so the random cases are the same on every run. */
@@ -407,4 +407,27 @@ function converge(seed) {
 
 test("random_clients_converge", () => {
   for (const seed of [1, 0x11fe, 20261117]) converge(seed);
+});
+
+test("a buffer of many edits far apart stays within the parts the server takes", () => {
+  const server = new Server("x".repeat(10000));
+  const me = join(server, 1);
+  me.client.local(`a${me.client.text}`);
+  // Every other character gets a mark while the first edit is in flight: thousands of parts.
+  for (let at = 2; at < 9000; at += 2) {
+    const t = me.client.text;
+    me.client.local(`${t.slice(0, at)}-${t.slice(at)}`);
+  }
+  assert.equal(me.sent.length, 1);
+  server.form(`${server.text}!`);
+  server.receive(1, me.sent[0]);
+  feed(server, me);
+  assert.equal(me.sent.length, 2);
+  assert.ok(me.sent[1].op.length <= MAX_PARTS, `${me.sent[1].op.length} parts`);
+  server.receive(1, me.sent[1]);
+  feed(server, me);
+  assert.equal(me.client.state, "synced");
+  assert.equal(me.client.text, server.text);
+  assert.ok(server.text.endsWith("!"));
+  assert.equal(server.text.split("-").length - 1, 4499);
 });

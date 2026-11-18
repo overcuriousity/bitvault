@@ -4,7 +4,19 @@
 // seq come back as an `op`, and every foreign operation is transformed with the server's
 // operation as `first`, as the server does.
 
-import { apply, compose, cpLength, diff, invert, isNoop, transform, transformPos, wellFormed } from "./ot.js";
+import {
+  MAX_PARTS,
+  apply,
+  coarsen,
+  compose,
+  cpLength,
+  diff,
+  invert,
+  isNoop,
+  transform,
+  transformPos,
+  wellFormed,
+} from "./ot.js";
 
 // Single-character inserts closer together than this undo as one step.
 const JOIN_MS = 1000;
@@ -154,14 +166,22 @@ export class LiveClient {
     }
   }
 
+  // `op` ends at the current text, as does the buffer it is composed into.
   #submit(op) {
     if (this.#inflight === null) {
       this.#seq += 1;
-      this.#inflight = { seq: this.#seq, op };
-      this.#send({ seq: this.#seq, base: this.#rev, op });
+      const fit = this.#fit(op);
+      this.#inflight = { seq: this.#seq, op: fit };
+      this.#send({ seq: this.#seq, base: this.#rev, op: fit });
     } else {
-      this.#buffer = this.#buffer === null ? op : compose(this.#buffer, op);
+      this.#buffer = this.#fit(this.#buffer === null ? op : compose(this.#buffer, op));
     }
+  }
+
+  // An operation ending at the current text, coarsened when it has more parts than the server
+  // takes: many edits far apart, typed while one was in flight for long.
+  #fit(op) {
+    return op.length > MAX_PARTS ? coarsen(op, this.#text) : op;
   }
 
   #changed(op) {

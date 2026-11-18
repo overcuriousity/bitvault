@@ -51,6 +51,19 @@ export function keepsAbove(oldText, newText, unit, map) {
   return oldText.slice(0, unit) === newText.slice(0, moved);
 }
 
+// The status while the stream is down: the browser's own offline state first, then what the
+// server answered the last probe with.
+export function downStatus({ online, code }) {
+  if (!online) return "Offline";
+  if (code === 429) return "Too many open pages from this address";
+  return "Reconnecting";
+}
+
+// The rejoin button's label: rejoining loads the page anew, which drops any text not yet sent.
+export function rejoinLabel(unsent) {
+  return unsent ? "Discard my text and rejoin" : "Rejoin";
+}
+
 export function backoff(attempt) {
   return Math.min(BACKOFF_MS * 2 ** attempt, BACKOFF_CAP_MS);
 }

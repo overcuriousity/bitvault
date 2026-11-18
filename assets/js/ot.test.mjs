@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import {
   apply,
   baseLength,
+  coarsen,
   compose,
   cpLength,
   cpToUnit,
@@ -214,4 +215,29 @@ test("code points and UTF-16 units convert", () => {
   // Without String.prototype.toWellFormed, as in older browsers.
   const old = Object.assign(new String("\ude00a\ud83d\ude00\ud83d"), { toWellFormed: undefined });
   assert.equal(wellFormed(old), "\ufffda😀\ufffd");
+});
+
+test("coarsen keeps the ends and replaces the middle, with the same result", () => {
+  assert.deepEqual(coarsen([2, "X", 3, -1, "Y", 4], "abXcdeYghij"), [2, "XcdeY", -4, 4]);
+  assert.deepEqual(coarsen(["X", 3], "Xabc"), ["X", 3]);
+  assert.deepEqual(coarsen([5], "hello"), [5]);
+  assert.deepEqual(coarsen([-3], ""), [-3]);
+  assert.deepEqual(coarsen([1, "😀", 1, "é", 1], "a😀béc"), [1, "😀bé", -1, 1]);
+  assert.throws(() => coarsen([1, "x"], "a"), RangeError);
+  // Seeded, so every run checks the same cases.
+  const r = rng(7);
+  for (let i = 0; i < 500; i += 1) {
+    const text = Array.from("abcdefghij😀".repeat(3)).slice(0, Math.floor(r() * 30)).join("");
+    const op = [];
+    for (let left = cpLength(text); left > 0; ) {
+      const n = 1 + Math.floor(r() * left);
+      op.push(r() < 0.5 ? n : -n);
+      if (r() < 0.5) op.push("xy");
+      left -= n;
+    }
+    const result = apply(text, op);
+    const coarse = coarsen(op, result);
+    assert.ok(coarse.length <= 4, JSON.stringify(coarse));
+    assert.equal(apply(text, coarse), result, JSON.stringify(op));
+  }
 });

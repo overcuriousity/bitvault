@@ -4,12 +4,14 @@ import assert from "node:assert/strict";
 import { transformPos } from "./ot.js";
 import {
   backoff,
+  downStatus,
   keepsAbove,
   lineOf,
   lineStart,
   mapSelection,
   presence,
   rebase,
+  rejoinLabel,
   streamUrl,
   syntaxValue,
 } from "./live-edit-core.js";
@@ -87,4 +89,17 @@ test("syntaxValue maps Automatic to null and back", () => {
   assert.equal(syntaxValue.send("rs"), "rs");
   assert.equal(syntaxValue.show(null), "auto");
   assert.equal(syntaxValue.show("plain"), "plain");
+});
+
+test("downStatus says Offline first, then a crowded address, else Reconnecting", () => {
+  assert.equal(downStatus({ online: false, code: 0 }), "Offline");
+  assert.equal(downStatus({ online: false, code: 429 }), "Offline");
+  assert.equal(downStatus({ online: true, code: 429 }), "Too many open pages from this address");
+  assert.equal(downStatus({ online: true, code: 0 }), "Reconnecting");
+  assert.equal(downStatus({ online: true, code: 503 }), "Reconnecting");
+});
+
+test("rejoinLabel warns when rejoining drops unsent text", () => {
+  assert.equal(rejoinLabel(true), "Discard my text and rejoin");
+  assert.equal(rejoinLabel(false), "Rejoin");
 });

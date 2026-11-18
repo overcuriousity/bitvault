@@ -3,10 +3,23 @@
 // connect fails, the form stays the plain form that saves on submit.
 import { LiveClient } from "./live-client.js";
 import { showNotice } from "./notice.js";
-import { backoff, keepsAbove, lineStart, mapSelection, presence, rebase, streamUrl, syntaxValue } from "./live-edit-core.js";
+import {
+  backoff,
+  downStatus,
+  keepsAbove,
+  lineStart,
+  mapSelection,
+  presence,
+  rebase,
+  rejoinLabel,
+  streamUrl,
+  syntaxValue,
+} from "./live-edit-core.js";
 import { cpLength, unitToCp } from "./ot.js";
 
 const CARET_MS = 250;
+// A POST that has not settled by then is given up and counts as a network error.
+const POST_MS = 15000;
 const EMPTY = "An empty paste is not saved.";
 const OUT = {
   stale: "You were disconnected for too long",
@@ -42,8 +55,13 @@ function start(form) {
   let clientId = null;
   let me = 0;
   let resuming = false;
-  let attempt = 0;
+  // The stream's reconnects and the edit POST's retries back off on their own counts.
+  let streamAttempt = 0;
+  let postAttempt = 0;
   let reconnectTimer = 0;
+  // Whether the stream is down and being reconnected, and how the last probe was answered.
+  let down = false;
+  let lastCode = 0;
   let composing = false;
   let held = [];
   let leaving = false;
@@ -92,13 +110,26 @@ function start(form) {
   }
 
   function request(body) {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), POST_MS);
     return fetch(live, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Live-Client": clientId },
       body: JSON.stringify(body),
       credentials: "same-origin",
       cache: "no-store",
-    });
+      signal: abort.signal,
+    }).finally(() => clearTimeout(timer));
+  }
+
+  // How the stream would answer now, 0 when the server is out of reach.
+  async function probe() {
+    const url = streamUrl({ live, grant: grantInput?.value, client: clientId, last: client.rev });
+    try {
+      return (await fetch(url, { method: "HEAD", credentials: "same-origin", cache: "no-store" })).status;
+    } catch {
+      return 0;
+    }
   }
 
   function queue(msg) {
@@ -117,20 +148,20 @@ function start(form) {
     try {
       res = await request({ ...sent, pos });
     } catch {
-      /* a network error is retried below */
+      /* a network error or a timeout is retried below; the server ignores a seq it applied */
     }
     posting = false;
     if (mode !== "live") return;
     const code = res?.status ?? 0;
     if (code === 204) {
       if (pending === sent) pending = null;
-      attempt = 0;
+      postAttempt = 0;
       pump();
     } else if (code === 0 || code === 429 || code === 503) {
       postTimer = setTimeout(() => {
         postTimer = 0;
         pump();
-      }, backoff(attempt++));
+      }, backoff(postAttempt++));
     } else if (code === 403) {
       pending = null;
       reconnect();
@@ -188,10 +219,18 @@ function start(form) {
     if (button) button.textContent = option.textContent;
   }
 
+  // The stream is up again: the status says Live.
+  function up() {
+    down = false;
+    lastCode = 0;
+    streamAttempt = 0;
+    setStatus("Live", "success");
+  }
+
   function onInit(d) {
     resuming = false;
-    attempt = 0;
     pending = null;
+    postAttempt = 0;
     if (mode === "live" && client.unsent) return end("stale");
     clientId = d.client;
     me = d.peer;
@@ -203,7 +242,7 @@ function start(form) {
     noteEmpty();
     showSyntax(d.syntax);
     showPeers(d.peers);
-    setStatus("Live", "success");
+    up();
   }
 
   function onEvent(name, data) {
@@ -221,9 +260,13 @@ function start(form) {
       showPeers(data);
       if (resuming) {
         resuming = false;
-        attempt = 0;
+        up();
+        // The edit in flight goes again at once, not after a backoff begun while the stream was
+        // down; a POST still out is given up after POST_MS and then sends what is pending.
+        clearTimeout(postTimer);
+        postTimer = 0;
         client.retry();
-        setStatus("Live", "success");
+        pump();
       }
     } else if (name === "syntax") {
       showSyntax(data.syntax);
@@ -258,8 +301,10 @@ function start(form) {
       // A replaced stream would go on reconnecting by itself with its old address.
       if (source !== es) return source.close();
       close();
-      if (mode === "connecting") plain();
-      else if (mode === "live") later();
+      if (mode === "connecting") {
+        plain();
+        crowdedAtFirst();
+      } else if (mode === "live") later();
     });
   }
 
@@ -268,36 +313,50 @@ function start(form) {
     es = null;
   }
 
+  function showDown() {
+    setStatus(downStatus({ online: navigator.onLine, code: lastCode }), "warning");
+  }
+
   function reconnect() {
     close();
-    setStatus("Reconnecting", "warning");
+    down = true;
+    showDown();
     connect();
   }
 
-  // After the stream dropped: asks how the stream would answer, then waits or gives up.
+  // After the stream dropped: asks how the stream would answer, then waits or gives up. A 429
+  // (too many streams from this address) keeps trying, and says so.
   function later() {
-    setStatus("Reconnecting", "warning");
+    down = true;
+    showDown();
     clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(async () => {
-      const url = streamUrl({ live, grant: grantInput?.value, client: clientId, last: client.rev });
-      let code = 0;
-      try {
-        code = (await fetch(url, { method: "HEAD", credentials: "same-origin", cache: "no-store" })).status;
-      } catch {
-        /* the server is out of reach; try again */
-      }
+      reconnectTimer = 0;
+      const code = await probe();
       // A stream opened while the probe was out (a POST's 403) already answers for itself.
       if (mode !== "live" || es) return;
+      lastCode = code;
       if (code === 200) connect();
       else if (code === 403) end(grantInput ? "unlock" : "stale");
       else if (code === 404) end("gone");
       else later();
-    }, backoff(attempt++));
+    }, backoff(streamAttempt++));
+  }
+
+  // The first connect failed and the form is plain again; when the address has too many streams
+  // open, the status line says so above the form.
+  async function crowdedAtFirst() {
+    const code = await probe();
+    if (mode !== "plain" || code !== 429) return;
+    setStatus(downStatus({ online: true, code }), "warning");
+    bar.hidden = false;
   }
 
   // Leaves the live state for good: the text stays in the textarea, read-only and copyable.
   function end(why) {
     if (mode === "ended") return;
+    // Text the session does not have yet, which a rejoin's reload would drop.
+    const unsent = mode === "connecting" ? ta.value !== ta.defaultValue : client.unsent || ta.value !== client.text;
     mode = "ended";
     close();
     clearTimeout(reconnectTimer);
@@ -315,7 +374,9 @@ function start(form) {
     showNotice(region, "warning", OUT[why] ?? " ");
     if (why === "unlock") region.querySelector(".oc-notice__text")?.replaceChildren(unlock);
     unlock.hidden = why !== "unlock";
-    document.getElementById("live-rejoin").hidden = why === "gone" || why === "unlock";
+    const rejoin = document.getElementById("live-rejoin");
+    rejoin.textContent = rejoinLabel(unsent);
+    rejoin.hidden = why === "gone" || why === "unlock";
     out.hidden = false;
     out.focus();
   }
@@ -391,7 +452,21 @@ function start(form) {
   });
   // Leaving any other way while an edit waits would drop it; the browser asks first.
   window.addEventListener("beforeunload", (e) => {
-    if (mode === "live" && client.unsent) e.preventDefault();
+    if (mode !== "live" || !client.unsent) return;
+    e.preventDefault();
+    // Older browsers ask only when this is set.
+    e.returnValue = "";
+  });
+  window.addEventListener("offline", () => {
+    if (mode === "live" && down) showDown();
+  });
+  window.addEventListener("online", () => {
+    if (mode !== "live" || !down) return;
+    // Back online: the next probe goes now instead of after the backoff reached while offline.
+    if (reconnectTimer) {
+      streamAttempt = 0;
+      later();
+    } else showDown();
   });
   document.getElementById("live-copy").addEventListener("click", copyMine);
   document.getElementById("live-rejoin").addEventListener("click", () => window.location.reload());

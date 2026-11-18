@@ -7,6 +7,8 @@
 // before a delete at the same spot. Positions and lengths count code points, never UTF-16 units.
 
 const MAX = 0xffffffff;
+// The most parts the server takes in one operation (`MAX_PARTS` in `ot.rs`).
+export const MAX_PARTS = 4096;
 
 const isHigh = (c) => c >= 0xd800 && c <= 0xdbff;
 const isLow = (c) => c >= 0xdc00 && c <= 0xdfff;
@@ -248,6 +250,27 @@ export function compose(a, b) {
       y.take(n);
     }
   }
+  return out;
+}
+
+// An operation of at most four parts with the effect of `op`, whose result is `target`: the
+// start and end `op` keeps stay kept, everything between is replaced by what `target` has there.
+// It merges less finely with crossing edits, so it stands in only for an operation too long to
+// send.
+export function coarsen(op, target) {
+  const { base, target: length } = lengths(op);
+  if (length !== cpLength(target)) {
+    throw new RangeError("The text is not the operation's result.");
+  }
+  const first = op[0];
+  const last = op[op.length - 1];
+  const head = typeof first === "number" && first > 0 ? first : 0;
+  const tail = op.length > 1 && typeof last === "number" && last > 0 ? last : 0;
+  const out = [];
+  push(out, head);
+  push(out, -(base - head - tail));
+  push(out, target.slice(cpToUnit(target, head), cpToUnit(target, length - tail)));
+  push(out, tail);
   return out;
 }
 
