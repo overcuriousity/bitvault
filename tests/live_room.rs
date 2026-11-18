@@ -346,7 +346,7 @@ async fn resume_replays() {
     let app = live_app().await;
     let st = &app.st;
     let p = create(st, "hello", Privacy::Unlisted).await;
-    let (client, peer, _b) = three_edits_while_away(st, &p).await;
+    let (client, peer, b) = three_edits_while_away(st, &p).await;
     let Joined::In { init, replay, peer: again, .. } =
         room::join(st, &p, None, ip(1), Some((client, 0))).await.unwrap()
     else {
@@ -354,7 +354,8 @@ async fn resume_replays() {
     };
     assert!(init.is_none());
     assert_eq!(again, peer);
-    let revs: Vec<u64> = replay
+    let [ops @ .., syntax, peers] = replay.as_slice() else { panic!("replayed too little: {replay:?}") };
+    let revs: Vec<u64> = ops
         .iter()
         .map(|e| match e {
             EditorEvent::Op { rev, .. } => *rev,
@@ -362,6 +363,34 @@ async fn resume_replays() {
         })
         .collect();
     assert_eq!(revs, [1, 2, 3]);
+    assert!(matches!(syntax, EditorEvent::Syntax(None)), "{syntax:?}");
+    let EditorEvent::Peers(peers) = peers else { panic!("the replay ends without peers: {peers:?}") };
+    let mut present: Vec<u32> = peers.iter().map(|p| p.peer).collect();
+    present.sort_unstable();
+    let mut want = vec![peer, b.peer];
+    want.sort_unstable();
+    assert_eq!(present, want, "the resumed client sees who is here");
+}
+
+#[tokio::test]
+async fn resume_brings_a_syntax_change() {
+    let app = live_app().await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let a = join(st, &p, ip(1)).await;
+    let b = join(st, &p, ip(2)).await;
+    let (client, rev) = (a.init.client.clone(), a.init.rev);
+    drop(a);
+    room::submit(st, &p, &b.init.client, Msg::Syntax(Some("rust".into()))).await.unwrap();
+    let Joined::In { init, replay, .. } = room::join(st, &p, None, ip(1), Some((client, rev))).await.unwrap() else {
+        panic!("full")
+    };
+    assert!(init.is_none());
+    let syntax = replay.iter().rev().find_map(|e| match e {
+        EditorEvent::Syntax(s) => Some(s.clone()),
+        _ => None,
+    });
+    assert_eq!(syntax, Some(Some("rust".to_owned())), "{replay:?}");
 }
 
 #[tokio::test]

@@ -433,7 +433,13 @@ impl RoomState {
         let _ = room.editors.send(EditorEvent::Peers(sess.peers()));
         let events = room.editors.subscribe();
         let (init, replay) = match replay {
-            Some(replay) => (None, replay),
+            // Syntax changes are not in the history, and the join's `Peers` went out before this
+            // stream subscribed, so the replay ends with both as they are now.
+            Some(mut replay) => {
+                replay.push(EditorEvent::Syntax(sess.syntax.clone()));
+                replay.push(EditorEvent::Peers(sess.peers()));
+                (None, replay)
+            }
             None => (Some(sess.init(idx)), Vec::new()),
         };
         self.editor_streams += 1;
