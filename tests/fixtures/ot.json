@@ -14,9 +14,18 @@
     { "text": "", "op": ["hi"], "result": "hi" },
     { "text": "a😀b", "op": [2, "X", 1], "result": "a😀Xb" },
     { "text": "a😀b", "op": [1, -1, 1], "result": "ab" },
-    { "text": "ä\n", "op": [1, "ß", -1], "result": "äß" }
+    { "text": "ä\n", "op": [1, "ß", -1], "result": "äß" },
+    { "text": "e\u0301", "op": [1, "X", 1, "Y"], "result": "eX\u0301Y" }
   ],
   "transform": [
+    {
+      "text": "e\u0301",
+      "first": [1, "X", 1],
+      "second": [2, "Y"],
+      "first2": [1, "X", 2],
+      "second2": [3, "Y"],
+      "result": "eX\u0301Y"
+    },
     {
       "text": "abc",
       "first": [1, "X", 2],
