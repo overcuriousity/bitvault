@@ -207,6 +207,18 @@ pub struct Rooms {
     history_revs: usize,
     history_bytes: usize,
     inner: Mutex<Inner>,
+    #[cfg(feature = "test-hooks")]
+    hold: Mutex<Option<JoinHold>>,
+}
+
+/// Holds the next session start between reading the row and installing the session. Test-only.
+#[cfg(feature = "test-hooks")]
+#[derive(Clone, Default)]
+pub struct JoinHold {
+    /// Notified once the join has read the row.
+    pub peeked: Arc<Notify>,
+    /// The join goes on when this is notified.
+    pub resume: Arc<Notify>,
 }
 
 #[derive(Default)]
@@ -214,17 +226,39 @@ struct Inner {
     rooms: HashMap<Key, Arc<Room>>,
     streams: HashMap<IpAddr, usize>,
     sessions: usize,
+    /// Counts the rows of live pastes written outside a session. A join that started a session
+    /// from a row read before such a write reads the row again.
+    writes: u64,
 }
 
 impl Rooms {
     pub fn new(timing: Timing) -> Arc<Self> {
-        Arc::new(Self { timing, history_revs: HISTORY_REVS, history_bytes: HISTORY_BYTES, inner: Mutex::default() })
+        Self::build(timing, HISTORY_REVS, HISTORY_BYTES)
     }
 
     /// Rooms whose sessions keep fewer operations. Test-only.
     #[cfg(feature = "test-hooks")]
     pub fn with_history(timing: Timing, revs: usize, bytes: usize) -> Arc<Self> {
-        Arc::new(Self { timing, history_revs: revs, history_bytes: bytes, inner: Mutex::default() })
+        Self::build(timing, revs, bytes)
+    }
+
+    fn build(timing: Timing, history_revs: usize, history_bytes: usize) -> Arc<Self> {
+        Arc::new(Self {
+            timing,
+            history_revs,
+            history_bytes,
+            inner: Mutex::default(),
+            #[cfg(feature = "test-hooks")]
+            hold: Mutex::default(),
+        })
+    }
+
+    /// Holds the next join that starts a session after it read the row. Test-only.
+    #[cfg(feature = "test-hooks")]
+    pub fn hold_next_start(&self) -> JoinHold {
+        let hold = JoinHold::default();
+        *lock(&self.hold) = Some(hold.clone());
+        hold
     }
 
     /// How many sessions are running.
@@ -491,7 +525,8 @@ pub async fn join(
     let dek = dek.map(Arc::new);
     let mut guard = st.rooms.reserve(key(p), ip)?;
     let room = Arc::clone(&guard.room);
-    // At most twice: a session another join started meanwhile is entered on the next turn.
+    // A session another join started meanwhile is entered on the next turn; a row written since
+    // it was read is read again.
     loop {
         {
             let mut s = lock(&room.state);
@@ -511,9 +546,23 @@ pub async fn join(
             }
         }
         let slot = st.rooms.reserve_session()?;
+        let writes = lock(&st.rooms.inner).writes;
         let (paste, text) =
             paste::peek_text(st, p.id, p.created_at, dek.as_deref(), domain::now()).await?.ok_or(Error::NotFound)?;
+        #[cfg(feature = "test-hooks")]
+        let hold = lock(&st.rooms.hold).take();
+        #[cfg(feature = "test-hooks")]
+        if let Some(hold) = hold {
+            hold.peeked.notify_one();
+            hold.resume.notified().await;
+        }
         let started = {
+            // Under the map's lock, as in `text_saved`: either that write sees this session, or
+            // this join sees the write.
+            let inner = lock(&st.rooms.inner);
+            if inner.writes != writes {
+                continue;
+            }
             let mut s = lock(&room.state);
             let start = s.session.is_none();
             if start {
@@ -602,17 +651,35 @@ pub async fn replace_text(st: &AppState, p: &Paste, text: String, syntax: Option
     Ok(true)
 }
 
-/// Tells the watchers of a paste without a session that `text` and `syntax` were just written to
-/// it: the rendered text, or `Reload` when the paste changed between text and URL
-/// (`kind_changed`) or is a URL paste, whose page shows the target.
+/// Called after `text` and `syntax` were written to a live paste's row outside a session. A
+/// session started meanwhile may hold the text from before the write: it gets the write as a
+/// server edit, as in [`replace_text`]. Without a session the watchers are told: the rendered
+/// text, or `Reload` when the paste changed between text and URL (`kind_changed`) or is a URL
+/// paste, whose page shows the target.
 pub async fn text_saved(st: &AppState, p: &Paste, text: &str, syntax: Option<&str>, kind_changed: bool) {
-    let Some(room) = st.rooms.room(key(p)) else { return };
-    {
-        let s = lock(&room.state);
-        if s.watchers == 0 || s.session.is_some() {
+    let limits = (st.rooms.history_revs, st.rooms.history_bytes);
+    let room = {
+        // A join installing its session takes this lock too, so it either is seen here or sees
+        // the count change and reads the row again.
+        let mut inner = lock(&st.rooms.inner);
+        inner.writes += 1;
+        let Some(room) = inner.rooms.get(&key(p)).cloned() else { return };
+        let mut s = lock(&room.state);
+        if let Some(sess) = s.session.as_mut() {
+            for event in sess.replace(text, syntax.map(str::to_owned), limits, Instant::now()) {
+                let _ = room.editors.send(event);
+            }
+            drop(s);
+            drop(inner);
+            room.wake.notify_one();
             return;
         }
-    }
+        if s.watchers == 0 {
+            return;
+        }
+        drop(s);
+        room
+    };
     if kind_changed || p.kind == Kind::Url {
         let _ = room.watchers.send(WatchEvent::Reload);
     } else {

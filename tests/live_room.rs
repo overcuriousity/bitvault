@@ -780,3 +780,48 @@ async fn flush_all_saves_now() {
     room::flush_all(st).await;
     assert_eq!(row_text(st, &p).await, "hello!");
 }
+
+#[tokio::test]
+async fn a_form_edit_written_before_a_session_started_reaches_it() {
+    // A join read the row before the form edit wrote it, and installed its session before the
+    // edit looked for one: the edit's look puts the written text into the session.
+    let app = support::app_with_timing(CONFIG, no_timed_saves()).await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let mut a = join(st, &p, ip(1)).await;
+    assert_eq!(a.init.text, "hello");
+    sqlx::query("UPDATE pastes SET content = ? WHERE id = ?")
+        .bind(b"new text".as_slice())
+        .bind(p.id.0 as i64)
+        .execute(&st.pool)
+        .await
+        .unwrap();
+    room::text_saved(st, &p, "new text", None, false).await;
+    let (_, peer, seq, op) = next_op(&mut a.events).await;
+    assert_eq!((peer, seq), (0, 0));
+    assert_eq!(op.apply("hello").unwrap(), "new text");
+    room::flush_all(st).await;
+    assert_eq!(row_text(st, &p).await, "new text");
+}
+
+#[tokio::test]
+async fn a_join_that_read_the_row_before_a_form_edit_reads_it_again() {
+    // A join read the row, then the form edit found no session and wrote the row, then the join
+    // installed its session: the join must start from the written text.
+    let app = support::app_with_timing(CONFIG, no_timed_saves()).await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let hold = st.rooms.hold_next_start();
+    let joining = {
+        let (st, p) = (st.clone(), p.clone());
+        tokio::spawn(async move { join(&st, &p, ip(1)).await })
+    };
+    tokio::time::timeout(PATIENCE, hold.peeked.notified()).await.expect("the join never read the row");
+    paste::edit(st, p.id, Access::Anonymous, ip(2), "new text".into(), None, domain::now()).await.unwrap();
+    assert_eq!(row_text(st, &p).await, "new text");
+    hold.resume.notify_one();
+    let a = tokio::time::timeout(PATIENCE, joining).await.expect("the join never finished").unwrap();
+    assert_eq!((a.init.rev, a.init.text.as_str()), (0, "new text"));
+    room::flush_all(st).await;
+    assert_eq!(row_text(st, &p).await, "new text");
+}
