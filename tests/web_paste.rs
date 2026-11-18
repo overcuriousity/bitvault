@@ -453,6 +453,75 @@ async fn the_edit_form_of_a_burn_paste_is_plain() {
     }
 }
 
+/// The value of `attr="…"` in `html`, if it is there.
+fn attr<'a>(html: &'a str, attr: &str) -> Option<&'a str> {
+    let field = format!("{attr}=\"");
+    let at = html.find(&field)? + field.len();
+    Some(&html[at..at + html[at..].find('"')?])
+}
+
+const LIVE_MARKS: [&str; 5] = ["data-bv-watch", "data-bv-live-edit", "data-bv-grant", "live-view.js", "live-view-says"];
+
+#[tokio::test]
+async fn a_live_paste_page_names_its_watch_stream() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let w = create(&app, NewPaste { editable: true, ..new("together", Privacy::Public) }).await;
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    assert_eq!(attr(&html, "data-bv-watch"), Some(format!("/{w}/events").as_str()), "{html}");
+    assert!(html.contains("data-bv-live-edit"), "{html}");
+    assert!(html.contains("id=\"live-view-says\" aria-live=\"polite\""), "{html}");
+    assert!(html.contains("/js/live-view.js\"") && html.contains("/js/paste.js\""), "{html}");
+    assert!(!html.contains("data-bv-grant"), "a public page has no grant: {html}");
+
+    let url = create(&app, NewPaste { editable: true, ..new("https://example.com/", Privacy::Unlisted) }).await;
+    let html = body_text(app.get(&format!("/{url}")).await).await;
+    assert_eq!(attr(&html, "data-bv-watch"), Some(format!("/{url}/events").as_str()), "{html}");
+
+    // An unlocked private page hands its stream the same grant its links carry.
+    let private = create(&app, NewPaste { editable: true, ..with_password("ours", Privacy::Private, "pw") }).await;
+    let html = body_text(app.post_form(&format!("/{private}/unlock"), "password=pw").await).await;
+    assert_eq!(attr(&html, "data-bv-watch"), Some(format!("/{private}/events").as_str()), "{html}");
+    let edit = grant_link(&html, "/edit");
+    let g = attr(&html, "data-bv-grant").unwrap_or_else(|| panic!("no data-bv-grant: {html}"));
+    assert!(edit.ends_with(&format!("?g={g}")), "{edit} vs {g}");
+}
+
+#[tokio::test]
+async fn a_burn_or_readonly_paste_page_does_not() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let off = app_with("[app]\neditable = true\nlive_edit = false\n").await;
+    let pages = [
+        (&app, create(&app, NewPaste { editable: true, burn_after_reads: 3, ..new("burns", Privacy::Public) }).await),
+        (&app, create(&app, NewPaste { editable: true, ..new("kept", Privacy::Readonly) }).await),
+        (&app, create(&app, new("not editable", Privacy::Public)).await),
+        (&off, create(&off, NewPaste { editable: true, ..new("alone", Privacy::Public) }).await),
+    ];
+    for (app, w) in pages {
+        let html = body_text(app.get(&format!("/{w}")).await).await;
+        for mark in LIVE_MARKS {
+            assert!(!html.contains(mark), "{mark}: {html}");
+        }
+    }
+    // Nor a private paste's locked page, the creator's sealed view of it, or a burned page.
+    let private = create(&app, NewPaste { editable: true, ..with_password("ours", Privacy::Private, "pw") }).await;
+    let once = create(&app, NewPaste { editable: true, burn_after_reads: 1, ..new("once", Privacy::Public) }).await;
+    for page in [format!("/{private}"), format!("/{once}")] {
+        let html = body_text(app.get(&page).await).await;
+        for mark in LIVE_MARKS {
+            assert!(!html.contains(mark), "{page} {mark}: {html}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_link_says_edit_without_scripts() {
+    let app = app_with("[app]\neditable = true\n").await;
+    let w = create(&app, NewPaste { editable: true, ..new("together", Privacy::Public) }).await;
+    let html = body_text(app.get(&format!("/{w}")).await).await;
+    assert!(html.contains("data-bv-live-edit"), "{html}");
+    assert!(html.contains("Edit</a>") && !html.contains("Live edit"), "{html}");
+}
+
 #[tokio::test]
 async fn editing_is_not_offered_unless_both_switches_are_on() {
     let app = app().await;

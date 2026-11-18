@@ -233,6 +233,16 @@ input[type="file"]:hover::file-selector-button { background: var(--color-bg-hove
 .bv-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .bv-actions .oc-btn, .bv-target .oc-btn { gap: var(--space-1); }
 .bv-actions .oc-btn[data-copied] { color: var(--color-success); }
+/* AGENTS.md exception 10: the Live edit link pulses slowly while others edit the paste. Under
+   reduced motion it stands still in the stronger of the two looks, so the state stays visible. */
+.bv-actions .oc-btn[data-live] { animation: bv-live-pulse 2.4s ease-in-out infinite alternate; }
+@keyframes bv-live-pulse {
+  from { border-color: var(--color-border-strong); background: var(--color-bg-elevated); }
+  to { border-color: var(--color-accent); background: var(--color-accent-dim); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bv-actions .oc-btn[data-live] { animation: none; border-color: var(--color-accent); background: var(--color-accent-dim); }
+}
 html[data-bv-copy-fallback] .oc-copy { display: inline-flex; }
 .bv-copy-scratch { position: fixed; top: 0; left: -9999px; opacity: 0; }
 .bv-delete { display: flex; align-items: flex-end; gap: var(--space-2); margin: 0; }

@@ -150,6 +150,11 @@ struct PasteView {
     target: Option<String>,
     files: Vec<FileView>,
     zip_href: Option<String>,
+    /// The stream (`/{words}/events`) that `live-view.js` follows while the paste is edited live;
+    /// `None` leaves the page static.
+    watch: Option<String>,
+    /// A private paste's grant, which the stream presents on connect; only with `watch`.
+    watch_grant: Option<String>,
 }
 
 impl PasteView {
@@ -251,6 +256,11 @@ fn paste_view(
         Shown::Secret | Shown::Sealed => (None, false, None),
     };
     let copy_text = !secret && content.as_ref().is_some_and(|c| !c.is_empty());
+    // Only a page that shows the text or the target follows it; a private one needs its grant.
+    let watch = (paste::live(st, p) && (content.is_some() || target.is_some()))
+        .then(|| format!("/{words}/events"))
+        .filter(|_| p.privacy != Privacy::Private || grant.is_some());
+    let watch_grant = watch.as_ref().and(grant).filter(|_| p.privacy == Privacy::Private).map(str::to_owned);
     let files = p
         .files
         .iter()
@@ -298,6 +308,8 @@ fn paste_view(
         zip_href: (!secret && !files.is_empty()).then(|| format!("/{words}/zip{files_g}")),
         files,
         full_url: full,
+        watch,
+        watch_grant,
     }
 }
 
@@ -306,6 +318,9 @@ fn render_paste(st: &AppState, admin: bool, view: &PasteView, words: &str) -> Re
     let mut js = vec![Assets::url("js/paste.js")];
     if view.secret && !view.https_only {
         js.push(Assets::url("js/secret.js"));
+    }
+    if view.watch.is_some() {
+        js.push(Assets::url("js/live-view.js"));
     }
     let extras = Extras { css: vec![Assets::url("css/syntax.css")], js };
     Ok(no_store(page_with(st, admin, "", words, body, extras)?.into_response()))
