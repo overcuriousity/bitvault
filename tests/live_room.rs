@@ -540,3 +540,25 @@ async fn carets_follow_the_edits() {
     .await
     .expect("the carets were never shifted");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn joins_racing_to_start_a_session_share_it() {
+    let app = live_app().await;
+    // Several rounds, so the two joins really overlap in some of them.
+    for round in 0..20 {
+        let p = create(&app.st, "hello", Privacy::Unlisted).await;
+        let racer = |n: u32| {
+            let (st, p) = (app.st.clone(), p.clone());
+            tokio::spawn(async move { join(&st, &p, ip(n)).await })
+        };
+        let (a, b) = (racer(2 * round), racer(2 * round + 1));
+        let (a, b) = (a.await.unwrap(), b.await.unwrap());
+        assert_ne!(a.peer, b.peer, "round {round}");
+        assert_eq!((a.init.rev, a.init.text.as_str()), (0, "hello"));
+        assert_eq!((b.init.rev, b.init.text.as_str()), (0, "hello"));
+        let peers = |e: &Editor| e.init.peers.iter().map(|p| p.peer).collect::<Vec<_>>();
+        // The later of the two saw the earlier in its presence row: one session, not two.
+        assert!(peers(&a).contains(&b.peer) || peers(&b).contains(&a.peer), "round {round}");
+    }
+    assert_eq!(app.st.rooms.sessions(), 20);
+}

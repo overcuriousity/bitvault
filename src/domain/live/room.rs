@@ -5,12 +5,13 @@
 //! watchers (read views) and, while editors are present, the session: the text in one order
 //! (each edit transformed over the ones it crossed), the operations since the session began, the
 //! clients it has had, and a private paste's data key. A task per session saves the text, renders
-//! it for watchers and ends the session after the last editor left.
+//! it for watchers and ends the session after the last editor left. The session's logic is in
+//! `session.rs`, its task in `task.rs`.
 //!
 //! Locking: [`Rooms`] has one lock over the map and the counts, each room one over its state.
 //! The map's is always taken first, and neither is held across an `.await`.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -21,11 +22,13 @@ use subtle::ConstantTimeEq;
 use tokio::sync::{Notify, broadcast};
 use tokio::time::Instant;
 
-use super::ot::{self, Op, Part};
+use super::ot::Op;
+use super::session::Session;
+use super::task::run;
 use crate::domain::crypto::{Dek, random_bytes};
-use crate::domain::paste::{self, Paste, TEXT_LIMIT};
+use crate::domain::paste::{self, Paste};
 use crate::domain::words::PasteId;
-use crate::domain::{self, Kind, Privacy, highlight};
+use crate::domain::{self, Privacy};
 use crate::error::Error;
 use crate::ratelimit::bucket_key;
 use crate::state::AppState;
@@ -37,10 +40,6 @@ const STREAMS_PER_ADDRESS: usize = 16;
 const SESSIONS: usize = 512;
 const HISTORY_REVS: usize = 10_000;
 const HISTORY_BYTES: usize = 8 << 20;
-/// Edits and syntax changes per editor and second, also the burst.
-const EDITS_PER_SECOND: f64 = 30.0;
-/// The most clients one session remembers; past it, the one absent longest is forgotten.
-const CLIENTS: usize = 4096;
 const EDITOR_CHANNEL: usize = 1024;
 const WATCH_CHANNEL: usize = 64;
 
@@ -197,18 +196,14 @@ fn key(p: &Paste) -> Key {
     (p.id, p.created_at)
 }
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(super) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     // A poisoned lock only means another request panicked; the state is still consistent.
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn chars(s: &str) -> u32 {
-    u32::try_from(s.chars().count()).unwrap_or(u32::MAX)
-}
-
 /// The rooms of all pastes with a stream or a session.
 pub struct Rooms {
-    timing: Timing,
+    pub(super) timing: Timing,
     history_revs: usize,
     history_bytes: usize,
     inner: Mutex<Inner>,
@@ -241,7 +236,9 @@ impl Rooms {
         lock(&self.inner).rooms.get(&key).cloned()
     }
 
-    /// Counts a new stream from `ip` into the room of `key`, creating the room.
+    /// Counts a new stream from `ip` into the room of `key`, creating the room. The cap of
+    /// [`STREAMS_PER_ADDRESS`] counts an IPv6 client by its /64 ([`bucket_key`]), as the rate
+    /// limiters do, since one subscriber usually holds the whole block.
     fn reserve(self: &Arc<Self>, key: Key, ip: IpAddr) -> Result<StreamGuard, Error> {
         let ip = bucket_key(ip);
         let mut inner = lock(&self.inner);
@@ -266,7 +263,7 @@ impl Rooms {
 
     /// Ends `room`'s session if `done` still says so with both locks held. Removes the room when
     /// no stream is left.
-    fn end(&self, room: &Arc<Room>, done: impl FnOnce(&RoomState) -> bool, gone: bool) -> bool {
+    pub(super) fn end(&self, room: &Arc<Room>, done: impl FnOnce(&RoomState) -> bool, gone: bool) -> bool {
         let mut inner = lock(&self.inner);
         let mut s = lock(&room.state);
         if s.session.is_none() || !done(&s) {
@@ -366,24 +363,24 @@ impl Drop for StreamGuard {
     }
 }
 
-struct Room {
-    key: Key,
-    editors: broadcast::Sender<EditorEvent>,
-    watchers: broadcast::Sender<WatchEvent>,
+pub(super) struct Room {
+    pub(super) key: Key,
+    pub(super) editors: broadcast::Sender<EditorEvent>,
+    pub(super) watchers: broadcast::Sender<WatchEvent>,
     /// Wakes the session task when something it times has changed.
-    wake: Notify,
-    state: Mutex<RoomState>,
+    pub(super) wake: Notify,
+    pub(super) state: Mutex<RoomState>,
 }
 
 #[derive(Default)]
-struct RoomState {
+pub(super) struct RoomState {
     /// Every counted stream, including those still joining.
-    streams: usize,
-    watchers: usize,
-    editor_streams: usize,
+    pub(super) streams: usize,
+    pub(super) watchers: usize,
+    pub(super) editor_streams: usize,
     /// The editor count watchers were last told.
-    live_sent: usize,
-    session: Option<Session>,
+    pub(super) live_sent: usize,
+    pub(super) session: Option<Session>,
 }
 
 impl Room {
@@ -400,7 +397,7 @@ impl Room {
 
 impl RoomState {
     /// Tells watchers the editor count when it changed.
-    fn sync_live(&mut self, room: &Room) {
+    pub(super) fn sync_live(&mut self, room: &Room) {
         let editors = self.session.as_ref().map_or(0, Session::present);
         if editors != self.live_sent {
             self.live_sent = editors;
@@ -449,241 +446,6 @@ impl RoomState {
 enum Entered {
     Full,
     In { init: Option<Init>, replay: Vec<EditorEvent>, events: broadcast::Receiver<EditorEvent>, peer: u32 },
-}
-
-struct Client {
-    id: ClientId,
-    peer: u32,
-    /// The last `seq` applied.
-    seq: u64,
-    pos: u32,
-    streams: usize,
-    /// In the presence row: a stream is open or closed less than the presence grace ago.
-    present: bool,
-    left_at: Option<Instant>,
-    tokens: f64,
-    refilled: Instant,
-}
-
-impl Client {
-    fn take_token(&mut self, now: Instant) -> Result<(), Error> {
-        let refill = now.duration_since(self.refilled).as_secs_f64() * EDITS_PER_SECOND;
-        self.tokens = (self.tokens + refill).min(EDITS_PER_SECOND);
-        self.refilled = now;
-        if self.tokens < 1.0 {
-            return Err(Error::TooManyAttempts);
-        }
-        self.tokens -= 1.0;
-        Ok(())
-    }
-}
-
-/// An applied operation, kept to transform late edits over and to replay.
-struct Logged {
-    peer: u32,
-    seq: u64,
-    op: Op,
-}
-
-struct Session {
-    paste: Paste,
-    dek: Option<Arc<Dek>>,
-    text: String,
-    len: u32,
-    rev: u64,
-    syntax: Option<String>,
-    /// The operations that made the last `history.len()` revisions.
-    history: VecDeque<Logged>,
-    history_bytes: usize,
-    clients: Vec<Client>,
-    next_peer: u32,
-    unsaved_since: Option<Instant>,
-    changed_at: Instant,
-    saving: bool,
-    retry_at: Option<Instant>,
-    render_pending: bool,
-    rendered_at: Option<Instant>,
-    peers_pending: bool,
-    peers_at: Option<Instant>,
-    /// Since when no editor stream is open.
-    alone_since: Option<Instant>,
-}
-
-impl Session {
-    fn new(paste: Paste, dek: Option<Arc<Dek>>, text: &str, now: Instant) -> Self {
-        // Live text is LF only.
-        let text = text.replace("\r\n", "\n").replace('\r', "\n");
-        Self {
-            len: chars(&text),
-            syntax: paste.syntax.clone(),
-            paste,
-            dek,
-            text,
-            rev: 0,
-            history: VecDeque::new(),
-            history_bytes: 0,
-            clients: Vec::new(),
-            next_peer: 0,
-            unsaved_since: None,
-            changed_at: now,
-            saving: false,
-            retry_at: None,
-            render_pending: false,
-            rendered_at: None,
-            peers_pending: false,
-            peers_at: None,
-            alone_since: None,
-        }
-    }
-
-    fn present(&self) -> usize {
-        self.clients.iter().filter(|c| c.present).count()
-    }
-
-    fn peers(&self) -> Vec<Peer> {
-        self.clients.iter().filter(|c| c.present).map(|c| Peer { peer: c.peer, pos: c.pos }).collect()
-    }
-
-    fn init(&self, idx: usize) -> Init {
-        let c = &self.clients[idx];
-        Init {
-            client: c.id.clone(),
-            peer: c.peer,
-            rev: self.rev,
-            text: self.text.clone(),
-            syntax: self.syntax.clone(),
-            peers: self.peers(),
-        }
-    }
-
-    fn add_client(&mut self, now: Instant) -> usize {
-        if self.clients.len() >= CLIENTS
-            && let Some(oldest) = self
-                .clients
-                .iter()
-                .enumerate()
-                .filter(|(_, c)| !c.present)
-                .min_by_key(|(_, c)| c.left_at)
-                .map(|(i, _)| i)
-        {
-            self.clients.remove(oldest);
-        }
-        self.next_peer += 1;
-        self.clients.push(Client {
-            id: ClientId::random(),
-            peer: self.next_peer,
-            seq: 0,
-            pos: 0,
-            streams: 0,
-            present: false,
-            left_at: None,
-            tokens: EDITS_PER_SECOND,
-            refilled: now,
-        });
-        self.clients.len() - 1
-    }
-
-    /// The revision the oldest kept operation applies to.
-    fn first_rev(&self) -> u64 {
-        self.rev - self.history.len() as u64
-    }
-
-    /// The operations after revision `since`, or `None` when they are no longer all kept.
-    fn replay(&self, since: u64) -> Option<Vec<EditorEvent>> {
-        let first = self.first_rev();
-        if !(first..=self.rev).contains(&since) {
-            return None;
-        }
-        let skip = usize::try_from(since - first).ok()?;
-        let events = self.history.iter().enumerate().skip(skip).map(|(i, l)| EditorEvent::Op {
-            rev: first + i as u64 + 1,
-            peer: l.peer,
-            seq: l.seq,
-            op: l.op.clone(),
-        });
-        Some(events.collect())
-    }
-
-    fn changed(&mut self, now: Instant) {
-        self.unsaved_since.get_or_insert(now);
-        self.changed_at = now;
-        self.render_pending = true;
-    }
-
-    /// Transforms `op`, made against `base`, over everything after it and applies it.
-    fn apply(
-        &mut self,
-        idx: usize,
-        edit: (u64, u64, Op, u32),
-        limits: (usize, usize),
-        now: Instant,
-    ) -> Result<EditorEvent, Error> {
-        let (seq, base, mut op, mut pos) = edit;
-        let invalid = || Error::Invalid("The edit does not fit the text. Reload the page.".into());
-        if op.parts().iter().any(|p| matches!(p, Part::Insert(s) if s.contains('\r'))) {
-            return Err(invalid());
-        }
-        let first = self.first_rev();
-        if base > self.rev || base < first {
-            return Err(invalid());
-        }
-        let skip = usize::try_from(base - first).map_err(|_| invalid())?;
-        for logged in self.history.iter().skip(skip) {
-            let (theirs, mine) = ot::transform(&logged.op, &op).map_err(|_| invalid())?;
-            pos = shift(pos, &theirs);
-            op = mine;
-        }
-        let text = op.apply(&self.text).map_err(|_| invalid())?;
-        if text.len() > TEXT_LIMIT && text.len() > self.text.len() {
-            return Err(Error::TooLarge);
-        }
-        let peer = self.clients[idx].peer;
-        for c in self.clients.iter_mut().filter(|c| c.peer != peer) {
-            c.pos = shift(c.pos, &op);
-        }
-        self.len = op.target_len();
-        let client = &mut self.clients[idx];
-        client.seq = seq;
-        client.pos = pos.min(self.len);
-        self.text = text;
-        self.rev += 1;
-        self.history_bytes += op.inserted_bytes();
-        self.history.push_back(Logged { peer, seq, op: op.clone() });
-        let (max_revs, max_bytes) = limits;
-        while self.history.len() > max_revs || (self.history_bytes > max_bytes && !self.history.is_empty()) {
-            if let Some(old) = self.history.pop_front() {
-                self.history_bytes -= old.op.inserted_bytes();
-            }
-        }
-        self.changed(now);
-        self.peers_pending = true;
-        Ok(EditorEvent::Op { rev: self.rev, peer, seq, op })
-    }
-}
-
-/// Where a caret at `pos` ends up after `op`: an insert at or before it moves it right, a
-/// delete before it moves it left, and a delete across it puts it at the delete's start.
-fn shift(pos: u32, op: &Op) -> u32 {
-    let (mut old, mut new) = (0u32, 0u32);
-    for part in op.parts() {
-        match part {
-            Part::Keep(n) => {
-                if pos < old.saturating_add(*n) {
-                    return new.saturating_add(pos - old);
-                }
-                old = old.saturating_add(*n);
-                new = new.saturating_add(*n);
-            }
-            Part::Delete(n) => {
-                if pos < old.saturating_add(*n) {
-                    return new;
-                }
-                old = old.saturating_add(*n);
-            }
-            Part::Insert(s) => new = new.saturating_add(chars(s)),
-        }
-    }
-    new
 }
 
 /// Joins an editor to the paste's session, starting the session if there is none. A private
@@ -794,160 +556,4 @@ pub async fn submit(st: &AppState, p: &Paste, client: &ClientId, msg: Msg) -> Re
     }
     room.wake.notify_one();
     Ok(())
-}
-
-/// What the session task does next.
-enum Step {
-    Wait(Option<Instant>),
-    Save { paste: Box<Paste>, dek: Option<Arc<Dek>>, text: String, syntax: Option<String>, since: Instant },
-    Render { text: String, syntax: Option<String> },
-    End,
-    Exit,
-}
-
-impl Room {
-    /// Decides the task's next step under the room's lock; presence and peers are sent here.
-    fn plan(&self, t: &Timing, now: Instant) -> Step {
-        let mut s = lock(&self.state);
-        let alone = s.editor_streams == 0;
-        let watched = s.watchers > 0;
-        let Some(sess) = s.session.as_mut() else { return Step::Exit };
-        let mut left = false;
-        for c in sess.clients.iter_mut().filter(|c| c.present && c.streams == 0) {
-            if c.left_at.is_some_and(|at| now >= at + t.presence_grace) {
-                c.present = false;
-                left = true;
-            }
-        }
-        let peers_due = sess.peers_pending && sess.peers_at.is_none_or(|at| now >= at + t.peers_every);
-        if left || peers_due {
-            sess.peers_pending = false;
-            sess.peers_at = Some(now);
-            let _ = self.editors.send(EditorEvent::Peers(sess.peers()));
-        }
-        if left {
-            s.sync_live(self);
-        }
-        let Some(sess) = s.session.as_mut() else { return Step::Exit };
-        let ending = alone && sess.alone_since.is_some_and(|at| now >= at + t.session_grace);
-        if let Some(since) = sess.unsaved_since
-            && !sess.saving
-            && sess.retry_at.is_none_or(|at| now >= at)
-            && (ending || now >= sess.changed_at + t.idle_save || now >= since + t.max_unsaved)
-        {
-            sess.unsaved_since = None;
-            // An empty paste without files is not saved: the last text stays.
-            if paste::require_content(&sess.text, !sess.paste.files.is_empty()).is_ok() {
-                sess.saving = true;
-                let (text, syntax) = (sess.text.clone(), sess.syntax.clone());
-                return Step::Save { paste: Box::new(sess.paste.clone()), dek: sess.dek.clone(), text, syntax, since };
-            }
-        }
-        let render_due = sess.render_pending && sess.rendered_at.is_none_or(|at| now >= at + t.render_every);
-        if render_due {
-            sess.render_pending = false;
-            if watched && sess.paste.kind == Kind::Text {
-                sess.rendered_at = Some(now);
-                return Step::Render { text: sess.text.clone(), syntax: sess.syntax.clone() };
-            }
-        }
-        if ending && sess.unsaved_since.is_none() && !sess.saving {
-            return Step::End;
-        }
-        let mut next: Option<Instant> = None;
-        let mut at = |when: Instant| next = Some(next.map_or(when, |n| n.min(when)));
-        for c in sess.clients.iter().filter(|c| c.present && c.streams == 0) {
-            if let Some(left_at) = c.left_at {
-                at(left_at + t.presence_grace);
-            }
-        }
-        if sess.peers_pending {
-            at(sess.peers_at.map_or(now, |p| p + t.peers_every));
-        }
-        if let Some(since) = sess.unsaved_since.filter(|_| !sess.saving) {
-            let due = (sess.changed_at + t.idle_save).min(since + t.max_unsaved);
-            at(sess.retry_at.map_or(due, |r| r.max(due)));
-        }
-        if sess.render_pending {
-            at(sess.rendered_at.map_or(now, |r| r + t.render_every));
-        }
-        if let Some(since) = sess.alone_since.filter(|_| alone) {
-            at(since + t.session_grace);
-        }
-        Step::Wait(next)
-    }
-
-    /// Takes in a save's result; `false` when the session is over.
-    fn saved(self: &Arc<Self>, rooms: &Rooms, result: Result<Option<Kind>, Error>, since: Instant) -> bool {
-        let mut s = lock(&self.state);
-        let Some(sess) = s.session.as_mut() else { return false };
-        sess.saving = false;
-        match result {
-            Ok(Some(kind)) => {
-                sess.retry_at = None;
-                // A URL paste's page shows the target, not the text, so it is loaded again.
-                if kind != sess.paste.kind || kind == Kind::Url {
-                    let _ = self.watchers.send(WatchEvent::Reload);
-                }
-                sess.paste.kind = kind;
-                true
-            }
-            Ok(None) => {
-                drop(s);
-                rooms.end(self, |_| true, true);
-                false
-            }
-            Err(e) => {
-                e.log();
-                sess.unsaved_since = Some(sess.unsaved_since.map_or(since, |u| u.min(since)));
-                sess.retry_at = Some(Instant::now() + rooms.timing.idle_save);
-                true
-            }
-        }
-    }
-}
-
-/// The session's task: saves, renders and ends the session, and then stops.
-async fn run(st: AppState, room: Arc<Room>) {
-    let rooms = Arc::clone(&st.rooms);
-    let t = rooms.timing;
-    loop {
-        match room.plan(&t, Instant::now()) {
-            Step::Wait(at) => match at {
-                Some(at) => tokio::select! {
-                    () = tokio::time::sleep_until(at) => {}
-                    () = room.wake.notified() => {}
-                },
-                None => room.wake.notified().await,
-            },
-            Step::Save { paste, dek, text, syntax, since } => {
-                let result = paste::store_text(&st, &paste, dek.as_deref(), text, syntax, domain::now()).await;
-                if !room.saved(&rooms, result, since) {
-                    return;
-                }
-            }
-            Step::Render { text, syntax } => match highlight::content_html(&st, &text, syntax.as_deref()).await {
-                Ok((html, highlighted)) => {
-                    let _ = room.watchers.send(WatchEvent::Content { html, highlighted });
-                }
-                Err(e) => e.log(),
-            },
-            Step::End => {
-                // An editor may have come and gone, or typed, since the plan.
-                let now = Instant::now();
-                let done = |s: &RoomState| {
-                    s.editor_streams == 0
-                        && s.session.as_ref().is_some_and(|x| {
-                            x.unsaved_since.is_none()
-                                && !x.saving
-                                && x.alone_since.is_some_and(|at| now >= at + t.session_grace)
-                        })
-                };
-                if rooms.end(&room, done, false) {
-                    return;
-                }
-            }
-            Step::Exit => return,
-        }
-    }
 }
