@@ -2,20 +2,24 @@
 //! ends the session after the last editor left. One per session; it stops when the session ends.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::time::Instant;
 
 use super::room::{EditorEvent, Room, RoomState, Rooms, Timing, WatchEvent, lock};
-use crate::domain::crypto::Dek;
-use crate::domain::paste::{self, Paste};
+use super::session::Save;
+use crate::domain::paste;
 use crate::domain::{self, Kind, highlight};
 use crate::error::Error;
 use crate::state::AppState;
 
+/// How often [`flush`] looks again while the task's own save is still being written.
+const FLUSH_POLL: Duration = Duration::from_millis(10);
+
 /// What the session task does next.
 enum Step {
     Wait(Option<Instant>),
-    Save { paste: Box<Paste>, dek: Option<Arc<Dek>>, text: String, syntax: Option<String>, since: Instant },
+    Save(Box<Save>),
     Render { text: String, syntax: Option<String> },
     End,
     Exit,
@@ -50,14 +54,9 @@ impl Room {
             && !sess.saving
             && sess.retry_at.is_none_or(|at| now >= at)
             && (ending || now >= sess.changed_at + t.idle_save || now >= since + t.max_unsaved)
+            && let Some(save) = sess.take_save()
         {
-            sess.unsaved_since = None;
-            // An empty paste without files is not saved: the last text stays.
-            if paste::require_content(&sess.text, !sess.paste.files.is_empty()).is_ok() {
-                sess.saving = true;
-                let (text, syntax) = (sess.text.clone(), sess.syntax.clone());
-                return Step::Save { paste: Box::new(sess.paste.clone()), dek: sess.dek.clone(), text, syntax, since };
-            }
+            return Step::Save(Box::new(save));
         }
         let render_due = sess.render_pending && sess.rendered_at.is_none_or(|at| now >= at + t.render_every);
         if render_due {
@@ -123,6 +122,46 @@ impl Room {
     }
 }
 
+/// Writes `save` and takes in the result; `false` when the session is over.
+async fn store(st: &AppState, room: &Arc<Room>, save: Save) -> bool {
+    let Save { paste, dek, text, syntax, since } = save;
+    let result = paste::store_text(st, &paste, dek.as_deref(), text, syntax, domain::now()).await;
+    room.saved(&st.rooms, result, since)
+}
+
+/// Sends watchers `text` as the paste page renders it.
+pub(super) async fn render(st: &AppState, room: &Room, text: &str, syntax: Option<&str>) {
+    match highlight::content_html(st, text, syntax).await {
+        Ok((html, highlighted)) => {
+            let _ = room.watchers.send(WatchEvent::Content { html, highlighted });
+        }
+        Err(e) => e.log(),
+    }
+}
+
+/// Saves `room`'s unsaved text now, after a save the task is writing, without waiting for the
+/// save delays. Errors are logged; the task retries them as usual.
+pub(super) async fn flush(st: &AppState, room: &Arc<Room>) {
+    loop {
+        let save = {
+            let mut s = lock(&room.state);
+            let Some(sess) = s.session.as_mut() else { return };
+            // `None` while the task is writing: the newer text must not race the older one.
+            (!sess.saving).then(|| sess.take_save())
+        };
+        match save {
+            None => tokio::time::sleep(FLUSH_POLL).await,
+            Some(None) => return,
+            Some(Some(save)) => {
+                store(st, room, save).await;
+                // The task plans again: it skipped saving while this save was being written.
+                room.wake.notify_one();
+                return;
+            }
+        }
+    }
+}
+
 /// The session's task: saves, renders and ends the session, and then stops.
 pub(super) async fn run(st: AppState, room: Arc<Room>) {
     let rooms = Arc::clone(&st.rooms);
@@ -136,18 +175,12 @@ pub(super) async fn run(st: AppState, room: Arc<Room>) {
                 },
                 None => room.wake.notified().await,
             },
-            Step::Save { paste, dek, text, syntax, since } => {
-                let result = paste::store_text(&st, &paste, dek.as_deref(), text, syntax, domain::now()).await;
-                if !room.saved(&rooms, result, since) {
+            Step::Save(save) => {
+                if !store(&st, &room, *save).await {
                     return;
                 }
             }
-            Step::Render { text, syntax } => match highlight::content_html(&st, &text, syntax.as_deref()).await {
-                Ok((html, highlighted)) => {
-                    let _ = room.watchers.send(WatchEvent::Content { html, highlighted });
-                }
-                Err(e) => e.log(),
-            },
+            Step::Render { text, syntax } => render(&st, &room, &text, syntax.as_deref()).await,
             Step::End => {
                 // An editor may have come and gone, or typed, since the plan.
                 let now = Instant::now();

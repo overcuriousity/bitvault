@@ -24,11 +24,11 @@ use tokio::time::Instant;
 
 use super::ot::Op;
 use super::session::Session;
-use super::task::run;
+use super::task::{self, run};
 use crate::domain::crypto::{Dek, random_bytes};
 use crate::domain::paste::{self, Paste};
 use crate::domain::words::PasteId;
-use crate::domain::{self, Privacy};
+use crate::domain::{self, Kind, Privacy};
 use crate::error::Error;
 use crate::ratelimit::bucket_key;
 use crate::state::AppState;
@@ -284,6 +284,27 @@ impl Rooms {
 }
 
 impl Inner {
+    /// Tells everyone in the rooms of `id` (of the paste created at `created_at`, or of any) that
+    /// the paste is gone, drops their sessions unsaved and forgets the rooms. Each room's lock is
+    /// taken under the map's.
+    fn gone(&mut self, id: PasteId, created_at: Option<i64>) {
+        let matches = |k: &Key| k.0 == id && created_at.is_none_or(|at| k.1 == at);
+        let keys: Vec<Key> = self.rooms.keys().copied().filter(matches).collect();
+        for key in keys {
+            let Some(room) = self.rooms.remove(&key) else { continue };
+            let mut s = lock(&room.state);
+            if s.session.take().is_some() {
+                self.sessions -= 1;
+            }
+            let _ = room.editors.send(EditorEvent::Gone);
+            let _ = room.watchers.send(WatchEvent::Gone);
+            drop(s);
+            // The task finds no session and stops; a save it is writing touches no row, since
+            // the row is gone and a paste taking over the address has another creation time.
+            room.wake.notify_one();
+        }
+    }
+
     fn remove(&mut self, room: &Arc<Room>) {
         if self.rooms.get(&room.key).is_some_and(|r| Arc::ptr_eq(r, room)) {
             self.rooms.remove(&room.key);
@@ -562,4 +583,55 @@ pub async fn submit(st: &AppState, p: &Paste, client: &ClientId, msg: Msg) -> Re
     }
     room.wake.notify_one();
     Ok(())
+}
+
+/// Puts a form or API edit into the paste's running session as one server edit, with `syntax` as
+/// its syntax, and returns `true`; it is saved with the rest. `false` when no session runs: the
+/// caller writes the row itself and then calls [`text_saved`].
+pub async fn replace_text(st: &AppState, p: &Paste, text: String, syntax: Option<String>) -> Result<bool, Error> {
+    let Some(room) = st.rooms.room(key(p)) else { return Ok(false) };
+    let limits = (st.rooms.history_revs, st.rooms.history_bytes);
+    {
+        let mut s = lock(&room.state);
+        let Some(sess) = s.session.as_mut() else { return Ok(false) };
+        for event in sess.replace(&text, syntax, limits, Instant::now()) {
+            let _ = room.editors.send(event);
+        }
+    }
+    room.wake.notify_one();
+    Ok(true)
+}
+
+/// Tells the watchers of a paste without a session that `text` and `syntax` were just written to
+/// it: the rendered text, or `Reload` when the paste changed between text and URL
+/// (`kind_changed`) or is a URL paste, whose page shows the target.
+pub async fn text_saved(st: &AppState, p: &Paste, text: &str, syntax: Option<&str>, kind_changed: bool) {
+    let Some(room) = st.rooms.room(key(p)) else { return };
+    {
+        let s = lock(&room.state);
+        if s.watchers == 0 || s.session.is_some() {
+            return;
+        }
+    }
+    if kind_changed || p.kind == Kind::Url {
+        let _ = room.watchers.send(WatchEvent::Reload);
+    } else {
+        task::render(st, &room, text, syntax).await;
+    }
+}
+
+/// The paste was deleted or expired: its editors and watchers get `Gone`, and its session is
+/// dropped unsaved. `created_at` picks the paste; `None` matches every room of `id`, for the purge,
+/// which knows only the ids it removed.
+pub fn gone(st: &AppState, id: PasteId, created_at: Option<i64>) {
+    lock(&st.rooms.inner).gone(id, created_at);
+}
+
+/// Saves every session's unsaved text now, for a shutdown; returns when the writes are done.
+/// Errors are logged.
+pub async fn flush_all(st: &AppState) {
+    let rooms: Vec<Arc<Room>> = lock(&st.rooms.inner).rooms.values().cloned().collect();
+    for room in rooms {
+        task::flush(st, &room).await;
+    }
 }

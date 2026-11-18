@@ -591,3 +591,192 @@ async fn joins_racing_to_start_a_session_share_it() {
     }
     assert_eq!(app.st.rooms.sessions(), 20);
 }
+
+/// The next editor event that `pick` accepts, skipping the others.
+async fn next_editor<T>(rx: &mut Receiver<EditorEvent>, pick: impl Fn(EditorEvent) -> Option<T>) -> T {
+    tokio::time::timeout(PATIENCE, async {
+        loop {
+            if let Some(t) = pick(rx.recv().await.unwrap()) {
+                return t;
+            }
+        }
+    })
+    .await
+    .expect("the expected editor event did not arrive")
+}
+
+async fn editor_gone(rx: &mut Receiver<EditorEvent>) {
+    next_editor(rx, |e| matches!(e, EditorEvent::Gone).then_some(())).await;
+}
+
+async fn watcher_gone(rx: &mut Receiver<WatchEvent>) {
+    next_watch(rx, |e| matches!(e, WatchEvent::Gone).then_some(())).await;
+}
+
+async fn row_count(st: &AppState, p: &Paste) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM pastes WHERE id = ?")
+        .bind(p.id.0 as i64)
+        .fetch_one(&st.pool)
+        .await
+        .unwrap()
+}
+
+/// Saves only when told: no idle or max-unsaved save comes during a test.
+fn no_timed_saves() -> Timing {
+    Timing { idle_save: Duration::from_secs(600), max_unsaved: Duration::from_secs(600), ..timing() }
+}
+
+#[tokio::test]
+async fn a_form_edit_arrives_as_an_operation() {
+    let app = live_app().await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let mut a = join(st, &p, ip(1)).await;
+    paste::edit(st, p.id, Access::Anonymous, ip(2), "new text".into(), Some("rust".into()), domain::now())
+        .await
+        .unwrap();
+    let (rev, peer, seq, op) = next_op(&mut a.events).await;
+    assert_eq!((rev, peer, seq), (1, 0, 0));
+    assert_eq!(op.apply("hello").unwrap(), "new text");
+    let syntax = next_editor(&mut a.events, |e| match e {
+        EditorEvent::Syntax(s) => Some(s),
+        _ => None,
+    })
+    .await;
+    assert_eq!(syntax.as_deref(), Some("rust"));
+    eventually("the row is saved", || async { row_text(st, &p).await == "new text" }).await;
+    assert_eq!(paste::meta(st, p.id, domain::now()).await.unwrap().syntax.as_deref(), Some("rust"));
+
+    // The same text with another syntax still reaches the editors and the row.
+    paste::edit(st, p.id, Access::Anonymous, ip(2), "new text".into(), None, domain::now()).await.unwrap();
+    let syntax = next_editor(&mut a.events, |e| match e {
+        EditorEvent::Syntax(s) => Some(s),
+        EditorEvent::Op { .. } => panic!("an unchanged text made an operation"),
+        _ => None,
+    })
+    .await;
+    assert_eq!(syntax, None);
+    eventually("the syntax is saved", || async {
+        paste::meta(st, p.id, domain::now()).await.unwrap().syntax.is_none()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn an_edit_without_a_session_tells_watchers() {
+    let app = live_app().await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let mut watcher = room::watch(st, &p, ip(9)).unwrap();
+    paste::edit(st, p.id, Access::Anonymous, ip(2), "new text".into(), None, domain::now()).await.unwrap();
+    assert_eq!(row_text(st, &p).await, "new text");
+    let html = next_watch(&mut watcher.events, |e| match e {
+        WatchEvent::Content { html, .. } => Some(html),
+        _ => None,
+    })
+    .await;
+    assert!(html.contains("new text"), "{html}");
+
+    let url = "https://example.org/";
+    paste::edit(st, p.id, Access::Anonymous, ip(2), url.into(), None, domain::now()).await.unwrap();
+    next_watch(&mut watcher.events, |e| matches!(e, WatchEvent::Reload).then_some(())).await;
+}
+
+#[tokio::test]
+async fn a_wrong_password_edit_changes_nothing_live() {
+    let app = live_app().await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Private).await;
+    let before = row(st, &p).await;
+    let mut watcher = room::watch(st, &p, ip(9)).unwrap();
+    let mut a = join_with(st, &p, ip(1), Some(dek(&p).await)).await;
+    // The join's `Live` reached the watcher before the edit.
+    next_watch(&mut watcher.events, |e| matches!(e, WatchEvent::Live { editors: 1 }).then_some(())).await;
+    let refused =
+        paste::edit(st, p.id, Access::Password("wrong".into()), ip(2), "new text".into(), None, domain::now()).await;
+    assert!(matches!(refused, Err(Error::Forbidden)), "{refused:?}");
+    // Long enough for a save and a render to have happened.
+    tokio::time::sleep(timing().max_unsaved).await;
+    assert!(matches!(a.events.try_recv(), Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
+    assert!(matches!(watcher.events.try_recv(), Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
+    assert_eq!(row(st, &p).await, before);
+}
+
+#[tokio::test]
+async fn delete_tells_everyone() {
+    let app = support::app_with_timing(CONFIG, no_timed_saves()).await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let mut watcher = room::watch(st, &p, ip(9)).unwrap();
+    let mut a = join(st, &p, ip(1)).await;
+    room::submit(st, &p, &a.init.client, edit(1, 0, insert(5, 5, "!"))).await.unwrap();
+    paste::delete(st, p.id, paste::DeleteAuth::None, ip(2), domain::now()).await.unwrap();
+    editor_gone(&mut a.events).await;
+    watcher_gone(&mut watcher.events).await;
+    let refused = room::submit(st, &p, &a.init.client, edit(2, 1, insert(6, 6, "!"))).await;
+    assert!(matches!(refused, Err(Error::Forbidden)), "{refused:?}");
+    assert_eq!(st.rooms.sessions(), 0, "the session was dropped");
+    room::flush_all(st).await;
+    assert_eq!(row_count(st, &p).await, 0, "a row was written after the delete");
+}
+
+#[tokio::test]
+async fn expiry_tells_everyone() {
+    let app = live_app().await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let mut watcher = room::watch(st, &p, ip(9)).unwrap();
+    let mut a = join(st, &p, ip(1)).await;
+    assert_eq!(paste::purge(st, p.expires_at.unwrap() + 1).await.unwrap(), 1);
+    editor_gone(&mut a.events).await;
+    watcher_gone(&mut watcher.events).await;
+    assert_eq!(st.rooms.sessions(), 0, "the session was dropped");
+}
+
+#[tokio::test]
+async fn a_new_paste_at_the_address_never_meets_the_old_room() {
+    let app = support::app_with_timing(CONFIG, no_timed_saves()).await;
+    let st = &app.st;
+    paste::set_id_source(vec![42]);
+    let old = create(st, "hello", Privacy::Unlisted).await;
+    let mut a = join(st, &old, ip(1)).await;
+    room::submit(st, &old, &a.init.client, edit(1, 0, insert(5, 5, "!"))).await.unwrap();
+    paste::delete(st, old.id, paste::DeleteAuth::None, ip(2), domain::now()).await.unwrap();
+    editor_gone(&mut a.events).await;
+
+    paste::set_id_source(vec![42]);
+    let new = NewPaste {
+        content: "fresh".into(),
+        privacy: Privacy::Unlisted,
+        expiry: Expiry::Hour24,
+        burn_after_reads: 0,
+        syntax: None,
+        editable: true,
+        password: None,
+        secret: None,
+    };
+    let id = paste::create(st, new, None, old.created_at + 5).await.unwrap();
+    assert_eq!(id, old.id);
+    let new = paste::meta(st, id, domain::now()).await.unwrap();
+    assert_ne!(new.created_at, old.created_at);
+
+    let refused = room::submit(st, &old, &a.init.client, edit(2, 1, insert(6, 6, "!"))).await;
+    assert!(matches!(refused, Err(Error::Forbidden)), "{refused:?}");
+    let b = join(st, &new, ip(3)).await;
+    assert_eq!((b.init.rev, b.init.text.as_str()), (0, "fresh"));
+    let refused = room::submit(st, &new, &a.init.client, edit(2, 0, insert(5, 5, "!"))).await;
+    assert!(matches!(refused, Err(Error::Forbidden)), "{refused:?}");
+    room::flush_all(st).await;
+    assert_eq!(row_text(st, &new).await, "fresh");
+}
+
+#[tokio::test]
+async fn flush_all_saves_now() {
+    let app = support::app_with_timing(CONFIG, no_timed_saves()).await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let a = join(st, &p, ip(1)).await;
+    room::submit(st, &p, &a.init.client, edit(1, 0, insert(5, 5, "!"))).await.unwrap();
+    room::flush_all(st).await;
+    assert_eq!(row_text(st, &p).await, "hello!");
+}

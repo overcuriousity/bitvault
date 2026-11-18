@@ -9,7 +9,7 @@ use tokio::time::Instant;
 use super::ot::{self, Op, Part};
 use super::room::{ClientId, EditorEvent, Init, Peer};
 use crate::domain::crypto::Dek;
-use crate::domain::paste::{Paste, TEXT_LIMIT};
+use crate::domain::paste::{self, Paste, TEXT_LIMIT};
 use crate::error::Error;
 
 /// Edits and syntax changes per editor and second, also the burst.
@@ -20,6 +20,11 @@ const CLIENTS: usize = 4096;
 
 pub(super) fn chars(s: &str) -> u32 {
     u32::try_from(s.chars().count()).unwrap_or(u32::MAX)
+}
+
+/// Live text is LF only: CRLF and a lone CR become LF.
+pub(super) fn lf(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 pub(super) struct Client {
@@ -56,6 +61,15 @@ pub(super) struct Logged {
     pub(super) op: Op,
 }
 
+/// A save taken from the session: what to write, and since when it was unsaved.
+pub(super) struct Save {
+    pub(super) paste: Paste,
+    pub(super) dek: Option<Arc<Dek>>,
+    pub(super) text: String,
+    pub(super) syntax: Option<String>,
+    pub(super) since: Instant,
+}
+
 pub(super) struct Session {
     pub(super) paste: Paste,
     pub(super) dek: Option<Arc<Dek>>,
@@ -82,8 +96,7 @@ pub(super) struct Session {
 
 impl Session {
     pub(super) fn new(paste: Paste, dek: Option<Arc<Dek>>, text: &str, now: Instant) -> Self {
-        // Live text is LF only.
-        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        let text = lf(text);
         Self {
             len: chars(&text),
             syntax: paste.syntax.clone(),
@@ -181,6 +194,22 @@ impl Session {
         self.render_pending = true;
     }
 
+    /// Takes the unsaved text for a save and marks the session as saving; the caller checks that
+    /// no save is being written. `None` when nothing is unsaved, or when the text is empty on a
+    /// paste without files, which is not saved: the last text stays.
+    pub(super) fn take_save(&mut self) -> Option<Save> {
+        let since = self.unsaved_since.take()?;
+        paste::require_content(&self.text, !self.paste.files.is_empty()).ok()?;
+        self.saving = true;
+        Some(Save {
+            paste: self.paste.clone(),
+            dek: self.dek.clone(),
+            text: self.text.clone(),
+            syntax: self.syntax.clone(),
+            since,
+        })
+    }
+
     /// Transforms `op`, made against `base`, over everything after it and applies it.
     pub(super) fn apply(
         &mut self,
@@ -209,13 +238,52 @@ impl Session {
             return Err(Error::TooLarge);
         }
         let peer = self.clients[idx].peer;
+        let event = self.commit(peer, seq, op, text, limits, now);
+        let client = &mut self.clients[idx];
+        client.seq = seq;
+        client.pos = pos.min(self.len);
+        Ok(event)
+    }
+
+    /// Replaces the whole text and the syntax, as a form or API edit does. A changed text is one
+    /// server edit (`peer` and `seq` 0) against the current text, so whatever changed inside the
+    /// span it replaces is overwritten; the events are for the editors.
+    pub(super) fn replace(
+        &mut self,
+        text: &str,
+        syntax: Option<String>,
+        limits: (usize, usize),
+        now: Instant,
+    ) -> Vec<EditorEvent> {
+        let text = lf(text);
+        let mut events = Vec::new();
+        if text != self.text {
+            let op = Op::from_texts(&self.text, &text);
+            events.push(self.commit(0, 0, op, text, limits, now));
+        }
+        if self.syntax != syntax {
+            self.syntax.clone_from(&syntax);
+            self.changed(now);
+            events.push(EditorEvent::Syntax(syntax));
+        }
+        events
+    }
+
+    /// Makes `op` by `peer`, which turns the text into `text`, the next revision: the other
+    /// editors' carets follow it and it joins the history.
+    fn commit(
+        &mut self,
+        peer: u32,
+        seq: u64,
+        op: Op,
+        text: String,
+        limits: (usize, usize),
+        now: Instant,
+    ) -> EditorEvent {
         for c in self.clients.iter_mut().filter(|c| c.peer != peer) {
             c.pos = shift(c.pos, &op);
         }
         self.len = op.target_len();
-        let client = &mut self.clients[idx];
-        client.seq = seq;
-        client.pos = pos.min(self.len);
         self.text = text;
         self.rev += 1;
         self.history_bytes += op.inserted_bytes();
@@ -228,7 +296,7 @@ impl Session {
         }
         self.changed(now);
         self.peers_pending = true;
-        Ok(EditorEvent::Op { rev: self.rev, peer, seq, op })
+        EditorEvent::Op { rev: self.rev, peer, seq, op }
     }
 }
 

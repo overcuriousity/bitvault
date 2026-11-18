@@ -14,6 +14,7 @@ use crate::domain::crypto::{self, Dek, KdfParams, SALT_LEN};
 use crate::domain::expiry::{self, Expiry};
 use crate::domain::files::{self, FileMeta, PLACEHOLDER_MIME, Staging};
 use crate::domain::grant;
+use crate::domain::live::room;
 use crate::domain::words::PasteId;
 use crate::domain::{Kind, Privacy};
 use crate::error::Error;
@@ -825,7 +826,17 @@ pub async fn edit(
         }
         _ => return Err(Error::Forbidden),
     };
-    store_text(st, &p, dek.as_ref(), content, syntax, now).await?.ok_or(Error::NotFound)?;
+    if !live(st, &p) {
+        store_text(st, &p, dek.as_ref(), content, syntax, now).await?.ok_or(Error::NotFound)?;
+        return Ok(());
+    }
+    // A running live session takes the edit in; without one, the row is written and its watchers
+    // are told.
+    if room::replace_text(st, &p, content.clone(), syntax.clone()).await? {
+        return Ok(());
+    }
+    let kind = store_text(st, &p, dek.as_ref(), content.clone(), syntax.clone(), now).await?.ok_or(Error::NotFound)?;
+    room::text_saved(st, &p, &content, syntax.as_deref(), kind != p.kind).await;
     Ok(())
 }
 
@@ -865,6 +876,7 @@ pub async fn delete(st: &AppState, id: PasteId, auth: DeleteAuth, ip: IpAddr, no
     if deleted.rows_affected() == 0 {
         return Err(Error::NotFound);
     }
+    room::gone(st, id, Some(p.created_at));
     // The paste is gone either way; a leftover directory is removed by the start-up orphan sweep.
     if let Err(e) = remove_files(st, id).await {
         tracing::warn!(error = %e, "could not remove a deleted paste's files");
@@ -973,6 +985,7 @@ pub async fn purge(st: &AppState, now: i64) -> Result<u64, Error> {
     .fetch_all(&st.pool)
     .await?;
     for id in ids.iter().filter_map(|id| u64::try_from(*id).ok()) {
+        room::gone(st, PasteId(id), None);
         // A leftover directory must not stop the rest of the purge; start-up removes orphans.
         if let Err(e) = remove_files(st, PasteId(id)).await {
             tracing::warn!(error = %e, "could not remove a purged paste's files");
