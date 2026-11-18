@@ -29,6 +29,15 @@ export function withGrant(href, g) {
   return `${path}?${params.join("&")}${hash}`;
 }
 
+// What a read view does with a `content` event's `html` when the page has (`hasText`) or lacks
+// its text block: an empty text hides the block, any other shows it, building the block where
+// the page has none. Never a reload: the page as loaded shows the stored row, which can differ
+// from the session's text, so a reload would only bring the same event again.
+export function contentStep(html, hasText) {
+  if (!html) return hasText ? "hide" : "none";
+  return hasText ? "show" : "create";
+}
+
 // How long to wait before the connect after `attempt` failed ones.
 export function delay(attempt) {
   return Math.min(RETRY_MS * 2 ** attempt, RETRY_CAP_MS);
@@ -70,26 +79,44 @@ function start(article) {
     return false;
   }
 
-  // Shows `waiting` unless the reader is selecting in the text; a page without the text, or text
-  // that became empty, is rendered anew instead.
+  // The text block where the page renders it, before the line of facts.
+  function makeText() {
+    const pre = document.createElement("pre");
+    pre.className = "paste-text";
+    pre.id = "paste-text";
+    pre.append(document.createElement("code"));
+    const meta = article.querySelector(".bv-meta");
+    if (meta) meta.before(pre);
+    else article.append(pre);
+    return pre;
+  }
+
+  // Shows `waiting` unless the reader is selecting in the text. An empty text hides the block.
   function showContent() {
     if (!waiting) return;
-    const pre = document.getElementById("paste-text");
-    const code = pre?.querySelector("code");
-    if (!code) {
-      if (waiting.html) window.location.reload();
+    let pre = document.getElementById("paste-text");
+    const step = contentStep(waiting.html, Boolean(pre?.querySelector("code")));
+    if (step === "none") {
       waiting = null;
       return;
     }
-    if (!waiting.html) return window.location.reload();
-    if (selecting(pre)) return;
+    if (step === "create") pre = makeText();
+    if (!pre.hidden && selecting(pre)) return;
     const { html, highlighted } = waiting;
     waiting = null;
-    // The server's own escaped rendering of the text, parsed in an inert document and moved over.
-    const doc = new DOMParser().parseFromString(`<pre><code>${html}</code></pre>`, "text/html");
+    const code = pre.querySelector("code");
     const { scrollX, scrollY } = window;
-    code.replaceChildren(...doc.querySelector("code").childNodes);
-    pre.classList.toggle("bv-code", Boolean(highlighted));
+    if (step === "hide") {
+      code.replaceChildren();
+      pre.classList.remove("bv-code");
+      pre.hidden = true;
+    } else {
+      // The server's own escaped rendering of the text, parsed in an inert document and moved over.
+      const doc = new DOMParser().parseFromString(`<pre><code>${html}</code></pre>`, "text/html");
+      code.replaceChildren(...doc.querySelector("code").childNodes);
+      pre.classList.toggle("bv-code", Boolean(highlighted));
+      pre.hidden = false;
+    }
     window.scrollTo(scrollX, scrollY);
   }
 
@@ -109,6 +136,8 @@ function start(article) {
 
   function gone() {
     stop();
+    article.querySelector(".bv-delete")?.remove();
+    if (says) says.textContent = GONE;
     const toolbar = article.querySelector(".bv-actions");
     if (!toolbar) return;
     const region = document.createElement("div");
@@ -135,9 +164,15 @@ function start(article) {
     timer = 0;
   }
 
+  // Closes the stream with no new one opened: nobody is shown editing until a stream says so.
+  function pause() {
+    close();
+    showEditors(0);
+  }
+
   function stop() {
     stopped = true;
-    close();
+    pause();
   }
 
   // At most one stream is open, and none while the tab is hidden.
@@ -155,7 +190,7 @@ function start(article) {
     source.addEventListener("error", () => {
       // A replaced stream would go on reconnecting by itself with its old address.
       if (source !== es) return source.close();
-      close();
+      pause();
       later();
     });
   }
@@ -180,7 +215,7 @@ function start(article) {
 
   document.addEventListener("selectionchange", showContent);
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) close();
+    if (document.hidden) pause();
     else if (!es && !timer) connect();
   });
   showEditors(0);

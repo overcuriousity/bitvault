@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { delay, label, withGrant } from "./live-view.js";
+import { contentStep, delay, label, withGrant } from "./live-view.js";
 
 test("the link names how many are editing", () => {
   assert.equal(label(0), "Live edit");
@@ -25,4 +25,14 @@ test("a grant keeps the other parameters and the fragment", () => {
 
 test("a failed connect is retried after 1 s, doubling to 30 s", () => {
   assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 20].map(delay), [1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000]);
+});
+
+test("empty html does not reload", () => {
+  assert.equal(contentStep("", true), "hide");
+  assert.equal(contentStep("", false), "none");
+  assert.equal(contentStep("<span>x</span>", true), "show");
+  assert.equal(contentStep("x", false), "create");
+  for (const html of ["", "x"]) {
+    for (const hasText of [true, false]) assert.notEqual(contentStep(html, hasText), "reload");
+  }
 });
