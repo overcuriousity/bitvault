@@ -1,12 +1,14 @@
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
 use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{Request, Response, header};
 use bitvault::config::Config;
+use bitvault::domain::live::room::{Rooms, Timing};
 use bitvault::state::AppState;
 use tower::ServiceExt;
 
@@ -35,20 +37,34 @@ pub async fn app_with(toml: &str) -> App {
     app_with_routes(toml, Router::new()).await
 }
 
+/// Like [`app_with`], with live-edit rooms on `timing`.
+pub async fn app_with_timing(toml: &str, timing: Timing) -> App {
+    app_with_rooms(toml, Rooms::new(timing)).await
+}
+
+/// Like [`app_with`], with these live-edit rooms.
+pub async fn app_with_rooms(toml: &str, rooms: Arc<Rooms>) -> App {
+    build_app(toml, Router::new(), rooms).await
+}
+
 /// Like [`app_with`], with test-only routes registered next to the app's own.
 pub async fn app_with_routes(toml: &str, extra: Router<AppState>) -> App {
+    build_app(toml, extra, Rooms::new(Timing::default())).await
+}
+
+async fn build_app(toml: &str, extra: Router<AppState>, rooms: Arc<Rooms>) -> App {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("config.toml");
     std::fs::write(&file, toml).unwrap();
     let mut cfg = bitvault::config::load(Some(&file)).unwrap();
     cfg.data_dir = Some(dir.path().join("data"));
     cfg.validate().unwrap();
-    app_from(cfg, dir, extra).await
+    app_from(cfg, dir, extra, rooms).await
 }
 
-async fn app_from(cfg: Config, dir: tempfile::TempDir, extra: Router<AppState>) -> App {
+async fn app_from(cfg: Config, dir: tempfile::TempDir, extra: Router<AppState>, rooms: Arc<Rooms>) -> App {
     let pool = bitvault::db::open(&cfg.data_dir()).await.unwrap();
-    let (router, st) = bitvault::app::build_with(cfg, pool, extra).await.unwrap();
+    let (router, st) = bitvault::app::build_with_rooms(cfg, pool, extra, rooms).await.unwrap();
     let router = router.layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 5000))));
     App { router, st, cookie: None, origin: ("localhost:8080".into(), "http://localhost:8080".into()), _dir: dir }
 }

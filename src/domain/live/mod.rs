@@ -2,3 +2,4 @@
 //! with the server as referee.
 
 pub mod ot;
+pub mod room;

@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::deployment::Deployment;
 use crate::domain::admin::AdminAuth;
 use crate::domain::grant::{GrantKey, Redeemed};
+use crate::domain::live::room::Rooms;
 use crate::ratelimit::RateLimiter;
 
 #[derive(Clone)]
@@ -25,4 +26,6 @@ pub struct AppState {
     pub redeemed: Arc<Redeemed>,
     /// Present only when `admin_password` is configured; without it there are no admin routes.
     pub admin: Option<Arc<AdminAuth>>,
+    /// Live-edit rooms; in memory only, like grants.
+    pub rooms: Arc<Rooms>,
 }

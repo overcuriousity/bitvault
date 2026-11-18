@@ -139,11 +139,7 @@ pub fn notice_icon(kind: &str) -> String {
     icon(name, IconSize::Tool)
 }
 
-/// Escapes text for an element body. Quotation marks stay as they are, which keeps messages
-/// that quote the user's input readable in the source as well as on screen.
-pub fn escape_text(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
-}
+pub use crate::domain::highlight::escape_text;
 
 /// `?deleted=word-word-word`, set by the delete redirect.
 #[derive(Debug, Default, serde::Deserialize)]

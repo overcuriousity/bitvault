@@ -310,7 +310,7 @@ fn plain_content(privacy: Privacy, content: String, has_files: bool) -> (Kind, V
 }
 
 /// Text is optional only when the paste carries files.
-fn require_content(content: &str, has_files: bool) -> Result<(), Error> {
+pub(crate) fn require_content(content: &str, has_files: bool) -> Result<(), Error> {
     if content.trim().is_empty() && !has_files {
         return Err(Error::Invalid("Enter some text to paste.".into()));
     }
@@ -718,6 +718,82 @@ pub fn editable(st: &AppState, p: &Paste) -> bool {
     st.cfg.app.editable && p.editable && !matches!(p.privacy, Privacy::Secret | Privacy::Readonly)
 }
 
+/// Whether an editable paste is edited live (`domain::live`): the config switch is on, and the
+/// paste neither burns after reads nor has burned.
+pub fn live(st: &AppState, p: &Paste) -> bool {
+    st.cfg.app.live_edit && editable(st, p) && p.burn_after_reads == 0 && p.burned_at.is_none()
+}
+
+/// The current text of the paste `id` created at `created_at`, without counting a read; a
+/// private paste's is opened with `dek`. `None` when the row is gone or another paste has taken
+/// over the address.
+pub(crate) async fn peek_text(
+    st: &AppState,
+    id: PasteId,
+    created_at: i64,
+    dek: Option<&Dek>,
+    now: i64,
+) -> Result<Option<(Paste, String)>, Error> {
+    let db = db_id(id);
+    let row = sqlx::query_as!(
+        ReadRow,
+        r#"SELECT id AS "id!", kind AS "kind!", privacy AS "privacy!", content AS "content!",
+                  syntax AS "syntax?", editable AS "editable!: bool",
+                  wrapped_key AS "wrapped_key?", verifier_hash AS "verifier_hash?",
+                  burn_after_reads AS "burn_after_reads!", read_count AS "read_count!",
+                  last_read_at AS "last_read_at?", burned_at AS "burned_at?", created_at AS "created_at!",
+                  expires_at AS "expires_at?"
+           FROM pastes
+           WHERE id = ? AND created_at = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)"#,
+        db,
+        created_at,
+        now,
+    )
+    .fetch_optional(&st.pool)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    let (paste, content) = row.split()?;
+    let text = match (paste.privacy, dek) {
+        (Privacy::Private, Some(dek)) => utf8(crypto::open(dek, &content)?)?,
+        (Privacy::Private, None) | (Privacy::Secret, _) => return Err(Error::Forbidden),
+        _ => utf8(content)?,
+    };
+    Ok(Some((with_files(st, paste).await?, text)))
+}
+
+/// Writes `text` and `syntax` into `p` as an edit does: by the same rules as a create (a text
+/// that is one URL makes a public or unlisted paste a URL paste), sealed with `dek` for a private
+/// paste. The caller checks the size and whether the text may be empty. `None` when no row was
+/// touched: the paste is gone, or another one has taken over its address.
+pub(crate) async fn store_text(
+    st: &AppState,
+    p: &Paste,
+    dek: Option<&Dek>,
+    text: String,
+    syntax: Option<String>,
+    now: i64,
+) -> Result<Option<Kind>, Error> {
+    let (kind, stored) = match (p.privacy, dek) {
+        (Privacy::Public | Privacy::Unlisted, _) => plain_content(p.privacy, text, !p.files.is_empty()),
+        (Privacy::Private, Some(dek)) => (Kind::Text, crypto::seal(dek, text.as_bytes())),
+        _ => return Err(Error::Forbidden),
+    };
+    let (db, kind_str) = (db_id(p.id), kind.as_str());
+    let updated = sqlx::query!(
+        "UPDATE pastes SET content = ?, syntax = ?, kind = ?
+         WHERE id = ? AND created_at = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+        stored,
+        syntax,
+        kind_str,
+        db,
+        p.created_at,
+        now,
+    )
+    .execute(&st.pool)
+    .await?;
+    Ok((updated.rows_affected() > 0).then_some(kind))
+}
+
 /// Replaces the content and syntax of an editable paste. Secret and read-only pastes are never
 /// editable.
 pub async fn edit(
@@ -736,39 +812,20 @@ pub async fn edit(
     if content.len() > TEXT_LIMIT {
         return Err(Error::TooLarge);
     }
-    let has_files = !p.files.is_empty();
-    require_content(&content, has_files)?;
-    let (kind, stored) = match (p.privacy, access) {
-        (Privacy::Public | Privacy::Unlisted, _) => plain_content(p.privacy, content, has_files),
-        (Privacy::Private, Access::Password(pw)) => {
-            let dek = match unlock(st, &p, &pw, ip).await {
-                Err(Error::WrongPassword) => return Err(Error::Forbidden),
-                other => other?,
-            };
-            (Kind::Text, crypto::seal(&dek, content.as_bytes()))
-        }
+    require_content(&content, !p.files.is_empty())?;
+    let dek = match (p.privacy, access) {
+        (Privacy::Public | Privacy::Unlisted, _) => None,
+        (Privacy::Private, Access::Password(pw)) => match unlock(st, &p, &pw, ip).await {
+            Err(Error::WrongPassword) => return Err(Error::Forbidden),
+            other => Some(other?),
+        },
         // Whoever opened a private paste may change it: the grant from the unlock carries its key.
         (Privacy::Private, Access::Grant(token)) => {
-            let dek = grant::check(&st.grant_key, &token, id, now)?.ok_or(Error::GrantExpired)?;
-            (Kind::Text, crypto::seal(&dek, content.as_bytes()))
+            Some(grant::check(&st.grant_key, &token, id, now)?.ok_or(Error::GrantExpired)?)
         }
         _ => return Err(Error::Forbidden),
     };
-    let (db, kind) = (db_id(id), kind.as_str());
-    let updated = sqlx::query!(
-        "UPDATE pastes SET content = ?, syntax = ?, kind = ?
-         WHERE id = ? AND burned_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
-        stored,
-        syntax,
-        kind,
-        db,
-        now,
-    )
-    .execute(&st.pool)
-    .await?;
-    if updated.rows_affected() == 0 {
-        return Err(Error::NotFound);
-    }
+    store_text(st, &p, dek.as_ref(), content, syntax, now).await?.ok_or(Error::NotFound)?;
     Ok(())
 }
 

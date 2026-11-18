@@ -11,6 +11,7 @@ use crate::deployment::Deployment;
 use crate::domain::admin::AdminAuth;
 use crate::domain::files;
 use crate::domain::grant::GrantKey;
+use crate::domain::live::room::{Rooms, Timing};
 use crate::error::Error;
 use crate::ratelimit::RateLimiter;
 use crate::security;
@@ -24,10 +25,16 @@ pub async fn build(cfg: Config, pool: SqlitePool) -> Result<(Router, AppState), 
 /// Builds the router and state; `extra` holds routes a caller (or test) adds next to the app's own.
 /// File directories without a paste are removed first, before anything is served.
 /// The admin password is hashed here and its plaintext dropped from the config.
-pub async fn build_with(
+pub async fn build_with(cfg: Config, pool: SqlitePool, extra: Router<AppState>) -> Result<(Router, AppState), Error> {
+    build_with_rooms(cfg, pool, extra, Rooms::new(Timing::default())).await
+}
+
+/// Like [`build_with`], with the live-edit rooms given, so a test can choose their timing.
+pub async fn build_with_rooms(
     mut cfg: Config,
     pool: SqlitePool,
     extra: Router<AppState>,
+    rooms: Arc<Rooms>,
 ) -> Result<(Router, AppState), Error> {
     cfg.validate()?;
     let admin = match cfg.app.admin_password.take().map(Zeroizing::new) {
@@ -47,6 +54,7 @@ pub async fn build_with(
         grant_key: Arc::new(GrantKey::random()),
         redeemed: Arc::default(),
         admin,
+        rooms,
     };
     files::remove_orphans(&st).await?;
     let api = api::routes()?;

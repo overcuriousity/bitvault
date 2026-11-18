@@ -1,7 +1,5 @@
 //! The paste page, unlock, raw text, edit and delete.
 
-use std::sync::{Arc, LazyLock};
-
 use askama::Template;
 use axum::Form;
 use axum::Router;
@@ -11,28 +9,20 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use serde::Deserialize;
-use tokio::sync::Semaphore;
 
 use super::admin::MaybeAdmin;
 use super::files::{GrantQuery, inline_image};
-use super::{
-    Extras, IconSize, TimeView, copy_icons, date, escape_text, icon, page_with, paste_id, paste_urls, render, size,
-};
+use super::{Extras, IconSize, TimeView, copy_icons, date, icon, page_with, paste_id, paste_urls, render, size};
 use crate::assets::Assets;
+use crate::domain::highlight::content_html;
 use crate::domain::paste::{self, Access, Body, DeleteAuth, Opened, Paste};
 use crate::domain::words::PasteId;
-use crate::domain::{self, Kind, Privacy, grant, highlight, qr};
+use crate::domain::{self, Kind, Privacy, grant, qr};
 use crate::error::Error;
 use crate::security::{BaseUrl, ClientIp};
 use crate::state::AppState;
 
-/// Content above this size is shown plain: syntect's fancy-regex can backtrack badly on large
-/// or crafted input, which would make every view of such a paste expensive.
-pub const HIGHLIGHT_LIMIT: usize = 128 * 1024;
-/// Highlighting runs on the blocking pool, at most this many at once, so slow input can neither
-/// stall the async workers nor take over the pool.
-const HIGHLIGHT_PERMITS: usize = 2;
-static HIGHLIGHT_SLOTS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(HIGHLIGHT_PERMITS)));
+pub use crate::domain::highlight::HIGHLIGHT_LIMIT;
 const HTML: &str = "text/html; charset=utf-8";
 const TEXT: &str = "text/plain; charset=utf-8";
 const OCTETS: &str = "application/octet-stream";
@@ -192,31 +182,6 @@ struct EditPage {
     /// The grant from unlocking a private paste, which the save sends back as its proof.
     grant: Option<String>,
     notice: Option<String>,
-}
-
-/// Highlighted markup when highlighting is on, the text is small enough and the syntax is known
-/// or, for an automatic one (`None`), detected from the first line; escaped plain text otherwise.
-/// Either way each line is wrapped in `<span class="line">`. The language is looked up first,
-/// so plain pastes never wait for a highlight slot.
-async fn content_html(st: &AppState, text: &str, syntax: Option<&str>) -> Result<(String, bool), Error> {
-    let found =
-        (st.cfg.app.highlight && text.len() <= HIGHLIGHT_LIMIT).then(|| highlight::resolve(text, syntax)).flatten();
-    if let Some(found) = found {
-        // The permit moves into the closure, so it is held until the work ends even if the
-        // request is dropped.
-        let permit = Arc::clone(&HIGHLIGHT_SLOTS).acquire_owned().await.map_err(Error::internal)?;
-        let owned = text.to_owned();
-        let html = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            highlight::render_with(&owned, found)
-        })
-        .await
-        .map_err(Error::internal)?;
-        if let Some(html) = html {
-            return Ok((html, true));
-        }
-    }
-    Ok((highlight::wrap_lines(&escape_text(text)), false))
 }
 
 fn reads(n: u32) -> String {
