@@ -242,7 +242,9 @@ function start(form) {
     }
   }
 
+  // At most one stream is open: every new one closes the one before.
   function connect() {
+    close();
     clearTimeout(reconnectTimer);
     const source = new EventSource(
       streamUrl({ live, grant: grantInput?.value, client: clientId, last: client.rev }),
@@ -253,7 +255,8 @@ function start(form) {
       source.addEventListener(name, (e) => receive(source, name, e.data));
     }
     source.addEventListener("error", () => {
-      if (source !== es) return;
+      // A replaced stream would go on reconnecting by itself with its old address.
+      if (source !== es) return source.close();
       close();
       if (mode === "connecting") plain();
       else if (mode === "live") later();
@@ -283,7 +286,8 @@ function start(form) {
       } catch {
         /* the server is out of reach; try again */
       }
-      if (mode !== "live") return;
+      // A stream opened while the probe was out (a POST's 403) already answers for itself.
+      if (mode !== "live" || es) return;
       if (code === 200) connect();
       else if (code === 403) end(grantInput ? "unlock" : "stale");
       else if (code === 404) end("gone");
@@ -384,6 +388,10 @@ function start(form) {
     if (mode !== "live" || !client.unsent) return;
     e.preventDefault();
     leaving = true;
+  });
+  // Leaving any other way while an edit waits would drop it; the browser asks first.
+  window.addEventListener("beforeunload", (e) => {
+    if (mode === "live" && client.unsent) e.preventDefault();
   });
   document.getElementById("live-copy").addEventListener("click", copyMine);
   document.getElementById("live-rejoin").addEventListener("click", () => window.location.reload());
