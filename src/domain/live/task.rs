@@ -100,8 +100,8 @@ impl Room {
         match result {
             Ok(Some(kind)) => {
                 sess.retry_at = None;
-                // A URL paste's page shows the target, not the text, so it is loaded again.
-                if kind != sess.paste.kind || kind == Kind::Url {
+                // Between text and URL the page shows something else, so it is loaded again.
+                if kind != sess.paste.kind {
                     let _ = self.watchers.send(WatchEvent::Reload);
                 }
                 sess.paste.kind = kind;
@@ -129,11 +129,17 @@ async fn store(st: &AppState, room: &Arc<Room>, save: Save) -> bool {
     room.saved(&st.rooms, result, since)
 }
 
+/// `text` as the paste page renders it, for watchers.
+pub(super) async fn content(st: &AppState, text: &str, syntax: Option<&str>) -> Result<WatchEvent, Error> {
+    let (html, highlighted) = highlight::content_html(st, text, syntax).await?;
+    Ok(WatchEvent::Content { html, highlighted })
+}
+
 /// Sends watchers `text` as the paste page renders it.
 pub(super) async fn render(st: &AppState, room: &Room, text: &str, syntax: Option<&str>) {
-    match highlight::content_html(st, text, syntax).await {
-        Ok((html, highlighted)) => {
-            let _ = room.watchers.send(WatchEvent::Content { html, highlighted });
+    match content(st, text, syntax).await {
+        Ok(event) => {
+            let _ = room.watchers.send(event);
         }
         Err(e) => e.log(),
     }

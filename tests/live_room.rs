@@ -826,3 +826,27 @@ async fn a_join_that_read_the_row_before_a_form_edit_reads_it_again() {
     room::flush_all(st).await;
     assert_eq!(row_text(st, &p).await, "new text");
 }
+
+#[tokio::test]
+async fn a_url_paste_that_stays_a_url_does_not_reload_watchers() {
+    let app = live_app().await;
+    let st = &app.st;
+    let (first, second, third) = ("https://example.org/", "https://example.org/a", "https://example.org/b");
+    let p = create(st, first, Privacy::Unlisted).await;
+    assert_eq!(row(st, &p).await.0, "url");
+    let mut watcher = room::watch(st, &p, ip(9)).unwrap();
+    // A save from a session.
+    let a = join(st, &p, ip(1)).await;
+    room::submit(st, &p, &a.init.client, edit(1, 0, Op::from_texts(first, second))).await.unwrap();
+    eventually("the session saved", || async { row_text(st, &p).await == second }).await;
+    drop(a);
+    sessions_end(st).await;
+    // A save without one.
+    paste::edit(st, p.id, Access::Anonymous, ip(2), third.into(), None, domain::now()).await.unwrap();
+    assert_eq!(row(st, &p).await, ("url".into(), third.into()));
+    // Whatever a reload would have been sent by is done: the session saved, ended, and the
+    // edit returned after telling the watchers.
+    while let Ok(e) = watcher.events.try_recv() {
+        assert!(matches!(e, WatchEvent::Live { .. }), "{e:?}");
+    }
+}

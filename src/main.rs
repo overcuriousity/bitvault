@@ -70,6 +70,9 @@ async fn run(cli: Cli) -> Result<(), bitvault::error::Error> {
     // accepting and drains; requests still running after DRAIN (an upload can run for an hour)
     // are cut off, inside the unit's TimeoutStopSec.
     live::room::flush_all(&st).await;
+    // Open event streams would hold the drain for its whole time: they end now, and their
+    // clients reconnect once the server runs again.
+    live::room::close_all(&st);
     let drained = tokio::time::timeout(DRAIN, server).await;
     // Sessions take edits while the server drains, so what came since the first save is saved too.
     live::room::flush_all(&st).await;

@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use subtle::ConstantTimeEq;
-use tokio::sync::{Notify, broadcast};
+use tokio::sync::{Notify, broadcast, watch};
 use tokio::time::Instant;
 
 use super::ot::Op;
@@ -191,6 +191,48 @@ pub struct Watching {
     pub editors: usize,
     pub events: broadcast::Receiver<WatchEvent>,
     pub guard: StreamGuard,
+    /// The running session's text, taken under the lock the subscription was made under.
+    current: Option<Current>,
+}
+
+/// A session's text as a watcher subscribed.
+struct Current {
+    text: String,
+    syntax: Option<String>,
+    kind: Kind,
+    dek: Option<Arc<Dek>>,
+}
+
+impl Watching {
+    /// The `Content` the watcher starts from: the text as the paste page renders it, from the
+    /// session when one ran at the subscription and otherwise from the row, without counting a
+    /// read. `None` for a URL paste, whose page shows the target. A private paste's text needs
+    /// its data key, the session's own when one runs.
+    /// Taken once: a second call reads the row.
+    pub async fn content(&mut self, st: &AppState, p: &Paste, dek: Option<&Dek>) -> Result<Option<WatchEvent>, Error> {
+        if p.privacy == Privacy::Private && dek.is_none() {
+            return Err(Error::Forbidden);
+        }
+        let (text, syntax, kind) = match self.current.take() {
+            Some(c) => {
+                if let (Some(ours), Some(given)) = (c.dek.as_deref(), dek)
+                    && ours != given
+                {
+                    return Err(Error::Forbidden);
+                }
+                (c.text, c.syntax, c.kind)
+            }
+            None => {
+                let (paste, text) =
+                    paste::peek_text(st, p.id, p.created_at, dek, domain::now()).await?.ok_or(Error::NotFound)?;
+                (text, paste.syntax, paste.kind)
+            }
+        };
+        if kind == Kind::Url {
+            return Ok(None);
+        }
+        task::content(st, &text, syntax.as_deref()).await.map(Some)
+    }
 }
 
 type Key = (PasteId, i64);
@@ -210,6 +252,8 @@ pub struct Rooms {
     history_revs: usize,
     history_bytes: usize,
     inner: Mutex<Inner>,
+    /// `true` once [`close_all`] ran: open streams end, new ones are refused.
+    closing: watch::Sender<bool>,
     #[cfg(feature = "test-hooks")]
     hold: Mutex<Option<JoinHold>>,
 }
@@ -251,6 +295,7 @@ impl Rooms {
             history_revs,
             history_bytes,
             inner: Mutex::default(),
+            closing: watch::Sender::new(false),
             #[cfg(feature = "test-hooks")]
             hold: Mutex::default(),
         })
@@ -280,10 +325,14 @@ impl Rooms {
 
     /// Counts a new stream from `ip` into the room of `key`, creating the room. The cap of
     /// [`STREAMS_PER_ADDRESS`] counts an IPv6 client by its /64 ([`bucket_key`]), as the rate
-    /// limiters do, since one subscriber usually holds the whole block.
+    /// limiters do, since one subscriber usually holds the whole block. After [`close_all`] no
+    /// stream is counted.
     fn reserve(self: &Arc<Self>, key: Key, ip: IpAddr) -> Result<StreamGuard, Error> {
         let ip = bucket_key(ip);
         let mut inner = lock(&self.inner);
+        if *self.closing.borrow() {
+            return Err(Error::ShuttingDown);
+        }
         let streams = inner.streams.entry(ip).or_default();
         if *streams >= STREAMS_PER_ADDRESS {
             return Err(Error::TooManyAttempts);
@@ -385,6 +434,15 @@ pub struct StreamGuard {
     room: Arc<Room>,
     ip: IpAddr,
     role: Role,
+}
+
+impl StreamGuard {
+    /// Returns once [`close_all`] has run, at once if it already has: the stream must end.
+    pub async fn closed(&self) {
+        // The sender lives as long as the rooms this guard holds, so the wait ends only by
+        // `close_all`.
+        let _ = self.rooms.closing.subscribe().wait_for(|closing| *closing).await;
+    }
 }
 
 impl Drop for StreamGuard {
@@ -601,8 +659,14 @@ pub fn watch(st: &AppState, p: &Paste, ip: IpAddr) -> Result<Watching, Error> {
     guard.role = Role::Watcher;
     let events = room.watchers.subscribe();
     let editors = s.session.as_ref().map_or(0, Session::present);
+    let current = s.session.as_ref().map(|sess| Current {
+        text: sess.text.clone(),
+        syntax: sess.syntax.clone(),
+        kind: sess.paste.kind,
+        dek: sess.dek.clone(),
+    });
     drop(s);
-    Ok(Watching { editors, events, guard })
+    Ok(Watching { editors, events, guard, current })
 }
 
 /// Applies an editor's message to the session. The stream, not the answer, tells the editor
@@ -661,9 +725,9 @@ pub async fn replace_text(st: &AppState, p: &Paste, text: String, syntax: Option
 
 /// Called after `text` and `syntax` were written to a live paste's row outside a session. A
 /// session started meanwhile may hold the text from before the write: it gets the write as a
-/// server edit, as in [`replace_text`]. Without a session the watchers are told: the rendered
-/// text, or `Reload` when the paste changed between text and URL (`kind_changed`) or is a URL
-/// paste, whose page shows the target.
+/// server edit, as in [`replace_text`]. Without a session the watchers are told: `Reload` when
+/// the paste changed between text and URL (`kind_changed`), the rendered text when it stays a
+/// text paste, and nothing when it stays a URL paste.
 pub async fn text_saved(st: &AppState, p: &Paste, text: &str, syntax: Option<&str>, kind_changed: bool) {
     let limits = (st.rooms.history_revs, st.rooms.history_bytes);
     let room = {
@@ -688,9 +752,9 @@ pub async fn text_saved(st: &AppState, p: &Paste, text: &str, syntax: Option<&st
         drop(s);
         room
     };
-    if kind_changed || p.kind == Kind::Url {
+    if kind_changed {
         let _ = room.watchers.send(WatchEvent::Reload);
-    } else {
+    } else if p.kind == Kind::Text {
         task::render(st, &room, text, syntax).await;
     }
 }
@@ -709,4 +773,11 @@ pub async fn flush_all(st: &AppState) {
     for room in rooms {
         task::flush(st, &room).await;
     }
+}
+
+/// Ends every editor and watcher stream, for a shutdown, so none holds the server in its drain;
+/// their clients reconnect once it runs again. Streams opened from now on are refused. Sessions
+/// keep running until [`flush_all`] has saved them.
+pub fn close_all(st: &AppState) {
+    st.rooms.closing.send_replace(true);
 }
