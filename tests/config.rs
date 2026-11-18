@@ -200,3 +200,10 @@ fn a_default_expiry_longer_than_max_expiry_is_rejected() {
     );
     assert!(m.contains("default_expiry"), "{m}");
 }
+
+#[test]
+fn live_edit_defaults_to_on_parses_off_and_an_unknown_neighbour_is_refused() {
+    assert!(from_toml("").unwrap().app.live_edit);
+    assert!(!from_toml("[app]\nlive_edit = false\n").unwrap().app.live_edit);
+    assert!(from_toml("[app]\nlive_edit = true\nlive_edti = true\n").is_err());
+}
