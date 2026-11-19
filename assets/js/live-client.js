@@ -33,6 +33,25 @@ function isOneInsert(op) {
   return inserts === 1;
 }
 
+// Where position `pos` of the text `op` makes lies in the text it applies to: a position in
+// text `op` inserted goes to where the insert stands.
+function basePos(pos, op) {
+  let base = 0;
+  let target = 0;
+  for (const part of op) {
+    if (typeof part === "string") {
+      const n = cpLength(part);
+      if (pos < target + n) return base;
+      target += n;
+    } else if (part > 0) {
+      if (pos < target + part) return base + (pos - target);
+      base += part;
+      target += part;
+    } else base -= part;
+  }
+  return base;
+}
+
 // Moves a stack of steps over `op`, which applies to the same text as its top step. Each step
 // applies after the one above it, so `op` is carried down the stack as it is transformed.
 function transformStack(stack, op) {
@@ -136,6 +155,19 @@ export class LiveClient {
     transformStack(this.#undo, over);
     transformStack(this.#redo, over);
     if (!isNoop(over)) this.#changed(over);
+  }
+
+  // `pos`, a caret in the current text, as a caret in the text the in-flight edit makes: what was
+  // typed since it went out is taken back out. An edit carries its caret this way.
+  sentPos(pos) {
+    return this.#buffer === null ? pos : basePos(pos, this.#buffer);
+  }
+
+  // `pos`, a caret in the current text, as a caret in the text at `rev`, the one the server has
+  // as far as this client knows. A caret move goes this way.
+  serverPos(pos) {
+    const sent = this.sentPos(pos);
+    return this.#inflight === null ? sent : basePos(sent, this.#inflight.op);
   }
 
   // After a reconnect and its replay: sends the in-flight edit again, as of the current `rev`.

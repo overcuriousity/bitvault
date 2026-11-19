@@ -431,3 +431,32 @@ test("a buffer of many edits far apart stays within the parts the server takes",
   assert.ok(server.text.endsWith("!"));
   assert.equal(server.text.split("-").length - 1, 4499);
 });
+
+test("carets_leave_out_typing_not_yet_sent", () => {
+  const server = new Server("hello");
+  const me = join(server, 1);
+  // "X" at 0 goes out; " world" is typed at the end while it is in flight.
+  me.client.local("Xhello");
+  me.client.local("Xhello world");
+  assert.equal(me.client.state, "buffered");
+  // At the end of the textarea, the edit's caret is at the end of "Xhello"; the server's text
+  // is still "hello".
+  assert.equal(me.client.sentPos(12), 6);
+  assert.equal(me.client.serverPos(12), 5);
+  // Before the insert in flight, and inside the buffered insert.
+  assert.equal(me.client.serverPos(0), 0);
+  assert.equal(me.client.sentPos(9), 6);
+  // Once acknowledged, only the buffer is unsent.
+  server.receive(1, me.sent[0]);
+  feed(server, me);
+  assert.equal(me.client.state, "waiting");
+  assert.equal(me.client.sentPos(12), 12);
+  assert.equal(me.client.serverPos(12), 6);
+});
+
+test("carets_are_unchanged_when_nothing_is_unsent", () => {
+  const server = new Server("hello");
+  const me = join(server, 1);
+  assert.equal(me.client.sentPos(3), 3);
+  assert.equal(me.client.serverPos(3), 3);
+});

@@ -21,6 +21,9 @@ const CARET_MS = 250;
 // A POST that has not settled by then is given up and counts as a network error.
 const POST_MS = 15000;
 const EMPTY = "An empty paste is not saved.";
+// How often a syntax change is sent again before the select goes back.
+const SYNTAX_TRIES = 5;
+const SYNTAX_REFUSED = "The syntax could not be changed.";
 const OUT = {
   stale: "You were disconnected for too long",
   refused: "Your last change was refused.",
@@ -72,6 +75,11 @@ function start(form) {
   let caretTimer = 0;
   let caretAt = 0;
   let caretSent = -1;
+  // The session's syntax as the stream last told it, which a refused change falls back to.
+  let syntaxNow = null;
+  let syntaxTimer = 0;
+  // Counts syntax choices, so the answer to an older one is ignored.
+  let syntaxChoice = 0;
 
   const client = new LiveClient({ send: (msg) => queue(msg), onChange: (text, map) => show(text, map) });
 
@@ -142,8 +150,9 @@ function start(form) {
     if (posting || pending === null || mode !== "live" || postTimer) return;
     posting = true;
     const sent = pending;
-    const pos = caretCp();
-    caretSent = pos;
+    caretSent = caretCp();
+    // The caret in the text this edit makes, not in the textarea, which may hold typing since.
+    const pos = client.sentPos(caretSent);
     let res = null;
     try {
       res = await request({ ...sent, pos });
@@ -179,7 +188,7 @@ function start(form) {
     if (pos === caretSent) return;
     caretSent = pos;
     caretAt = Date.now();
-    request({ pos }).catch(() => {});
+    request({ pos: client.serverPos(pos) }).catch(() => {});
   }
 
   function caretMoved() {
@@ -209,6 +218,7 @@ function start(form) {
   }
 
   function showSyntax(syntax) {
+    syntaxNow = syntax;
     if (!select) return;
     const value = syntaxValue.show(syntax);
     const option = [...select.options].find((o) => o.value === value);
@@ -362,6 +372,7 @@ function start(form) {
     clearTimeout(reconnectTimer);
     clearTimeout(postTimer);
     clearTimeout(caretTimer);
+    clearTimeout(syntaxTimer);
     leaving = false;
     ta.readOnly = true;
     if (select) select.disabled = true;
@@ -438,8 +449,34 @@ function start(form) {
     if (document.activeElement === ta) caretMoved();
   });
   for (const name of ["select", "keyup", "pointerup"]) ta.addEventListener(name, caretMoved);
+  // Sends the syntax the select shows; a network error, 429 or 503 is retried, and any other
+  // answer, or too many retries, puts the select back to the session's syntax.
+  async function sendSyntax(choice, attempt) {
+    syntaxTimer = 0;
+    if (mode !== "live" || !select || choice !== syntaxChoice) return;
+    const syntax = syntaxValue.send(select.value);
+    let code = 0;
+    try {
+      code = (await request({ syntax })).status;
+    } catch {
+      /* retried below */
+    }
+    // Another choice was made meanwhile; its own send answers for it.
+    if (mode !== "live" || choice !== syntaxChoice) return;
+    if (code === 204) return;
+    if ((code === 0 || code === 429 || code === 503) && attempt < SYNTAX_TRIES) {
+      syntaxTimer = setTimeout(() => sendSyntax(choice, attempt + 1), backoff(attempt));
+      return;
+    }
+    showSyntax(syntaxNow);
+    const region = document.getElementById("oc-live");
+    if (region) region.textContent = SYNTAX_REFUSED;
+  }
+
   select?.addEventListener("change", () => {
-    if (mode === "live") request({ syntax: syntaxValue.send(select.value) }).catch(() => {});
+    clearTimeout(syntaxTimer);
+    syntaxChoice += 1;
+    sendSyntax(syntaxChoice, 0);
   });
   form.addEventListener("submit", (e) => {
     if (mode !== "plain") e.preventDefault();
