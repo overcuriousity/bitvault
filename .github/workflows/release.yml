@@ -3,6 +3,11 @@ name: release
 on:
   push:
     tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -11,6 +16,7 @@ env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: "true"
   BIN: bitvault
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   verify:
@@ -19,11 +25,13 @@ jobs:
       version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
       - id: v
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${TAG#v}"
           crate=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          [ "$version" = "$crate" ] || { echo "Tag $GITHUB_REF_NAME does not match Cargo.toml version $crate."; exit 1; }
+          [ "$version" = "$crate" ] || { echo "Tag $TAG does not match Cargo.toml version $crate."; exit 1; }
           grep -q "^## \[$version\]" CHANGELOG.md || { echo "CHANGELOG.md has no section for $version."; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
@@ -35,6 +43,8 @@ jobs:
         target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
       - name: Install the pinned toolchain
         run: rustup toolchain install
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
@@ -60,6 +70,8 @@ jobs:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
       - name: Install the pinned toolchain
         run: rustup toolchain install
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -75,4 +87,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           awk "/^## \\[$VERSION\\]/{f=1;next} /^## \\[/{f=0} f" CHANGELOG.md > dist/notes.md
-          gh release create "$GITHUB_REF_NAME" dist/out/* --title "$GITHUB_REF_NAME" --notes-file dist/notes.md
+          gh release create "$TAG" dist/out/* --title "$TAG" --notes-file dist/notes.md
