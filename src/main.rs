@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use bitvault::domain::paste;
+use bitvault::domain::{live, paste};
 use bitvault::{app, config, db};
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
@@ -55,16 +55,34 @@ async fn run(cli: Cli) -> Result<(), bitvault::error::Error> {
             shutdown().await;
             let _ = stopping.send(true);
         });
-    // On a stop signal the server stops accepting and drains; requests still running after
-    // DRAIN (an upload can run for an hour) are cut off, inside the unit's TimeoutStopSec.
-    let deadline = async move {
-        let _ = stopped.wait_for(|s| *s).await;
-        tokio::time::sleep(DRAIN).await;
+    let mut server = tokio::spawn(std::future::IntoFuture::into_future(server));
+    let served = |r: Result<std::io::Result<()>, tokio::task::JoinError>| {
+        r.map_err(bitvault::error::Error::internal)?.map_err(bitvault::error::Error::internal)
     };
     tokio::select! {
-        served = std::future::IntoFuture::into_future(server) => served.map_err(bitvault::error::Error::internal),
-        () = deadline => {
-            tracing::warn!(seconds = DRAIN.as_secs(), "requests were still running after the drain time; stopping anyway");
+        r = &mut server => {
+            live::room::flush_all(&st).await;
+            return served(r);
+        }
+        _ = stopped.wait_for(|s| *s) => {}
+    }
+    // On a stop signal the live-edit sessions are saved at once, while the server stops
+    // accepting and drains; requests still running after DRAIN (an upload can run for an hour)
+    // are cut off, inside the unit's TimeoutStopSec.
+    live::room::flush_all(&st).await;
+    // Open event streams would hold the drain for its whole time: they end now, and their
+    // clients reconnect once the server runs again.
+    live::room::close_all(&st);
+    let drained = tokio::time::timeout(DRAIN, server).await;
+    // Sessions take edits while the server drains, so what came since the first save is saved too.
+    live::room::flush_all(&st).await;
+    match drained {
+        Ok(r) => served(r),
+        Err(_) => {
+            tracing::warn!(
+                seconds = DRAIN.as_secs(),
+                "requests were still running after the drain time; stopping anyway"
+            );
             Ok(())
         }
     }

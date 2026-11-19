@@ -1,8 +1,20 @@
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use syntect::html::{ClassStyle, ClassedHTMLGenerator};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 use syntect::util::LinesWithEndings;
+use tokio::sync::Semaphore;
+
+use crate::error::Error;
+use crate::state::AppState;
+
+/// Content above this size is shown plain: syntect's fancy-regex can backtrack badly on large
+/// or crafted input, which would make every view of such a paste expensive.
+pub const HIGHLIGHT_LIMIT: usize = 128 * 1024;
+/// Highlighting runs on the blocking pool, at most this many at once, so slow input can neither
+/// stall the async workers nor take over the pool.
+const HIGHLIGHT_PERMITS: usize = 2;
+static HIGHLIGHT_SLOTS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(HIGHLIGHT_PERMITS)));
 
 static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
 
@@ -64,6 +76,36 @@ pub fn render(text: &str, token: &str) -> Option<String> {
 /// line); `None` when the first line names none.
 pub fn render_auto(text: &str) -> Option<String> {
     render_with(text, resolve(text, None)?)
+}
+
+/// Highlighted markup when highlighting is on, the text is small enough and the syntax is known
+/// or, for an automatic one (`None`), detected from the first line; escaped plain text otherwise.
+/// Either way each line is wrapped in `<span class="line">`. The language is looked up first,
+/// so plain pastes never wait for a highlight slot.
+pub async fn content_html(st: &AppState, text: &str, syntax: Option<&str>) -> Result<(String, bool), Error> {
+    let found = (st.cfg.app.highlight && text.len() <= HIGHLIGHT_LIMIT).then(|| resolve(text, syntax)).flatten();
+    if let Some(found) = found {
+        // The permit moves into the closure, so it is held until the work ends even if the
+        // request is dropped.
+        let permit = Arc::clone(&HIGHLIGHT_SLOTS).acquire_owned().await.map_err(Error::internal)?;
+        let owned = text.to_owned();
+        let html = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            render_with(&owned, found)
+        })
+        .await
+        .map_err(Error::internal)?;
+        if let Some(html) = html {
+            return Ok((html, true));
+        }
+    }
+    Ok((wrap_lines(&escape_text(text)), false))
+}
+
+/// Escapes text for an element body. Quotation marks stay as they are, which keeps messages
+/// that quote the user's input readable in the source as well as on screen.
+pub fn escape_text(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 const LINE_OPEN: &str = "<span class=\"line\">";

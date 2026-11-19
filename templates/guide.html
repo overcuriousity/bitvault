@@ -67,6 +67,10 @@
 {%- if editable %}
 <h2 id="editing">Change a paste</h2>
 <p>Allow editing is pre-checked on this server. Untick it to keep a paste fixed. A private paste is changed from its opened page. Read-only and secret pastes cannot be changed.</p>
+{%- if live_edit %}
+<h2 id="live-edit">Live edit</h2>
+<p>With scripts on, an editable public, unlisted or private paste is edited live: several people can type in it at the same time, up to 64 at once, and the server merges what they type and saves it by itself shortly after typing pauses. Pages that only read the paste follow the text and show a pulsing Live edit button. A private paste stays unlocked in a tab for as long as the tab is connected. If the server restarts, open pages reconnect by themselves; anyone who typed meanwhile is told and keeps a copy of their text. Without scripts, and for pastes with burn after reads, the edit form with Save changes is used.</p>
+{%- endif %}
 {%- endif %}
 
 <h2>Delete a paste</h2>

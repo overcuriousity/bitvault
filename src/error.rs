@@ -28,6 +28,9 @@ pub enum Error {
     UnsupportedFormat,
     #[error("No free paste address was found. Try again in a moment.")]
     IdSpaceExhausted,
+    /// The server is stopping and takes no new long-lived connections.
+    #[error("The server is restarting. Try again in a moment.")]
+    ShuttingDown,
     #[error("Something went wrong. Try again later.")]
     Db(#[from] sqlx::Error),
     #[error("Something went wrong. Try again later.")]
@@ -47,7 +50,7 @@ impl Error {
             Self::TooManyAttempts => StatusCode::TOO_MANY_REQUESTS,
             Self::Invalid(_) | Self::UnsupportedFormat => StatusCode::UNPROCESSABLE_ENTITY,
             Self::TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
-            Self::IdSpaceExhausted => StatusCode::SERVICE_UNAVAILABLE,
+            Self::IdSpaceExhausted | Self::ShuttingDown => StatusCode::SERVICE_UNAVAILABLE,
             Self::Db(_) | Self::Io(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

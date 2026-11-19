@@ -17,11 +17,12 @@ use crate::error::Error;
 const ENV_PREFIX: &str = "BITVAULT__";
 /// The keys whose environment values are parsed as TOML-like values: the switches, numbers and
 /// lists. `tests/config.rs` checks the list against the defaults.
-pub const PARSED_ENV_KEYS: [&str; 12] = [
+pub const PARSED_ENV_KEYS: [&str; 13] = [
     "insecure_http",
     "trusted_proxies",
     "app.listing",
     "app.editable",
+    "app.live_edit",
     "app.read_stats",
     "app.highlight",
     "app.qr",
@@ -72,6 +73,8 @@ pub struct AppConfig {
     pub uploader_password: Option<String>,
     pub listing: bool,
     pub editable: bool,
+    /// Editable pastes are edited live, by several people at once (`domain::live`).
+    pub live_edit: bool,
     pub read_stats: bool,
     pub highlight: bool,
     pub qr: bool,
@@ -96,6 +99,7 @@ impl Default for AppConfig {
             uploader_password: None,
             listing: true,
             editable: false,
+            live_edit: true,
             read_stats: false,
             highlight: true,
             qr: true,
@@ -122,6 +126,7 @@ impl fmt::Debug for AppConfig {
             .field("uploader_password", &redact(&self.uploader_password))
             .field("listing", &self.listing)
             .field("editable", &self.editable)
+            .field("live_edit", &self.live_edit)
             .field("privacy_levels", &self.privacy_levels)
             .field("expiry_choices", &self.expiry_choices)
             .finish_non_exhaustive()

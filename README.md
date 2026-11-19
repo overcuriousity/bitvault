@@ -7,6 +7,7 @@ A self-hosted pastebin, file drop and URL shortener. Every paste lives at three 
 - Text, files and short links, with syntax highlighting, QR codes and a REST API.
 - Privacy levels: public, unlisted and read-only (not encrypted; read-only cannot be changed or deleted by its readers), private (encrypted on the server) and secret (encrypted in your browser, so the server never sees the key).
 - Expiry, burn after reading, optional editing and one optional admin.
+- Live edit: several people type in one editable paste at once, and open read views follow the text. It needs JavaScript and `live_edit = true` (the default); a reverse proxy must not buffer the `/<words>/events` and `/<words>/live/events` streams, as `deploy/nginx.conf` does.
 
 BitVault is a maintained fork of [Microbin](https://github.com/szabodanika/microbin). Version 2026.11.0 is a rewrite with no compatibility with 1.6.0 data, URLs, configuration or API; see the [changelog](CHANGELOG.md).
 
@@ -23,7 +24,7 @@ The installer works offline, checks the bundle for damage and never calls sudo i
 
 ## Run behind nginx
 
-BitVault listens on `127.0.0.1:8080` and expects a reverse proxy to terminate TLS. Use [`deploy/nginx.conf`](deploy/nginx.conf) (it is also in the bundle) and set `public_url` to the address users type. Uploads stream through nginx, so keep `client_max_body_size` at `max_file_mb` plus one.
+BitVault listens on `127.0.0.1:8080` and expects a reverse proxy to terminate TLS. Use [`deploy/nginx.conf`](deploy/nginx.conf) (it is also in the bundle) and set `public_url` to the address users type. Uploads stream through nginx, so keep `client_max_body_size` at `max_file_mb` plus one. The proxy's address must be in `trusted_proxies` (the default trusts a proxy on the same host): otherwise every visitor seems to come from the proxy, and since live edit allows 16 open streams per address (each open live editor or followed read view is one), the whole instance would allow 16 in total.
 
 ### Plain HTTP on a private network
 

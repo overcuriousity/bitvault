@@ -1,7 +1,5 @@
 //! The paste page, unlock, raw text, edit and delete.
 
-use std::sync::{Arc, LazyLock};
-
 use askama::Template;
 use axum::Form;
 use axum::Router;
@@ -11,28 +9,20 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use serde::Deserialize;
-use tokio::sync::Semaphore;
 
 use super::admin::MaybeAdmin;
 use super::files::{GrantQuery, inline_image};
-use super::{
-    Extras, IconSize, TimeView, copy_icons, date, escape_text, icon, page_with, paste_id, paste_urls, render, size,
-};
+use super::{Extras, IconSize, TimeView, copy_icons, date, icon, page_with, paste_id, paste_urls, render, size};
 use crate::assets::Assets;
+use crate::domain::highlight::content_html;
 use crate::domain::paste::{self, Access, Body, DeleteAuth, Opened, Paste};
 use crate::domain::words::PasteId;
-use crate::domain::{self, Kind, Privacy, grant, highlight, qr};
+use crate::domain::{self, Kind, Privacy, grant, qr};
 use crate::error::Error;
 use crate::security::{BaseUrl, ClientIp};
 use crate::state::AppState;
 
-/// Content above this size is shown plain: syntect's fancy-regex can backtrack badly on large
-/// or crafted input, which would make every view of such a paste expensive.
-pub const HIGHLIGHT_LIMIT: usize = 128 * 1024;
-/// Highlighting runs on the blocking pool, at most this many at once, so slow input can neither
-/// stall the async workers nor take over the pool.
-const HIGHLIGHT_PERMITS: usize = 2;
-static HIGHLIGHT_SLOTS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(HIGHLIGHT_PERMITS)));
+pub use crate::domain::highlight::HIGHLIGHT_LIMIT;
 const HTML: &str = "text/html; charset=utf-8";
 const TEXT: &str = "text/plain; charset=utf-8";
 const OCTETS: &str = "application/octet-stream";
@@ -160,6 +150,11 @@ struct PasteView {
     target: Option<String>,
     files: Vec<FileView>,
     zip_href: Option<String>,
+    /// The stream (`/{words}/events`) that `live-view.js` follows while the paste is edited live;
+    /// `None` leaves the page static.
+    watch: Option<String>,
+    /// A private paste's grant, which the stream presents on connect; only with `watch`.
+    watch_grant: Option<String>,
 }
 
 impl PasteView {
@@ -192,31 +187,11 @@ struct EditPage {
     /// The grant from unlocking a private paste, which the save sends back as its proof.
     grant: Option<String>,
     notice: Option<String>,
-}
-
-/// Highlighted markup when highlighting is on, the text is small enough and the syntax is known
-/// or, for an automatic one (`None`), detected from the first line; escaped plain text otherwise.
-/// Either way each line is wrapped in `<span class="line">`. The language is looked up first,
-/// so plain pastes never wait for a highlight slot.
-async fn content_html(st: &AppState, text: &str, syntax: Option<&str>) -> Result<(String, bool), Error> {
-    let found =
-        (st.cfg.app.highlight && text.len() <= HIGHLIGHT_LIMIT).then(|| highlight::resolve(text, syntax)).flatten();
-    if let Some(found) = found {
-        // The permit moves into the closure, so it is held until the work ends even if the
-        // request is dropped.
-        let permit = Arc::clone(&HIGHLIGHT_SLOTS).acquire_owned().await.map_err(Error::internal)?;
-        let owned = text.to_owned();
-        let html = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            highlight::render_with(&owned, found)
-        })
-        .await
-        .map_err(Error::internal)?;
-        if let Some(html) = html {
-            return Ok((html, true));
-        }
-    }
-    Ok((highlight::wrap_lines(&escape_text(text)), false))
+    /// The live-edit address (`/{words}/live`) that `live-edit.js` turns the form into an editor
+    /// with; `None` keeps the plain form.
+    live: Option<String>,
+    /// An empty text is saved only on a paste with files.
+    has_files: bool,
 }
 
 fn reads(n: u32) -> String {
@@ -281,6 +256,11 @@ fn paste_view(
         Shown::Secret | Shown::Sealed => (None, false, None),
     };
     let copy_text = !secret && content.as_ref().is_some_and(|c| !c.is_empty());
+    // Only a page that shows the text or the target follows it; a private one needs its grant.
+    let watch = (paste::live(st, p) && (content.is_some() || target.is_some()))
+        .then(|| format!("/{words}/events"))
+        .filter(|_| p.privacy != Privacy::Private || grant.is_some());
+    let watch_grant = watch.as_ref().and(grant).filter(|_| p.privacy == Privacy::Private).map(str::to_owned);
     let files = p
         .files
         .iter()
@@ -328,6 +308,8 @@ fn paste_view(
         zip_href: (!secret && !files.is_empty()).then(|| format!("/{words}/zip{files_g}")),
         files,
         full_url: full,
+        watch,
+        watch_grant,
     }
 }
 
@@ -336,6 +318,9 @@ fn render_paste(st: &AppState, admin: bool, view: &PasteView, words: &str) -> Re
     let mut js = vec![Assets::url("js/paste.js")];
     if view.secret && !view.https_only {
         js.push(Assets::url("js/secret.js"));
+    }
+    if view.watch.is_some() {
+        js.push(Assets::url("js/live-view.js"));
     }
     let extras = Extras { css: vec![Assets::url("css/syntax.css")], js };
     Ok(no_store(page_with(st, admin, "", words, body, extras)?.into_response()))
@@ -586,15 +571,24 @@ fn edit_page(
     status: StatusCode,
 ) -> Result<Response, Error> {
     let words = p.id.words();
+    // A form shown again with a notice holds text the person typed; a live editor would replace
+    // it with the session's text, so that form stays plain.
+    let live = (notice.is_none() && paste::live(st, p)).then(|| format!("/{words}/live"));
+    let extras = match live {
+        Some(_) => Extras { js: vec![Assets::url("js/live-edit.js")], ..Extras::default() },
+        None => Extras::default(),
+    };
     let view = EditPage {
         words: words.clone(),
         content: draft.content,
         syntax_options: super::home::syntax_options(&st.cfg.app, draft.syntax),
         grant: draft.grant,
         notice,
+        live,
+        has_files: !p.files.is_empty(),
     };
     let body = render(&view)?;
-    let page = page_with(st, admin, "", &format!("Edit {words}"), body, Extras::default())?;
+    let page = page_with(st, admin, "", &format!("Edit {words}"), body, extras)?;
     Ok(no_store((status, page).into_response()))
 }
 

@@ -148,7 +148,7 @@ fn code(e: &Error) -> &'static str {
         Error::Invalid(_) => "INVALID",
         Error::TooLarge => "TOO_LARGE",
         Error::UnsupportedFormat => "UNSUPPORTED_FORMAT",
-        Error::IdSpaceExhausted => "UNAVAILABLE",
+        Error::IdSpaceExhausted | Error::ShuttingDown => "UNAVAILABLE",
         Error::Db(_) | Error::Io(_) | Error::Internal(_) => "INTERNAL",
     }
 }

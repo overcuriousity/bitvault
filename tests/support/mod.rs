@@ -1,12 +1,14 @@
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
 use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{Request, Response, header};
 use bitvault::config::Config;
+use bitvault::domain::live::room::{Rooms, Timing};
 use bitvault::state::AppState;
 use tower::ServiceExt;
 
@@ -35,20 +37,34 @@ pub async fn app_with(toml: &str) -> App {
     app_with_routes(toml, Router::new()).await
 }
 
+/// Like [`app_with`], with live-edit rooms on `timing`.
+pub async fn app_with_timing(toml: &str, timing: Timing) -> App {
+    app_with_rooms(toml, Rooms::new(timing)).await
+}
+
+/// Like [`app_with`], with these live-edit rooms.
+pub async fn app_with_rooms(toml: &str, rooms: Arc<Rooms>) -> App {
+    build_app(toml, Router::new(), rooms).await
+}
+
 /// Like [`app_with`], with test-only routes registered next to the app's own.
 pub async fn app_with_routes(toml: &str, extra: Router<AppState>) -> App {
+    build_app(toml, extra, Rooms::new(Timing::default())).await
+}
+
+async fn build_app(toml: &str, extra: Router<AppState>, rooms: Arc<Rooms>) -> App {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("config.toml");
     std::fs::write(&file, toml).unwrap();
     let mut cfg = bitvault::config::load(Some(&file)).unwrap();
     cfg.data_dir = Some(dir.path().join("data"));
     cfg.validate().unwrap();
-    app_from(cfg, dir, extra).await
+    app_from(cfg, dir, extra, rooms).await
 }
 
-async fn app_from(cfg: Config, dir: tempfile::TempDir, extra: Router<AppState>) -> App {
+async fn app_from(cfg: Config, dir: tempfile::TempDir, extra: Router<AppState>, rooms: Arc<Rooms>) -> App {
     let pool = bitvault::db::open(&cfg.data_dir()).await.unwrap();
-    let (router, st) = bitvault::app::build_with(cfg, pool, extra).await.unwrap();
+    let (router, st) = bitvault::app::build_with_rooms(cfg, pool, extra, rooms).await.unwrap();
     let router = router.layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 5000))));
     App { router, st, cookie: None, origin: ("localhost:8080".into(), "http://localhost:8080".into()), _dir: dir }
 }
@@ -167,6 +183,120 @@ pub fn created(res: &Response<Body>) -> (String, String) {
     let pair = set.split(';').next().unwrap().trim();
     assert!(pair.starts_with(&format!("{CREATED_COOKIE}=")), "{set}");
     (location.trim_start_matches('/').to_owned(), pair.to_owned())
+}
+
+/// One server-sent event: its name, id and data (the data lines joined by newlines).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SseFrame {
+    pub event: String,
+    pub id: Option<String>,
+    pub data: String,
+}
+
+impl SseFrame {
+    pub fn json(&self) -> serde_json::Value {
+        serde_json::from_str(&self.data).unwrap_or_else(|e| panic!("frame data is no JSON ({e}): {self:?}"))
+    }
+}
+
+/// Reads the frames of an event-stream response body as they arrive. Comment lines (keep-alives)
+/// are skipped.
+pub struct SseReader {
+    body: Body,
+    buf: Vec<u8>,
+    /// Every frame read so far.
+    pub frames: Vec<SseFrame>,
+    /// The body has ended.
+    pub ended: bool,
+}
+
+/// How long [`SseReader`] waits for what it was asked to read before the test fails.
+pub const SSE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
+
+impl SseReader {
+    pub fn new(res: Response<Body>) -> Self {
+        Self { body: res.into_body(), buf: Vec::new(), frames: Vec::new(), ended: false }
+    }
+
+    /// Reads until `done` holds for the frames read so far; fails with them when the body ends
+    /// first or [`SSE_PATIENCE`] passes.
+    pub async fn until(&mut self, done: impl Fn(&[SseFrame]) -> bool) -> &[SseFrame] {
+        let reached = tokio::time::timeout(SSE_PATIENCE, async {
+            while !done(&self.frames) {
+                if !self.read_chunk().await {
+                    return false;
+                }
+            }
+            true
+        })
+        .await;
+        match reached {
+            Ok(true) => &self.frames,
+            Ok(false) => panic!("the stream ended first; frames so far: {:#?}", self.frames),
+            Err(_) => panic!("timed out; frames so far: {:#?}", self.frames),
+        }
+    }
+
+    /// Reads until the frame `n` (counting from 0) has arrived and returns it.
+    pub async fn nth(&mut self, n: usize) -> SseFrame {
+        self.until(|f| f.len() > n).await[n].clone()
+    }
+
+    /// Reads until the first frame named `event` after the first `from` frames, and returns it.
+    pub async fn next_named(&mut self, from: usize, event: &str) -> SseFrame {
+        let frames = self.until(|f| f.iter().skip(from).any(|x| x.event == event)).await;
+        frames.iter().skip(from).find(|x| x.event == event).cloned().unwrap()
+    }
+
+    /// Reads until the body ends; fails with the frames so far after [`SSE_PATIENCE`].
+    pub async fn read_to_end(&mut self) -> &[SseFrame] {
+        let ended = tokio::time::timeout(SSE_PATIENCE, async { while self.read_chunk().await {} }).await;
+        assert!(ended.is_ok(), "the stream did not end; frames so far: {:#?}", self.frames);
+        &self.frames
+    }
+
+    /// Reads one chunk and parses the frames it completes; `false` once the body has ended.
+    async fn read_chunk(&mut self) -> bool {
+        use http_body_util::BodyExt;
+        if self.ended {
+            return false;
+        }
+        match self.body.frame().await {
+            Some(Ok(frame)) => {
+                if let Ok(data) = frame.into_data() {
+                    self.buf.extend_from_slice(&data);
+                    self.parse();
+                }
+                true
+            }
+            Some(Err(e)) => panic!("the stream failed ({e}); frames so far: {:#?}", self.frames),
+            None => {
+                self.ended = true;
+                false
+            }
+        }
+    }
+
+    fn parse(&mut self) {
+        while let Some(end) = self.buf.windows(2).position(|w| w == b"\n\n") {
+            let raw: Vec<u8> = self.buf.drain(..end + 2).collect();
+            let raw = String::from_utf8(raw).unwrap();
+            let (mut event, mut id, mut data) = (String::new(), None, Vec::new());
+            for line in raw.lines() {
+                let (field, value) = line.split_once(':').unwrap_or((line, ""));
+                let value = value.strip_prefix(' ').unwrap_or(value);
+                match field {
+                    "event" => event = value.to_owned(),
+                    "id" => id = Some(value.to_owned()),
+                    "data" => data.push(value.to_owned()),
+                    _ => {}
+                }
+            }
+            if !event.is_empty() || !data.is_empty() {
+                self.frames.push(SseFrame { event, id, data: data.join("\n") });
+            }
+        }
+    }
 }
 
 pub async fn body_text(res: Response<Body>) -> String {

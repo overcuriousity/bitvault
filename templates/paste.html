@@ -5,7 +5,7 @@
 {% import "components/field.html" as field %}
 {% import "components/icon_button.html" as icon_button %}
 {% import "components/notice.html" as notice %}
-<article class="paste-view"{% if secret %} data-secret{% endif %}{% if secret && burns %} data-burns{% endif %}>
+<article class="paste-view"{% if secret %} data-secret{% endif %}{% if secret && burns %} data-burns{% endif %}{% if let Some(w) = watch %} data-bv-watch="{{ w }}"{% endif %}{% if let Some(g) = watch_grant %} data-bv-grant="{{ g }}"{% endif %}>
 {%- if created %}
 {% call notice::notice("success", "Paste created.") %}{% endcall %}
 {%- endif %}
@@ -42,10 +42,15 @@
   <a class="oc-btn" href="{{ href }}">{{ self.icon("languages")|safe }}Translate</a>
   {%- endif %}
   {%- if let Some(href) = edit_href %}
-  <a class="oc-btn" href="{{ href }}">{{ self.icon("pencil")|safe }}Edit</a>
+  <a class="oc-btn" href="{{ href }}"{% if watch.is_some() %} data-bv-live-edit{% endif %}>{{ self.icon("pencil")|safe }}Edit</a>
   {%- endif %}
   {%- endif %}
 </div>
+{%- endif %}
+{%- if watch.is_some() %}
+{#- live-view.js says here once when someone starts editing, and builds its notices with these symbols. #}
+<div class="oc-sr-only" id="live-view-says" aria-live="polite"></div>
+{% call notice::icons() %}{% endcall %}
 {%- endif %}
 {%- if https_only %}
 {% call notice::notice("info", "Secret pastes open only over https.") %}{% endcall %}
@@ -95,6 +100,9 @@
 {%- else if let Some(html) = content %}
 {%- if !html.is_empty() %}
 <pre class="paste-text{% if highlighted %} bv-code{% endif %}" id="paste-text"><code>{{ html|safe }}</code></pre>
+{%- else if watch.is_some() %}
+{#- live-view.js shows the text here once it is no longer empty. #}
+<pre class="paste-text" id="paste-text" hidden><code></code></pre>
 {%- endif %}
 {%- endif %}
 {#- One quiet line: when it was made, when it goes, and the short address where there is one. #}
