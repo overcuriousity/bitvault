@@ -889,7 +889,7 @@ pub async fn delete(st: &AppState, id: PasteId, auth: DeleteAuth, ip: IpAddr, no
     if deleted.rows_affected() == 0 {
         return Err(Error::NotFound);
     }
-    room::gone(st, id, Some(p.created_at));
+    room::gone(st, id, p.created_at);
     // The paste is gone either way; a leftover directory is removed by the start-up orphan sweep.
     if let Err(e) = remove_files(st, id).await {
         tracing::warn!(error = %e, "could not remove a deleted paste's files");
@@ -988,21 +988,23 @@ pub async fn totals(st: &AppState, now: i64) -> Result<Totals, Error> {
 /// Returns how many rows went.
 pub async fn purge(st: &AppState, now: i64) -> Result<u64, Error> {
     let burned_before = now.saturating_sub(BURNED_TTL_SECS);
-    let ids = sqlx::query_scalar!(
+    let rows = sqlx::query!(
         r#"DELETE FROM pastes
            WHERE (expires_at IS NOT NULL AND expires_at <= ?) OR (burned_at IS NOT NULL AND burned_at <= ?)
-           RETURNING id AS "id!""#,
+           RETURNING id AS "id!", created_at AS "created_at!""#,
         now,
         burned_before,
     )
     .fetch_all(&st.pool)
     .await?;
-    for id in ids.iter().filter_map(|id| u64::try_from(*id).ok()) {
-        room::gone(st, PasteId(id), None);
+    for (id, created_at) in rows.iter().filter_map(|r| Some((u64::try_from(r.id).ok()?, r.created_at))) {
+        // Only the rooms of the row removed here: a paste created at the freed address since
+        // has its own creation time and keeps its session.
+        room::gone(st, PasteId(id), created_at);
         // A leftover directory must not stop the rest of the purge; start-up removes orphans.
         if let Err(e) = remove_files(st, PasteId(id)).await {
             tracing::warn!(error = %e, "could not remove a purged paste's files");
         }
     }
-    Ok(u64::try_from(ids.len()).unwrap_or(u64::MAX))
+    Ok(u64::try_from(rows.len()).unwrap_or(u64::MAX))
 }

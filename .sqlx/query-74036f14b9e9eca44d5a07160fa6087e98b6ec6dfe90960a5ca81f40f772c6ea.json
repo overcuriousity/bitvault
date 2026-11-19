@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM pastes\n           WHERE (expires_at IS NOT NULL AND expires_at <= ?) OR (burned_at IS NOT NULL AND burned_at <= ?)\n           RETURNING id AS \"id!\", created_at AS \"created_at!\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "pastes",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "pastes",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      null,
+      false
+    ]
+  },
+  "hash": "74036f14b9e9eca44d5a07160fa6087e98b6ec6dfe90960a5ca81f40f772c6ea"
+}

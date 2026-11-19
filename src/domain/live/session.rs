@@ -15,11 +15,14 @@ use crate::error::Error;
 
 /// Edits and syntax changes per editor and second, also the burst.
 const EDITS_PER_SECOND: f64 = 30.0;
+/// Caret moves per editor and second, also the burst; the editor sends at most four a second.
+const CARETS_PER_SECOND: f64 = 10.0;
 /// The most clients one session remembers. Past it, [`Session::add_client`] forgets the one
 /// absent longest, so repeated fresh joins cannot grow a long session's memory without bound.
 const CLIENTS: usize = 4096;
-/// The most transform work one edit may ask for: its parts times the revisions it is behind.
-/// Real edits have a handful of parts and are a few revisions behind.
+/// The most transform work one edit may ask for: the parts of every operation it is transformed
+/// over plus its own parts for each of them. Real edits have a handful of parts and are a few
+/// revisions behind.
 const TRANSFORM_BUDGET: u64 = 1_000_000;
 
 pub(super) fn chars(s: &str) -> u32 {
@@ -41,14 +44,37 @@ pub(super) struct Client {
     /// In the presence row: a stream is open or closed less than the presence grace ago.
     pub(super) present: bool,
     pub(super) left_at: Option<Instant>,
-    pub(super) tokens: f64,
-    pub(super) refilled: Instant,
+    edits: Bucket,
+    carets: Bucket,
 }
 
 impl Client {
+    /// Spends one of the edits and syntax changes this editor may make.
     pub(super) fn take_token(&mut self, now: Instant) -> Result<(), Error> {
-        let refill = now.duration_since(self.refilled).as_secs_f64() * EDITS_PER_SECOND;
-        self.tokens = (self.tokens + refill).min(EDITS_PER_SECOND);
+        self.edits.take(EDITS_PER_SECOND, now)
+    }
+
+    /// Spends one of the caret moves this editor may send, apart from its edits, so moving
+    /// the caret never costs typing.
+    pub(super) fn take_caret(&mut self, now: Instant) -> Result<(), Error> {
+        self.carets.take(CARETS_PER_SECOND, now)
+    }
+}
+
+/// A token bucket that refills at `rate` a second up to `rate`.
+struct Bucket {
+    tokens: f64,
+    refilled: Instant,
+}
+
+impl Bucket {
+    fn full(rate: f64, now: Instant) -> Self {
+        Self { tokens: rate, refilled: now }
+    }
+
+    fn take(&mut self, rate: f64, now: Instant) -> Result<(), Error> {
+        let refill = now.duration_since(self.refilled).as_secs_f64() * rate;
+        self.tokens = (self.tokens + refill).min(rate);
         self.refilled = now;
         if self.tokens < 1.0 {
             return Err(Error::TooManyAttempts);
@@ -171,8 +197,8 @@ impl Session {
             streams: 0,
             present: false,
             left_at: None,
-            tokens: EDITS_PER_SECOND,
-            refilled: now,
+            edits: Bucket::full(EDITS_PER_SECOND, now),
+            carets: Bucket::full(CARETS_PER_SECOND, now),
         });
         self.clients.len() - 1
     }
@@ -237,16 +263,24 @@ impl Session {
         if base > self.rev || base < first {
             return Err(invalid());
         }
-        // Refused before any work: transforming costs about the parts times the revisions behind.
-        let parts = u64::try_from(op.parts().len()).unwrap_or(u64::MAX);
-        if parts.saturating_mul(self.rev - base) > TRANSFORM_BUDGET {
-            return Err(Error::Invalid("The edit is too far behind the text. Reload the page.".into()));
-        }
+        let behind = || Error::Invalid("The edit is too far behind the text. Reload the page.".into());
         let skip = usize::try_from(base - first).map_err(|_| invalid())?;
+        // A transform walks the parts of both operations, so the budget counts both. Refused
+        // before any work when the parts alone exceed it, and checked again as the edit grows.
+        let parts = |op: &Op| u64::try_from(op.parts().len()).unwrap_or(u64::MAX);
+        let mine = parts(&op);
+        let work =
+            self.history.iter().skip(skip).fold(0u64, |sum, l| sum.saturating_add(parts(&l.op)).saturating_add(mine));
+        if work > TRANSFORM_BUDGET {
+            return Err(behind());
+        }
+        let mut work = 0u64;
         for logged in self.history.iter().skip(skip) {
-            let (theirs, mine) = ot::transform(&logged.op, &op).map_err(|_| invalid())?;
-            pos = shift(pos, &theirs);
-            op = mine;
+            work = work.saturating_add(parts(&logged.op)).saturating_add(parts(&op));
+            if work > TRANSFORM_BUDGET {
+                return Err(behind());
+            }
+            (op, pos) = ot::transform_caret(&logged.op, &op, pos).map_err(|_| invalid())?;
         }
         let text = op.apply(&self.text).map_err(|_| invalid())?;
         if text.len() > TEXT_LIMIT && text.len() > self.text.len() {
@@ -296,7 +330,7 @@ impl Session {
         now: Instant,
     ) -> EditorEvent {
         for c in self.clients.iter_mut().filter(|c| c.peer != peer) {
-            c.pos = shift(c.pos, &op);
+            c.pos = ot::shift(c.pos, &op);
         }
         self.len = op.target_len();
         self.text = text;
@@ -314,29 +348,4 @@ impl Session {
         self.peers_pending = true;
         EditorEvent::Op { rev: self.rev, peer, seq, op }
     }
-}
-
-/// Where a caret at `pos` ends up after `op`: an insert at or before it moves it right, a
-/// delete before it moves it left, and a delete across it puts it at the delete's start.
-fn shift(pos: u32, op: &Op) -> u32 {
-    let (mut old, mut new) = (0u32, 0u32);
-    for part in op.parts() {
-        match part {
-            Part::Keep(n) => {
-                if pos < old.saturating_add(*n) {
-                    return new.saturating_add(pos - old);
-                }
-                old = old.saturating_add(*n);
-                new = new.saturating_add(*n);
-            }
-            Part::Delete(n) => {
-                if pos < old.saturating_add(*n) {
-                    return new;
-                }
-                old = old.saturating_add(*n);
-            }
-            Part::Insert(s) => new = new.saturating_add(chars(s)),
-        }
-    }
-    new
 }

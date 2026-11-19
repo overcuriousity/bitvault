@@ -198,32 +198,144 @@ impl<'a> Steps<'a> {
     }
 }
 
+/// Where [`transform_into`] puts the parts of `first'`: a whole operation, or only a caret
+/// carried over it.
+trait Sink {
+    fn keep(&mut self, n: u32);
+    fn delete(&mut self, n: u32);
+    fn insert(&mut self, s: &str);
+}
+
+impl Sink for Op {
+    fn keep(&mut self, n: u32) {
+        self.push(Part::Keep(n));
+    }
+
+    fn delete(&mut self, n: u32) {
+        self.push(Part::Delete(n));
+    }
+
+    fn insert(&mut self, s: &str) {
+        self.push(Part::Insert(s.to_owned()));
+    }
+}
+
+/// A caret carried over an operation that arrives part by part, as [`shift`] carries it over the
+/// whole operation. A delete waits for the next keep, so an insert after it counts first, as in
+/// the normal form; no inserted text is copied.
+struct Caret {
+    pos: u32,
+    old: u32,
+    new: u32,
+    deleting: u32,
+    at: Option<u32>,
+}
+
+impl Caret {
+    fn new(pos: u32) -> Self {
+        Self { pos, old: 0, new: 0, deleting: 0, at: None }
+    }
+
+    fn flush(&mut self) {
+        let n = std::mem::take(&mut self.deleting);
+        if n == 0 || self.at.is_some() {
+            return;
+        }
+        if self.pos < self.old.saturating_add(n) {
+            self.at = Some(self.new);
+        } else {
+            self.old = self.old.saturating_add(n);
+        }
+    }
+
+    fn finish(mut self) -> u32 {
+        self.flush();
+        self.at.unwrap_or(self.new)
+    }
+}
+
+impl Sink for Caret {
+    fn keep(&mut self, n: u32) {
+        if n == 0 {
+            return;
+        }
+        self.flush();
+        if self.at.is_some() {
+            return;
+        }
+        if self.pos < self.old.saturating_add(n) {
+            self.at = Some(self.new.saturating_add(self.pos - self.old));
+        } else {
+            self.old = self.old.saturating_add(n);
+            self.new = self.new.saturating_add(n);
+        }
+    }
+
+    fn delete(&mut self, n: u32) {
+        self.deleting = self.deleting.saturating_add(n);
+    }
+
+    fn insert(&mut self, s: &str) {
+        if self.at.is_none() {
+            self.new = self.new.saturating_add(char_len(s));
+        }
+    }
+}
+
+/// Where a caret at `pos` ends up after `op`: an insert at or before it moves it right, a
+/// delete before it moves it left, and a delete across it puts it at the delete's start.
+pub fn shift(pos: u32, op: &Op) -> u32 {
+    let mut caret = Caret::new(pos);
+    for part in &op.parts {
+        match part {
+            Part::Keep(n) => caret.keep(*n),
+            Part::Delete(n) => caret.delete(*n),
+            Part::Insert(s) => caret.insert(s),
+        }
+    }
+    caret.finish()
+}
+
 /// Transforms two operations on the same text into `(first', second')`, so that `second'`
 /// applies after `first` and `first'` after `second`, both giving the same text. `first` is the
 /// operation the server received first: of two inserts at one position, its text comes first.
 pub fn transform(first: &Op, second: &Op) -> Result<(Op, Op), OtError> {
+    let mut first2 = Op::default();
+    let second2 = transform_into(first, second, &mut first2)?;
+    Ok((first2, second2))
+}
+
+/// `second'` as [`transform`] gives it, and `pos`, a caret in the text `second` makes, carried
+/// over `first'`, without building `first'` or copying what `first` inserts.
+pub fn transform_caret(first: &Op, second: &Op, pos: u32) -> Result<(Op, u32), OtError> {
+    let mut caret = Caret::new(pos);
+    let second2 = transform_into(first, second, &mut caret)?;
+    Ok((second2, caret.finish()))
+}
+
+fn transform_into(first: &Op, second: &Op, first2: &mut impl Sink) -> Result<Op, OtError> {
     if first.base_len() != second.base_len() {
         return Err(OtError::Length);
     }
-    let (mut first2, mut second2) = (Op::default(), Op::default());
+    let mut second2 = Op::default();
     let (mut a, mut b) = (Steps::new(first), Steps::new(second));
     loop {
         match (a.head, b.head) {
             (None, None) => break,
             (Some(Step::Insert(s)), _) => {
-                first2.push(Part::Insert(s.to_owned()));
+                first2.insert(s);
                 second2.push(Part::Keep(char_len(s)));
                 a.advance();
             }
             (_, Some(Step::Insert(s))) => {
-                first2.push(Part::Keep(char_len(s)));
+                first2.keep(char_len(s));
                 second2.push(Part::Insert(s.to_owned()));
                 b.advance();
             }
             (None, Some(_)) | (Some(_), None) => return Err(OtError::Length),
             (Some(Step::Keep(x)), Some(Step::Keep(y))) => {
                 let n = x.min(y);
-                first2.push(Part::Keep(n));
+                first2.keep(n);
                 second2.push(Part::Keep(n));
                 a.take(n);
                 b.take(n);
@@ -235,7 +347,7 @@ pub fn transform(first: &Op, second: &Op) -> Result<(Op, Op), OtError> {
             }
             (Some(Step::Delete(x)), Some(Step::Keep(y))) => {
                 let n = x.min(y);
-                first2.push(Part::Delete(n));
+                first2.delete(n);
                 a.take(n);
                 b.take(n);
             }
@@ -247,7 +359,7 @@ pub fn transform(first: &Op, second: &Op) -> Result<(Op, Op), OtError> {
             }
         }
     }
-    Ok((first2, second2))
+    Ok(second2)
 }
 
 impl Serialize for Op {

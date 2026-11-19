@@ -957,3 +957,84 @@ async fn the_last_editor_leaving_saves_at_once() {
     eventually("the text is saved", || async { row_text(st, &p).await == "hello!" }).await;
     assert_eq!(st.rooms.sessions(), 1, "the session still waits out its grace");
 }
+
+#[tokio::test]
+async fn an_edit_behind_operations_with_many_parts_is_refused() {
+    // The old check counted only the edit's own parts: 2 parts, 300 revisions behind, passed,
+    // although each of those revisions has 4096 parts to walk.
+    let app = live_app().await;
+    let st = &app.st;
+    let p = create(st, &"a".repeat(4096), Privacy::Unlisted).await;
+    let editors: Vec<Editor> = futures_util::future::join_all((0..12).map(|n| join(st, &p, ip(n)))).await;
+    let mut len = 4096u32;
+    let mut rev = 0u64;
+    for n in 0..300u64 {
+        let mut parts: Vec<Part> = (0..2048).flat_map(|_| [Part::Keep(1), Part::Insert("b".into())]).collect();
+        parts.push(Part::Keep(len - 2048));
+        let op = Op::from_parts(parts);
+        assert_eq!(op.parts().len(), 4097);
+        let (who, seq) = (usize::try_from(n % 12).unwrap(), n / 12 + 1);
+        room::submit(st, &p, &editors[who].init.client, edit(seq, rev, op)).await.unwrap();
+        len += 2048;
+        rev += 1;
+    }
+    let last = &editors[0].init.client;
+    let refused = room::submit(st, &p, last, edit(100, 0, insert(4096, 0, "z"))).await;
+    assert!(matches!(refused, Err(Error::Invalid(_))), "{refused:?}");
+    room::submit(st, &p, last, edit(100, rev, insert(len, 0, "z"))).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_join_that_read_the_row_before_a_delete_starts_no_session() {
+    let app = support::app_with_timing(CONFIG, no_timed_saves()).await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let hold = st.rooms.hold_next_start();
+    let joining = {
+        let (st, p) = (st.clone(), p.clone());
+        tokio::spawn(async move { room::join(&st, &p, None, ip(1), None).await.map(|_| ()) })
+    };
+    tokio::time::timeout(PATIENCE, hold.peeked.notified()).await.expect("the join never read the row");
+    paste::delete(st, p.id, paste::DeleteAuth::None, ip(2), domain::now()).await.unwrap();
+    hold.resume.notify_one();
+    let joined = tokio::time::timeout(PATIENCE, joining).await.expect("the join never finished").unwrap();
+    assert!(matches!(joined, Err(Error::NotFound)), "{joined:?}");
+    assert_eq!(st.rooms.sessions(), 0, "the deleted paste kept a session");
+    assert_eq!(st.rooms.streams_from(ip(1)), 0);
+}
+
+#[tokio::test]
+async fn gone_leaves_a_paste_that_took_over_the_address() {
+    let app = live_app().await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let mut a = join(st, &p, ip(1)).await;
+    // The row of an older paste at this address goes, as the purge removes it.
+    room::gone(st, p.id, p.created_at - 1);
+    assert_eq!(st.rooms.sessions(), 1);
+    room::submit(st, &p, &a.init.client, edit(1, 0, insert(5, 5, "!"))).await.unwrap();
+    let (rev, ..) = next_op(&mut a.events).await;
+    assert_eq!(rev, 1);
+    room::gone(st, p.id, p.created_at);
+    editor_gone(&mut a.events).await;
+    assert_eq!(st.rooms.sessions(), 0);
+}
+
+#[tokio::test]
+async fn carets_are_limited_per_editor_apart_from_edits() {
+    let app = live_app().await;
+    let st = &app.st;
+    let p = create(st, "hello", Privacy::Unlisted).await;
+    let a = join(st, &p, ip(1)).await;
+    let mut refused = 0;
+    for _ in 0..30 {
+        match room::submit(st, &p, &a.init.client, Msg::Caret { pos: 1 }).await {
+            Ok(()) => {}
+            Err(Error::TooManyAttempts) => refused += 1,
+            Err(e) => panic!("{e:?}"),
+        }
+    }
+    assert!(refused > 0, "30 carets at once all passed");
+    // The edits' own budget is untouched.
+    room::submit(st, &p, &a.init.client, edit(1, 0, insert(5, 0, "x"))).await.unwrap();
+}

@@ -252,3 +252,40 @@ fn random_editors_converge() {
         simulate(seed);
     }
 }
+
+/// A random operation on a text of `len` characters, with many parts of every kind.
+fn random_op(rng: &mut StdRng, len: u32) -> Op {
+    let mut parts = Vec::new();
+    let mut left = len;
+    while left > 0 || rng.random_range(0..3) == 0 {
+        match rng.random_range(0..3) {
+            0 if left > 0 => {
+                let n = rng.random_range(1..=left.min(4));
+                parts.push(ot::Part::Keep(n));
+                left -= n;
+            }
+            1 if left > 0 => {
+                let n = rng.random_range(1..=left.min(4));
+                parts.push(ot::Part::Delete(n));
+                left -= n;
+            }
+            _ => parts.push(ot::Part::Insert(["x", "😀", "ab"][rng.random_range(0..3)].into())),
+        }
+    }
+    Op::from_parts(parts)
+}
+
+#[test]
+fn transform_caret_carries_the_caret_as_shift_over_first_prime() {
+    let mut rng = StdRng::seed_from_u64(7);
+    for _ in 0..5000 {
+        let len = rng.random_range(0..12);
+        let (first, second) = (random_op(&mut rng, len), random_op(&mut rng, len));
+        let (first2, second2) = ot::transform(&first, &second).unwrap();
+        for pos in 0..=second.target_len() + 1 {
+            let (op, moved) = ot::transform_caret(&first, &second, pos).unwrap();
+            assert_eq!(op, second2);
+            assert_eq!(moved, ot::shift(pos, &first2), "{first:?} {second:?} at {pos}");
+        }
+    }
+}

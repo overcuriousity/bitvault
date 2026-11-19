@@ -439,14 +439,10 @@ impl Rooms {
 }
 
 impl Inner {
-    /// Tells everyone in the rooms of `id` (of the paste created at `created_at`, or of any) that
-    /// the paste is gone, drops their sessions unsaved and forgets the rooms. Each room's lock is
-    /// taken under the map's.
-    fn gone(&mut self, id: PasteId, created_at: Option<i64>) {
-        let matches = |k: &Key| k.0 == id && created_at.is_none_or(|at| k.1 == at);
-        let keys: Vec<Key> = self.rooms.keys().copied().filter(matches).collect();
-        for key in keys {
-            let Some(room) = self.rooms.remove(&key) else { continue };
+    /// Tells everyone in the room of the paste `key` that the paste is gone, drops its session
+    /// unsaved and forgets the room. The room's lock is taken under the map's.
+    fn gone(&mut self, key: Key) {
+        if let Some(room) = self.rooms.remove(&key) {
             let mut s = lock(&room.state);
             if s.session.take().is_some() {
                 self.sessions -= 1;
@@ -697,6 +693,12 @@ pub async fn join(
             // Under the map's lock, as in `text_saved`: either that write sees this session, or
             // this join sees the write.
             let inner = lock(&st.rooms.inner);
+            // The paste was deleted or purged while the row was read: `gone` took the room out
+            // of the map, and a session installed now would edit a paste nobody can reach.
+            if !inner.rooms.get(&room.key).is_some_and(|r| Arc::ptr_eq(r, &room)) {
+                drop(inner);
+                return Err(Error::NotFound);
+            }
             if inner.writes != writes {
                 continue;
             }
@@ -752,6 +754,7 @@ pub async fn submit(st: &AppState, p: &Paste, client: &ClientId, msg: Msg) -> Re
         let idx = sess.clients.iter().position(|c| c.id == *client).ok_or(Error::Forbidden)?;
         match msg {
             Msg::Caret { pos } => {
+                sess.clients[idx].take_caret(now)?;
                 sess.clients[idx].pos = pos.min(sess.len);
                 sess.peers_pending = true;
             }
@@ -830,11 +833,10 @@ pub async fn text_saved(st: &AppState, p: &Paste, text: &str, syntax: Option<&st
     }
 }
 
-/// The paste was deleted or expired: its editors and watchers get `Gone`, and its session is
-/// dropped unsaved. `created_at` picks the paste; `None` matches every room of `id`, for the purge,
-/// which knows only the ids it removed.
-pub fn gone(st: &AppState, id: PasteId, created_at: Option<i64>) {
-    lock(&st.rooms.inner).gone(id, created_at);
+/// The paste `id` created at `created_at` was deleted or expired: its editors and watchers get
+/// `Gone`, and its session is dropped unsaved. A paste that took over the address keeps its room.
+pub fn gone(st: &AppState, id: PasteId, created_at: i64) {
+    lock(&st.rooms.inner).gone((id, created_at));
 }
 
 /// Saves every session's unsaved text now, for a shutdown; returns when the writes are done.
