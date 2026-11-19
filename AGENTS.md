@@ -48,3 +48,4 @@ https://github.com/overcuriousity/overcuriousity-dev-manifest/tree/v2026.11.0/ma
 - `cargo sqlx prepare -- --all-targets --all-features` after changing any `sqlx::query!`; commit `.sqlx/`.
 - `BITVAULT_WRITE_FIXTURES=1 node --test 'assets/js/crypto.test.mjs'` regenerates the JS interop fixture; commit it only on purpose.
 - `sh scripts/third-party.sh > THIRD-PARTY-LICENSES` after dependency changes (needs `cargo-about`).
+- Release: bump `version` in `Cargo.toml` and add its `## [version]` section to `CHANGELOG.md`. When `ci` passes on master, `tag.yml` tags `v<version>` and runs `release.yml`. Pushing a tag by hand also releases.

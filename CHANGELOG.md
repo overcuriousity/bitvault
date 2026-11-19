@@ -2,6 +2,21 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are CalVer `YYYY.M.N`.
 
+## [2026.11.7]
+
+### Added
+
+- Live edit: several people can type in one editable public, unlisted or private paste at the same time, up to 64 at once. The server merges what they type and saves it shortly after typing pauses. Open read views follow the text and show a pulsing Live edit button. Without JavaScript, and for pastes with burn after reads, the edit form with Save changes is still used.
+- `live_edit` config key, on by default.
+- Edits made through the form or the API, deletes and expiry reach a live edit that is running. If the server restarts, open pages reconnect by themselves, and anyone who typed in the meantime is told and keeps a copy of their text.
+- Merging a version change to master now tags and publishes the release by itself.
+
+### Changed
+
+- `deploy/nginx.conf` passes the `/<words>/events` and `/<words>/live/events` streams through unbuffered, with keep-alive to the app. A proxy you configure yourself must do the same.
+- Each address may keep 16 live streams open. Put your reverse proxy in `trusted_proxies` (by default, a proxy on the same host is trusted), or every visitor counts as the proxy's address.
+- Live edit refuses edits that would cost too much, and its budgets count the paste's history.
+
 ## [2026.11.6]
 
 ### Fixed
